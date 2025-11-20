@@ -1,0 +1,9 @@
+{
+  "name": "salesforce-oauth-connector",
+  "version": "1.0.0",
+  "description": "Salesforce OAuth Connector - Python FastAPI Backend",
+  "scripts": {
+    "dev": "uvicorn app.main:app --host 0.0.0.0 --port 5000 --reload",
+    "start": "uvicorn app.main:app --host 0.0.0.0 --port 5000"
+  }
+}
