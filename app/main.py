@@ -71,98 +71,168 @@ async def root():
         <html>
         <head>
             <title>Salesforce OAuth Connector</title>
+            <link rel="preconnect" href="https://fonts.googleapis.com">
+            <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+            <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;500;600;700&display=swap" rel="stylesheet">
             <style>
+                * {
+                    margin: 0;
+                    padding: 0;
+                    box-sizing: border-box;
+                }
                 body {
-                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-                    max-width: 800px;
-                    margin: 50px auto;
+                    font-family: 'Quicksand', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                    background: #0f172a;
+                    color: #e2e8f0;
+                    min-height: 100vh;
                     padding: 20px;
                     line-height: 1.6;
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    min-height: 100vh;
                 }
                 .container {
-                    background: white;
+                    max-width: 900px;
+                    margin: 0 auto;
                     padding: 40px;
-                    border-radius: 10px;
-                    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+                    background: rgba(30, 41, 59, 0.6);
+                    border-radius: 12px;
+                    border: 1px solid #334155;
+                    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
                 }
-                h1 {
-                    color: #333;
-                    margin-top: 0;
+                .header {
+                    border-bottom: 1px solid #334155;
+                    padding-bottom: 20px;
+                    margin-bottom: 30px;
                 }
                 .status {
-                    display: inline-block;
-                    background: #10b981;
-                    color: white;
-                    padding: 5px 15px;
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 6px;
+                    background: rgba(20, 83, 45, 0.2);
+                    color: #22c55e;
+                    padding: 6px 16px;
                     border-radius: 20px;
                     font-size: 14px;
-                    margin-bottom: 20px;
+                    font-weight: 600;
+                    margin-bottom: 16px;
+                    border: 1px solid rgba(34, 197, 94, 0.3);
+                }
+                .status::before {
+                    content: '';
+                    width: 8px;
+                    height: 8px;
+                    background: #22c55e;
+                    border-radius: 50%;
+                    animation: pulse 2s ease-in-out infinite;
+                }
+                @keyframes pulse {
+                    0%, 100% { opacity: 1; }
+                    50% { opacity: 0.5; }
+                }
+                h1 {
+                    color: #f1f5f9;
+                    margin: 8px 0 12px 0;
+                    font-size: 2.25rem;
+                    font-weight: 700;
+                    background: linear-gradient(135deg, #22d3ee, #0891b2);
+                    -webkit-background-clip: text;
+                    -webkit-text-fill-color: transparent;
+                    background-clip: text;
+                }
+                h2 {
+                    color: #f1f5f9;
+                    margin-bottom: 16px;
+                    font-size: 1.5rem;
+                    font-weight: 600;
+                }
+                p {
+                    color: #cbd5e1;
+                    margin-bottom: 12px;
                 }
                 .section {
-                    margin: 30px 0;
+                    margin: 32px 0;
+                    padding: 24px;
+                    background: rgba(15, 23, 42, 0.5);
+                    border-radius: 8px;
+                    border: 1px solid #334155;
                 }
                 .btn {
                     display: inline-block;
-                    background: #667eea;
-                    color: white;
-                    padding: 12px 24px;
+                    background: #22d3ee;
+                    color: #0f172a;
+                    padding: 12px 28px;
                     text-decoration: none;
-                    border-radius: 5px;
-                    margin: 10px 10px 10px 0;
-                    transition: background 0.3s;
+                    border-radius: 6px;
+                    margin: 8px 12px 8px 0;
+                    font-weight: 600;
+                    transition: all 0.2s ease;
+                    border: 1px solid #0891b2;
                 }
                 .btn:hover {
-                    background: #5568d3;
+                    background: #0891b2;
+                    transform: translateY(-1px);
+                    box-shadow: 0 4px 12px rgba(34, 211, 238, 0.3);
                 }
                 .btn-secondary {
-                    background: #6b7280;
+                    background: #475569;
+                    color: #f1f5f9;
+                    border: 1px solid #64748b;
                 }
                 .btn-secondary:hover {
-                    background: #4b5563;
+                    background: #64748b;
+                    box-shadow: 0 4px 12px rgba(71, 85, 105, 0.3);
                 }
                 code {
-                    background: #f3f4f6;
-                    padding: 2px 6px;
-                    border-radius: 3px;
+                    background: #1e293b;
+                    color: #22d3ee;
+                    padding: 3px 8px;
+                    border-radius: 4px;
                     font-family: 'Courier New', monospace;
+                    font-size: 0.9em;
+                    border: 1px solid #334155;
                 }
-                ul {
-                    padding-left: 20px;
+                ul, ol {
+                    padding-left: 24px;
+                    color: #cbd5e1;
                 }
                 li {
-                    margin: 8px 0;
+                    margin: 10px 0;
+                }
+                li code {
+                    margin-right: 8px;
+                }
+                .emoji {
+                    font-style: normal;
                 }
             </style>
         </head>
         <body>
             <div class="container">
-                <span class="status">✓ ONLINE</span>
-                <h1>🔐 Salesforce OAuth Connector</h1>
-                <p>A simple, stable FastAPI backend for Salesforce OAuth2 integration.</p>
+                <div class="header">
+                    <span class="status">ONLINE</span>
+                    <h1><span class="emoji">🔐</span> Salesforce OAuth Connector</h1>
+                    <p>A simple, stable FastAPI backend for Salesforce OAuth2 integration.</p>
+                </div>
                 
                 <div class="section">
-                    <h2>📚 API Documentation</h2>
+                    <h2><span class="emoji">📚</span> API Documentation</h2>
                     <p>Interact with all endpoints through our interactive API documentation:</p>
                     <a href="/docs" class="btn">Open Swagger UI</a>
                     <a href="/redoc" class="btn btn-secondary">Open ReDoc</a>
                 </div>
                 
                 <div class="section">
-                    <h2>🚀 Available Endpoints</h2>
+                    <h2><span class="emoji">🚀</span> Available Endpoints</h2>
                     <ul>
-                        <li><code>GET /health</code> - Health check</li>
-                        <li><code>POST /api/connectors/salesforce/start</code> - Start OAuth flow</li>
-                        <li><code>GET /oauth/callback/salesforce</code> - OAuth callback handler</li>
-                        <li><code>GET /api/connectors/salesforce/status</code> - Connection status</li>
-                        <li><code>GET /api/connectors/salesforce/test</code> - Test API connection</li>
-                        <li><code>POST /api/connectors/salesforce/disconnect</code> - Disconnect</li>
+                        <li><code>GET /health</code> Health check</li>
+                        <li><code>POST /api/connectors/salesforce/start</code> Start OAuth flow</li>
+                        <li><code>GET /oauth/callback/salesforce</code> OAuth callback handler</li>
+                        <li><code>GET /api/connectors/salesforce/status</code> Connection status</li>
+                        <li><code>GET /api/connectors/salesforce/test</code> Test API connection</li>
+                        <li><code>POST /api/connectors/salesforce/disconnect</code> Disconnect</li>
                     </ul>
                 </div>
                 
                 <div class="section">
-                    <h2>📖 Setup Instructions</h2>
+                    <h2><span class="emoji">📖</span> Setup Instructions</h2>
                     <p>To use this connector:</p>
                     <ol>
                         <li>Create a Connected App in Salesforce</li>
@@ -227,20 +297,24 @@ async def start_oauth_flow(request: StartOAuthRequest):
             )
     
     # Generate auth URL and state
+    # Ensure base_url and callback_url are strings (not None)
+    base_url_str = str(base_url) if base_url else ""
+    callback_url_str = str(callback_url) if callback_url else ""
+    
     auth_url, state = generate_auth_url(
-        base_url=base_url,
+        base_url=base_url_str,
         client_id=request.client_id,
-        redirect_uri=callback_url
+        redirect_uri=callback_url_str
     )
     
     # Save initial credentials to database
     save_credentials(
         environment=request.environment,
-        base_url=base_url,
+        base_url=base_url_str,
         client_id=request.client_id,
         client_secret=request.client_secret,
         state=state,
-        callback_url=callback_url
+        callback_url=callback_url_str
     )
     
     return AuthUrlResponse(auth_url=auth_url)
