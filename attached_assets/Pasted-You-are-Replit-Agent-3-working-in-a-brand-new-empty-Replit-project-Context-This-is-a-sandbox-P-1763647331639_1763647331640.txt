@@ -1,0 +1,199 @@
+You are Replit Agent 3 working in a brand-new, empty Replit project.
+Context
+This is a **sandbox POC** for a single Salesforce connector. For additional context, I'm including the documentation for the main AOS platform.  You are going to develop the "Connector Mesh" in a separate "sandbox" and branch, which then will be folded into the main AOS. As you see in the  docs, the sandbox is  building the complex part of the AAM .  
+
+- Goal: prove we can do a correct OAuth2 handshake with Salesforce, store tokens, auto-refresh them, and call one Salesforce API.
+- The  user (ilya) is not a coder.   Do not expect them to edit code. Expose everything via simple HTTP endpoints and a clear README.
+- The last demo elsewhere crashed our FastAPI server. This POC must be simple, stable, and easy to reason about.
+
+High-level requirements
+- Stack: Python 3 + FastAPI + httpx + SQLite (built-in) + Uvicorn.
+- Single small backend service:
+  - Minimal endpoints to:
+    - Start Salesforce OAuth flow.
+    - Handle Salesforce OAuth callback.
+    - Store access/refresh tokens in a local DB.
+    - Automatically refresh access tokens when needed.
+    - Test calling a Salesforce REST endpoint using stored creds.
+- No frontend UI needed beyond FastAPI’s docs (Swagger UI).
+- No background jobs, schedulers, or complex frameworks. Keep it simple.
+
+Data model
+- Use SQLite (or equivalent) for a single table `salesforce_credentials`:
+
+  - id                (integer primary key, or always use single row id=1)
+  - environment       (TEXT: 'production' | 'sandbox' | 'custom')
+  - base_url          (TEXT)        -- auth/token base (login.salesforce.com, test.salesforce.com, or custom domain)
+  - instance_url      (TEXT)        -- org URL returned by SF (e.g., https://myorg.my.salesforce.com)
+  - client_id         (TEXT, store encrypted or at least not logged)
+  - client_secret     (TEXT, same note)
+  - access_token      (TEXT)
+  - refresh_token     (TEXT)
+  - token_type        (TEXT)        -- usually "Bearer"
+  - expires_at        (TEXT or TIMESTAMP)  -- absolute expiry time
+  - status            (TEXT: 'disconnected' | 'connected' | 'error')
+  - error_message     (TEXT, nullable)
+  - updated_at        (TEXT or TIMESTAMP)
+
+- It is acceptable in this POC to have exactly one row (one Salesforce org).
+
+Endpoints to implement
+1) `GET /health`
+   - Returns `{ "status": "ok" }` if the app is running.
+   - This is purely to verify the server doesn’t crash.
+
+2) `POST /api/connectors/salesforce/start`
+   - Input JSON:
+
+     {
+       "environment": "production" | "sandbox" | "custom",
+       "custom_domain": "https://yourdomain.my.salesforce.com",  // only if environment == "custom"
+       "client_id": "xxxx",
+       "client_secret": "yyyy"
+     }
+
+   - Behavior:
+     - Determine auth/token base URLs:
+       - production: base = https://login.salesforce.com
+       - sandbox:    base = https://test.salesforce.com
+       - custom:     base = <custom_domain>
+       - Auth URL    = base + "/services/oauth2/authorize"
+       - Token URL   = base + "/services/oauth2/token"
+     - Persist:
+       - environment, base_url, client_id, client_secret into the DB.
+       - status = 'disconnected', clear any old tokens.
+     - Generate a random `state` value and persist it (state can be a column in the same table or a separate small table; simplest is adding a `state` field).
+     - Construct OAuth authorization URL:
+
+       <AUTH_URL>?response_type=code
+         &client_id=<client_id>
+         &redirect_uri=<CALLBACK_URL>
+         &state=<state>
+
+     - The CALLBACK_URL should be an environment variable like `SALESFORCE_CALLBACK_URL` and default to:
+       "https://<REPLIT_PUBLIC_URL>/oauth/callback/salesforce"
+       but at minimum:
+       - Use a `SALESFORCE_CALLBACK_URL` env var and show its value clearly in README and logs, so Ilya can copy it into Salesforce Connected App config.
+
+     - Return JSON:
+
+       {
+         "auth_url": "<full_authorization_url>"
+       }
+
+   - Ilya will paste `auth_url` into a browser manually if necessary.
+
+3) `GET /oauth/callback/salesforce`
+   - This is the OAuth redirect URI.
+   - Query parameters: `code` and `state`.
+   - Behavior:
+     - Validate `state` against what is stored in DB.
+     - If state mismatch → mark status='error', error_message='invalid_state', return simple error.
+     - If valid, exchange the `code` for tokens by POSTing to the token URL:
+
+       - POST to `<base_url>/services/oauth2/token`
+       - with form data:
+         - grant_type=authorization_code
+         - code=<code>
+         - client_id=<client_id from DB>
+         - client_secret=<client_secret from DB>
+         - redirect_uri=<SALESFORCE_CALLBACK_URL>
+
+     - Expect a JSON response with:
+       - access_token
+       - refresh_token
+       - instance_url
+       - token_type
+       - issued_at (string) and possibly expires_in (seconds). If `expires_in` is present, compute `expires_at = now + expires_in - small_margin`. If not, assume a reasonable default (e.g. now + 60 minutes).
+     - Store these fields in `salesforce_credentials`:
+       - access_token, refresh_token, token_type, instance_url, expires_at, status='connected', error_message=NULL, updated_at=now.
+     - Return a very simple HTML or JSON response like:
+       - "Salesforce connected successfully. You can close this window."
+
+4) Salesforce HTTP client helper (internal, not necessarily exposed)
+   - Implement a helper function, e.g. in a separate module:
+
+     async def call_salesforce(method: str, path: str, params: dict = None, json_body: dict = None) -> ResponseData
+
+   - Behavior:
+     - Fetch the single credentials row from DB.
+     - If status != 'connected', raise a clear error (e.g. HTTP 400 if called from an endpoint).
+     - If `expires_at` is near or past (now + safety margin, e.g. 60 seconds), attempt **refresh**:
+       - call a `refresh_salesforce_token()` function (see next bullet).
+     - Build URL = instance_url + path, e.g. `instance_url + "/services/data/v59.0/limits"`.
+     - Add `Authorization: Bearer <access_token>` header and `Content-Type: application/json` as needed.
+     - Use httpx for the HTTP call.
+     - If Salesforce responds 401 with `INVALID_SESSION_ID`:
+       - Attempt refresh once, then retry the request once.
+     - If after refresh it still fails with 401, set status='error', error_message='auth_failed', and propagate an error.
+
+   - Implement `refresh_salesforce_token()`:
+     - Read refresh_token, client_id, client_secret, base_url.
+     - POST to `<base_url>/services/oauth2/token` with:
+       - grant_type=refresh_token
+       - client_id
+       - client_secret
+       - refresh_token
+     - On success, update access_token, token_type, expires_at, instance_url (if present), status='connected'.
+     - On failure (e.g. invalid_grant), set status='error', error_message=<Salesforce error string>.
+
+5) `GET /api/connectors/salesforce/status`
+   - Returns a summary for the UI / for Ilya:
+
+     {
+       "status": "disconnected" | "connected" | "error",
+       "environment": "...",
+       "instance_url": "...",
+       "expires_at": "...",
+       "error_message": "..." or null,
+       "updated_at": "..."
+     }
+
+6) `GET /api/connectors/salesforce/test`
+   - Uses the helper client to call a simple Salesforce endpoint, for example:
+     - `GET /services/data/v59.0/limits` (API limits endpoint).
+   - If status != 'connected', return 400 with a clear message.
+   - If call succeeds, return the JSON from Salesforce.
+   - If call fails, return a 500 with a sanitized error.
+
+Project structure
+- Keep it simple:
+
+  - `app/main.py`      – FastAPI app, endpoints, startup DB init.
+  - `app/db.py`        – tiny helper for SQLite connection + migrations.
+  - `app/salesforce.py` – Salesforce client + refresh logic.
+  - `requirements.txt` – fastapi, uvicorn[standard], httpx, python-dotenv (if you use it).
+
+- Add a `README.md` that explains, step-by-step, for a non-coder:
+
+  1. How to run the app in Replit (what command, e.g. `uvicorn app.main:app --host 0.0.0.0 --port 8000`).
+  2. Where to see the public URL (Replit gives a URL).
+  3. How to set `SALESFORCE_CALLBACK_URL` env var (copy from Replit URL + `/oauth/callback/salesforce`).
+  4. How to configure a **Salesforce Connected App**:
+     - Use the callback URL given above.
+     - Enable OAuth 2.0 “Web Server” flow.
+     - Add scopes: `api`, `refresh_token`, and possibly `offline_access` if needed.
+     - Copy client_id and client_secret.
+  5. How to call `POST /api/connectors/salesforce/start` from the built-in HTTP client in Replit or via Swagger UI:
+     - with environment, custom_domain (if needed), client_id, client_secret.
+  6. How to click the `auth_url`, log in to Salesforce, and approve.
+  7. How to verify with `GET /api/connectors/salesforce/status` and `GET /api/connectors/salesforce/test`.
+
+Important constraints
+- Do NOT add extra features (no multi-tenant, no task scheduler, no Airbyte, no other connectors).
+- Do NOT over-complicate the schema. One table, one row is fine.
+- Handle errors cleanly and avoid crashing the process:
+  - Wrap network calls, return clear JSON errors rather than unhandled exceptions.
+- Keep the code small, readable, and well-commented so a non-coder can follow the flow.
+- After implementing, quickly test:
+  - `/health`
+  - `/api/connectors/salesforce/start` (with dummy values)
+  - `/oauth/callback/salesforce` (fake code/state to see error handling)
+  - `/api/connectors/salesforce/status`
+  - `/api/connectors/salesforce/test` (once Ilya has real SF credentials set up).
+
+Start by:
+- Creating the basic FastAPI app with `/health`.
+- Adding the SQLite init and `salesforce_credentials` table.
+- Implementing `/start`, `/callback`, client helper, `/status`, and `/test`.
+
