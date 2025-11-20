@@ -85,17 +85,71 @@ async def root():
                     background: #0f172a;
                     color: #e2e8f0;
                     min-height: 100vh;
-                    padding: 20px;
                     line-height: 1.6;
+                }
+                .nav {
+                    background: rgba(30, 41, 59, 0.8);
+                    border-bottom: 1px solid #334155;
+                    padding: 16px 0;
+                    position: sticky;
+                    top: 0;
+                    z-index: 1000;
+                    backdrop-filter: blur(8px);
+                }
+                .nav-container {
+                    max-width: 1200px;
+                    margin: 0 auto;
+                    padding: 0 20px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    flex-wrap: wrap;
+                    gap: 16px;
+                }
+                .nav-brand {
+                    font-size: 1.25rem;
+                    font-weight: 700;
+                    background: linear-gradient(135deg, #22d3ee, #0891b2);
+                    -webkit-background-clip: text;
+                    -webkit-text-fill-color: transparent;
+                    background-clip: text;
+                    text-decoration: none;
+                }
+                .nav-links {
+                    display: flex;
+                    gap: 8px;
+                    flex-wrap: wrap;
+                }
+                .nav-link {
+                    color: #cbd5e1;
+                    text-decoration: none;
+                    padding: 8px 16px;
+                    border-radius: 6px;
+                    font-weight: 500;
+                    transition: all 0.2s ease;
+                    border: 1px solid transparent;
+                }
+                .nav-link:hover {
+                    color: #22d3ee;
+                    background: rgba(34, 211, 238, 0.1);
+                    border-color: rgba(34, 211, 238, 0.3);
+                }
+                .nav-link.active {
+                    color: #22d3ee;
+                    background: rgba(34, 211, 238, 0.2);
+                    border-color: rgba(34, 211, 238, 0.3);
                 }
                 .container {
                     max-width: 900px;
                     margin: 0 auto;
-                    padding: 40px;
+                    padding: 40px 20px;
+                }
+                .card {
                     background: rgba(30, 41, 59, 0.6);
                     border-radius: 12px;
                     border: 1px solid #334155;
                     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+                    padding: 40px;
                 }
                 .header {
                     border-bottom: 1px solid #334155;
@@ -205,41 +259,56 @@ async def root():
             </style>
         </head>
         <body>
+            <nav class="nav">
+                <div class="nav-container">
+                    <a href="/" class="nav-brand">Salesforce OAuth</a>
+                    <div class="nav-links">
+                        <a href="/" class="nav-link active">Home</a>
+                        <a href="/docs" class="nav-link">API Docs</a>
+                        <a href="/redoc" class="nav-link">ReDoc</a>
+                        <a href="/api/connectors/salesforce/status" class="nav-link">Status</a>
+                        <a href="/health" class="nav-link">Health</a>
+                    </div>
+                </div>
+            </nav>
+            
             <div class="container">
-                <div class="header">
-                    <span class="status">ONLINE</span>
-                    <h1><span class="emoji">🔐</span> Salesforce OAuth Connector</h1>
-                    <p>A simple, stable FastAPI backend for Salesforce OAuth2 integration.</p>
-                </div>
-                
-                <div class="section">
-                    <h2><span class="emoji">📚</span> API Documentation</h2>
-                    <p>Interact with all endpoints through our interactive API documentation:</p>
-                    <a href="/docs" class="btn">Open Swagger UI</a>
-                    <a href="/redoc" class="btn btn-secondary">Open ReDoc</a>
-                </div>
-                
-                <div class="section">
-                    <h2><span class="emoji">🚀</span> Available Endpoints</h2>
-                    <ul>
-                        <li><code>GET /health</code> Health check</li>
-                        <li><code>POST /api/connectors/salesforce/start</code> Start OAuth flow</li>
-                        <li><code>GET /oauth/callback/salesforce</code> OAuth callback handler</li>
-                        <li><code>GET /api/connectors/salesforce/status</code> Connection status</li>
-                        <li><code>GET /api/connectors/salesforce/test</code> Test API connection</li>
-                        <li><code>POST /api/connectors/salesforce/disconnect</code> Disconnect</li>
-                    </ul>
-                </div>
-                
-                <div class="section">
-                    <h2><span class="emoji">📖</span> Setup Instructions</h2>
-                    <p>To use this connector:</p>
-                    <ol>
-                        <li>Create a Connected App in Salesforce</li>
-                        <li>Set <code>SALESFORCE_CALLBACK_URL</code> in Replit Secrets</li>
-                        <li>Use the Swagger UI to initiate OAuth flow</li>
-                    </ol>
-                    <p>See the <strong>README.md</strong> file for detailed instructions.</p>
+                <div class="card">
+                    <div class="header">
+                        <span class="status">ONLINE</span>
+                        <h1><span class="emoji">🔐</span> Salesforce OAuth Connector</h1>
+                        <p>A simple, stable FastAPI backend for Salesforce OAuth2 integration.</p>
+                    </div>
+                    
+                    <div class="section">
+                        <h2><span class="emoji">📚</span> API Documentation</h2>
+                        <p>Interact with all endpoints through our interactive API documentation:</p>
+                        <a href="/docs" class="btn">Open Swagger UI</a>
+                        <a href="/redoc" class="btn btn-secondary">Open ReDoc</a>
+                    </div>
+                    
+                    <div class="section">
+                        <h2><span class="emoji">🚀</span> Available Endpoints</h2>
+                        <ul>
+                            <li><code>GET /health</code> Health check</li>
+                            <li><code>POST /api/connectors/salesforce/start</code> Start OAuth flow</li>
+                            <li><code>GET /oauth/callback/salesforce</code> OAuth callback handler</li>
+                            <li><code>GET /api/connectors/salesforce/status</code> Connection status</li>
+                            <li><code>GET /api/connectors/salesforce/test</code> Test API connection</li>
+                            <li><code>POST /api/connectors/salesforce/disconnect</code> Disconnect</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="section">
+                        <h2><span class="emoji">📖</span> Setup Instructions</h2>
+                        <p>To use this connector:</p>
+                        <ol>
+                            <li>Create a Connected App in Salesforce</li>
+                            <li>Set <code>SALESFORCE_CALLBACK_URL</code> in Replit Secrets</li>
+                            <li>Use the Swagger UI to initiate OAuth flow</li>
+                        </ol>
+                        <p>See the <strong>README.md</strong> file for detailed instructions.</p>
+                    </div>
                 </div>
             </div>
         </body>
@@ -373,17 +442,190 @@ async def oauth_callback(
         
         return HTMLResponse(
             content="""
+            <!DOCTYPE html>
             <html>
-                <head><title>Success</title></head>
-                <body style="font-family: sans-serif; padding: 2rem; max-width: 600px; margin: 0 auto;">
-                    <h1 style="color: green;">✓ Salesforce Connected Successfully</h1>
-                    <p>Your Salesforce account has been connected.</p>
-                    <p>You can now close this window and test the connection using:</p>
-                    <ul>
-                        <li><code>GET /api/connectors/salesforce/status</code> - Check connection status</li>
-                        <li><code>GET /api/connectors/salesforce/test</code> - Test API call</li>
-                    </ul>
-                </body>
+            <head>
+                <title>OAuth Success - Salesforce Connector</title>
+                <link rel="preconnect" href="https://fonts.googleapis.com">
+                <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+                <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;500;600;700&display=swap" rel="stylesheet">
+                <style>
+                    * { margin: 0; padding: 0; box-sizing: border-box; }
+                    body {
+                        font-family: 'Quicksand', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                        background: #0f172a;
+                        color: #e2e8f0;
+                        min-height: 100vh;
+                        line-height: 1.6;
+                    }
+                    .nav {
+                        background: rgba(30, 41, 59, 0.8);
+                        border-bottom: 1px solid #334155;
+                        padding: 16px 0;
+                        backdrop-filter: blur(8px);
+                    }
+                    .nav-container {
+                        max-width: 1200px;
+                        margin: 0 auto;
+                        padding: 0 20px;
+                        display: flex;
+                        align-items: center;
+                        justify-content: space-between;
+                        flex-wrap: wrap;
+                        gap: 16px;
+                    }
+                    .nav-brand {
+                        font-size: 1.25rem;
+                        font-weight: 700;
+                        background: linear-gradient(135deg, #22d3ee, #0891b2);
+                        -webkit-background-clip: text;
+                        -webkit-text-fill-color: transparent;
+                        text-decoration: none;
+                    }
+                    .nav-links {
+                        display: flex;
+                        gap: 8px;
+                        flex-wrap: wrap;
+                    }
+                    .nav-link {
+                        color: #cbd5e1;
+                        text-decoration: none;
+                        padding: 8px 16px;
+                        border-radius: 6px;
+                        font-weight: 500;
+                        transition: all 0.2s ease;
+                        border: 1px solid transparent;
+                    }
+                    .nav-link:hover {
+                        color: #22d3ee;
+                        background: rgba(34, 211, 238, 0.1);
+                        border-color: rgba(34, 211, 238, 0.3);
+                    }
+                    .container {
+                        max-width: 700px;
+                        margin: 60px auto;
+                        padding: 40px 20px;
+                    }
+                    .card {
+                        background: rgba(30, 41, 59, 0.6);
+                        border-radius: 12px;
+                        border: 1px solid #334155;
+                        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+                        padding: 48px;
+                        text-align: center;
+                    }
+                    .success-icon {
+                        width: 80px;
+                        height: 80px;
+                        margin: 0 auto 24px;
+                        background: rgba(20, 83, 45, 0.2);
+                        border: 2px solid #22c55e;
+                        border-radius: 50%;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        font-size: 40px;
+                        animation: scaleIn 0.5s ease-out;
+                    }
+                    @keyframes scaleIn {
+                        from { transform: scale(0); opacity: 0; }
+                        to { transform: scale(1); opacity: 1; }
+                    }
+                    h1 {
+                        color: #22c55e;
+                        font-size: 2rem;
+                        font-weight: 700;
+                        margin-bottom: 16px;
+                    }
+                    p {
+                        color: #cbd5e1;
+                        margin-bottom: 24px;
+                        font-size: 1.1rem;
+                    }
+                    .next-steps {
+                        background: rgba(15, 23, 42, 0.5);
+                        border: 1px solid #334155;
+                        border-radius: 8px;
+                        padding: 24px;
+                        margin-top: 32px;
+                        text-align: left;
+                    }
+                    .next-steps h2 {
+                        color: #f1f5f9;
+                        font-size: 1.25rem;
+                        margin-bottom: 16px;
+                    }
+                    .next-steps ul {
+                        list-style: none;
+                        padding: 0;
+                    }
+                    .next-steps li {
+                        padding: 12px 0;
+                        border-bottom: 1px solid #334155;
+                    }
+                    .next-steps li:last-child {
+                        border-bottom: none;
+                    }
+                    code {
+                        background: #1e293b;
+                        color: #22d3ee;
+                        padding: 3px 8px;
+                        border-radius: 4px;
+                        font-family: 'Courier New', monospace;
+                        font-size: 0.9em;
+                        border: 1px solid #334155;
+                    }
+                    .btn {
+                        display: inline-block;
+                        background: #22d3ee;
+                        color: #0f172a;
+                        padding: 12px 28px;
+                        text-decoration: none;
+                        border-radius: 6px;
+                        margin-top: 24px;
+                        font-weight: 600;
+                        transition: all 0.2s ease;
+                        border: 1px solid #0891b2;
+                    }
+                    .btn:hover {
+                        background: #0891b2;
+                        transform: translateY(-1px);
+                        box-shadow: 0 4px 12px rgba(34, 211, 238, 0.3);
+                    }
+                </style>
+            </head>
+            <body>
+                <nav class="nav">
+                    <div class="nav-container">
+                        <a href="/" class="nav-brand">Salesforce OAuth</a>
+                        <div class="nav-links">
+                            <a href="/" class="nav-link">Home</a>
+                            <a href="/docs" class="nav-link">API Docs</a>
+                            <a href="/redoc" class="nav-link">ReDoc</a>
+                            <a href="/api/connectors/salesforce/status" class="nav-link">Status</a>
+                            <a href="/health" class="nav-link">Health</a>
+                        </div>
+                    </div>
+                </nav>
+                
+                <div class="container">
+                    <div class="card">
+                        <div class="success-icon">✓</div>
+                        <h1>Salesforce Connected Successfully</h1>
+                        <p>Your Salesforce account has been authenticated and connected.</p>
+                        
+                        <div class="next-steps">
+                            <h2>Next Steps</h2>
+                            <ul>
+                                <li><code>GET /api/connectors/salesforce/status</code> - Check connection status</li>
+                                <li><code>GET /api/connectors/salesforce/test</code> - Test API connection</li>
+                            </ul>
+                        </div>
+                        
+                        <a href="/docs" class="btn">Go to API Documentation</a>
+                    </div>
+                </div>
+            </body>
             </html>
             """
         )
@@ -394,7 +636,168 @@ async def oauth_callback(
             error_message=str(e)
         )
         return HTMLResponse(
-            content=f"<h1>Error</h1><p>Failed to exchange code for tokens: {str(e)}</p>",
+            content=f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>OAuth Error - Salesforce Connector</title>
+                <link rel="preconnect" href="https://fonts.googleapis.com">
+                <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+                <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;500;600;700&display=swap" rel="stylesheet">
+                <style>
+                    * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+                    body {{
+                        font-family: 'Quicksand', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                        background: #0f172a;
+                        color: #e2e8f0;
+                        min-height: 100vh;
+                        line-height: 1.6;
+                    }}
+                    .nav {{
+                        background: rgba(30, 41, 59, 0.8);
+                        border-bottom: 1px solid #334155;
+                        padding: 16px 0;
+                        backdrop-filter: blur(8px);
+                    }}
+                    .nav-container {{
+                        max-width: 1200px;
+                        margin: 0 auto;
+                        padding: 0 20px;
+                        display: flex;
+                        align-items: center;
+                        justify-content: space-between;
+                        flex-wrap: wrap;
+                        gap: 16px;
+                    }}
+                    .nav-brand {{
+                        font-size: 1.25rem;
+                        font-weight: 700;
+                        background: linear-gradient(135deg, #22d3ee, #0891b2);
+                        -webkit-background-clip: text;
+                        -webkit-text-fill-color: transparent;
+                        text-decoration: none;
+                    }}
+                    .nav-links {{
+                        display: flex;
+                        gap: 8px;
+                        flex-wrap: wrap;
+                    }}
+                    .nav-link {{
+                        color: #cbd5e1;
+                        text-decoration: none;
+                        padding: 8px 16px;
+                        border-radius: 6px;
+                        font-weight: 500;
+                        transition: all 0.2s ease;
+                        border: 1px solid transparent;
+                    }}
+                    .nav-link:hover {{
+                        color: #22d3ee;
+                        background: rgba(34, 211, 238, 0.1);
+                        border-color: rgba(34, 211, 238, 0.3);
+                    }}
+                    .container {{
+                        max-width: 700px;
+                        margin: 60px auto;
+                        padding: 40px 20px;
+                    }}
+                    .card {{
+                        background: rgba(30, 41, 59, 0.6);
+                        border-radius: 12px;
+                        border: 1px solid #334155;
+                        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+                        padding: 48px;
+                        text-align: center;
+                    }}
+                    .error-icon {{
+                        width: 80px;
+                        height: 80px;
+                        margin: 0 auto 24px;
+                        background: rgba(127, 29, 29, 0.2);
+                        border: 2px solid #ef4444;
+                        border-radius: 50%;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        font-size: 40px;
+                        animation: shake 0.5s ease-out;
+                    }}
+                    @keyframes shake {{
+                        0%, 100% {{ transform: translateX(0); }}
+                        25% {{ transform: translateX(-10px); }}
+                        75% {{ transform: translateX(10px); }}
+                    }}
+                    h1 {{
+                        color: #ef4444;
+                        font-size: 2rem;
+                        font-weight: 700;
+                        margin-bottom: 16px;
+                    }}
+                    p {{
+                        color: #cbd5e1;
+                        margin-bottom: 24px;
+                        font-size: 1.1rem;
+                    }}
+                    .error-details {{
+                        background: rgba(15, 23, 42, 0.5);
+                        border: 1px solid #334155;
+                        border-radius: 8px;
+                        padding: 16px;
+                        margin-top: 24px;
+                        text-align: left;
+                        color: #f87171;
+                        font-family: 'Courier New', monospace;
+                        font-size: 0.9em;
+                    }}
+                    .btn {{
+                        display: inline-block;
+                        background: #22d3ee;
+                        color: #0f172a;
+                        padding: 12px 28px;
+                        text-decoration: none;
+                        border-radius: 6px;
+                        margin-top: 24px;
+                        font-weight: 600;
+                        transition: all 0.2s ease;
+                        border: 1px solid #0891b2;
+                    }}
+                    .btn:hover {{
+                        background: #0891b2;
+                        transform: translateY(-1px);
+                        box-shadow: 0 4px 12px rgba(34, 211, 238, 0.3);
+                    }}
+                </style>
+            </head>
+            <body>
+                <nav class="nav">
+                    <div class="nav-container">
+                        <a href="/" class="nav-brand">Salesforce OAuth</a>
+                        <div class="nav-links">
+                            <a href="/" class="nav-link">Home</a>
+                            <a href="/docs" class="nav-link">API Docs</a>
+                            <a href="/redoc" class="nav-link">ReDoc</a>
+                            <a href="/api/connectors/salesforce/status" class="nav-link">Status</a>
+                            <a href="/health" class="nav-link">Health</a>
+                        </div>
+                    </div>
+                </nav>
+                
+                <div class="container">
+                    <div class="card">
+                        <div class="error-icon">✗</div>
+                        <h1>OAuth Error</h1>
+                        <p>Failed to connect to Salesforce. Please try again.</p>
+                        
+                        <div class="error-details">
+                            {str(e)}
+                        </div>
+                        
+                        <a href="/" class="btn">Return Home</a>
+                    </div>
+                </div>
+            </body>
+            </html>
+            """,
             status_code=400
         )
 
