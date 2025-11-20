@@ -86,7 +86,7 @@ async def root():
                 body {
                     font-family: 'Quicksand', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                     background: #0f172a;
-                    color: #e2e8f0;
+                    color: #ffffff;
                     min-height: 100vh;
                     line-height: 1.6;
                 }
@@ -124,7 +124,7 @@ async def root():
                     flex-wrap: wrap;
                 }
                 .nav-link {
-                    color: #cbd5e1;
+                    color: #ffffff;
                     text-decoration: none;
                     padding: 8px 16px;
                     border-radius: 6px;
@@ -201,7 +201,7 @@ async def root():
                     font-weight: 600;
                 }
                 p {
-                    color: #cbd5e1;
+                    color: #ffffff;
                     margin-bottom: 12px;
                 }
                 .section {
@@ -248,7 +248,7 @@ async def root():
                 }
                 ul, ol {
                     padding-left: 24px;
-                    color: #cbd5e1;
+                    color: #ffffff;
                 }
                 li {
                     margin: 10px 0;
@@ -340,7 +340,7 @@ async def custom_swagger_ui():
                 body {
                     font-family: 'Quicksand', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                     background: #0f172a;
-                    color: #e2e8f0;
+                    color: #ffffff;
                     min-height: 100vh;
                 }
                 .nav {
@@ -376,7 +376,7 @@ async def custom_swagger_ui():
                     flex-wrap: wrap;
                 }
                 .nav-link {
-                    color: #cbd5e1;
+                    color: #ffffff;
                     text-decoration: none;
                     padding: 8px 16px;
                     border-radius: 6px;
@@ -455,7 +455,7 @@ async def custom_redoc():
                 body {
                     font-family: 'Quicksand', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                     background: #0f172a;
-                    color: #e2e8f0;
+                    color: #ffffff;
                     min-height: 100vh;
                 }
                 .nav {
@@ -491,7 +491,7 @@ async def custom_redoc():
                     flex-wrap: wrap;
                 }
                 .nav-link {
-                    color: #cbd5e1;
+                    color: #ffffff;
                     text-decoration: none;
                     padding: 8px 16px;
                     border-radius: 6px;
@@ -564,7 +564,7 @@ async def health_page():
                 body {
                     font-family: 'Quicksand', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                     background: #0f172a;
-                    color: #e2e8f0;
+                    color: #ffffff;
                     min-height: 100vh;
                     line-height: 1.6;
                 }
@@ -601,7 +601,7 @@ async def health_page():
                     flex-wrap: wrap;
                 }
                 .nav-link {
-                    color: #cbd5e1;
+                    color: #ffffff;
                     text-decoration: none;
                     padding: 8px 16px;
                     border-radius: 6px;
@@ -828,7 +828,7 @@ async def oauth_callback(
                     body {
                         font-family: 'Quicksand', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                         background: #0f172a;
-                        color: #e2e8f0;
+                        color: #ffffff;
                         min-height: 100vh;
                         line-height: 1.6;
                     }
@@ -862,7 +862,7 @@ async def oauth_callback(
                         flex-wrap: wrap;
                     }
                     .nav-link {
-                        color: #cbd5e1;
+                        color: #ffffff;
                         text-decoration: none;
                         padding: 8px 16px;
                         border-radius: 6px;
@@ -907,7 +907,7 @@ async def oauth_callback(
                         margin-bottom: 16px;
                     }
                     p {
-                        color: #cbd5e1;
+                        color: #ffffff;
                         margin-bottom: 24px;
                         font-size: 1.1rem;
                     }
@@ -978,7 +978,7 @@ async def oauth_callback(
                     body {
                         font-family: 'Quicksand', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                         background: #0f172a;
-                        color: #e2e8f0;
+                        color: #ffffff;
                         min-height: 100vh;
                         line-height: 1.6;
                     }
@@ -1012,7 +1012,7 @@ async def oauth_callback(
                         flex-wrap: wrap;
                     }
                     .nav-link {
-                        color: #cbd5e1;
+                        color: #ffffff;
                         text-decoration: none;
                         padding: 8px 16px;
                         border-radius: 6px;
@@ -1057,7 +1057,7 @@ async def oauth_callback(
                         margin-bottom: 16px;
                     }
                     p {
-                        color: #cbd5e1;
+                        color: #ffffff;
                         margin-bottom: 24px;
                         font-size: 1.1rem;
                     }
@@ -1154,7 +1154,7 @@ async def oauth_callback(
                     body {
                         font-family: 'Quicksand', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                         background: #0f172a;
-                        color: #e2e8f0;
+                        color: #ffffff;
                         min-height: 100vh;
                         line-height: 1.6;
                     }
@@ -1188,7 +1188,7 @@ async def oauth_callback(
                         flex-wrap: wrap;
                     }
                     .nav-link {
-                        color: #cbd5e1;
+                        color: #ffffff;
                         text-decoration: none;
                         padding: 8px 16px;
                         border-radius: 6px;
@@ -1238,7 +1238,7 @@ async def oauth_callback(
                         margin-bottom: 16px;
                     }
                     p {
-                        color: #cbd5e1;
+                        color: #ffffff;
                         margin-bottom: 24px;
                         font-size: 1.1rem;
                     }
@@ -1349,7 +1349,7 @@ async def oauth_callback(
                     body {{
                         font-family: 'Quicksand', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                         background: #0f172a;
-                        color: #e2e8f0;
+                        color: #ffffff;
                         min-height: 100vh;
                         line-height: 1.6;
                     }}
@@ -1383,7 +1383,7 @@ async def oauth_callback(
                         flex-wrap: wrap;
                     }}
                     .nav-link {{
-                        color: #cbd5e1;
+                        color: #ffffff;
                         text-decoration: none;
                         padding: 8px 16px;
                         border-radius: 6px;
@@ -1434,7 +1434,7 @@ async def oauth_callback(
                         margin-bottom: 16px;
                     }}
                     p {{
-                        color: #cbd5e1;
+                        color: #ffffff;
                         margin-bottom: 24px;
                         font-size: 1.1rem;
                     }}
@@ -1590,7 +1590,7 @@ async def status_page():
                 body {{
                     font-family: 'Quicksand', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                     background: #0f172a;
-                    color: #e2e8f0;
+                    color: #ffffff;
                     min-height: 100vh;
                     line-height: 1.6;
                 }}
@@ -1627,7 +1627,7 @@ async def status_page():
                     flex-wrap: wrap;
                 }}
                 .nav-link {{
-                    color: #cbd5e1;
+                    color: #ffffff;
                     text-decoration: none;
                     padding: 8px 16px;
                     border-radius: 6px;
@@ -1709,7 +1709,7 @@ async def status_page():
                     margin-bottom: 8px;
                 }}
                 .info-card p {{
-                    color: #cbd5e1;
+                    color: #ffffff;
                     font-size: 1.1rem;
                     word-break: break-all;
                 }}
