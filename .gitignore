@@ -1,6 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+.pythonlibs/
+
+# Environment variables
+.env
+.env.local
+
+# Database
+salesforce.db
+*.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Old JS template artifacts (can be removed)
 node_modules
 dist
-.DS_Store
 server/public
 vite.config.ts.*
 *.tar.gz
