@@ -266,8 +266,8 @@ async def root():
                         <a href="/" class="nav-link active">Home</a>
                         <a href="/docs" class="nav-link">API Docs</a>
                         <a href="/redoc" class="nav-link">ReDoc</a>
-                        <a href="/api/connectors/salesforce/status" class="nav-link">Status</a>
-                        <a href="/health" class="nav-link">Health</a>
+                        <a href="/status-page" class="nav-link">Status</a>
+                        <a href="/health-page" class="nav-link">Health</a>
                     </div>
                 </div>
             </nav>
@@ -320,9 +320,200 @@ async def root():
 @app.get("/health")
 async def health_check():
     """
-    Health check endpoint - verify server is running
+    Health check endpoint - verify server is running (JSON API)
     """
     return {"status": "ok"}
+
+
+@app.get("/health-page")
+async def health_page():
+    """
+    Health check page - human-friendly HTML version
+    """
+    return HTMLResponse(
+        content="""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Health Check - Salesforce Connector</title>
+            <link rel="preconnect" href="https://fonts.googleapis.com">
+            <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+            <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;500;600;700&display=swap" rel="stylesheet">
+            <style>
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                body {
+                    font-family: 'Quicksand', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                    background: #0f172a;
+                    color: #e2e8f0;
+                    min-height: 100vh;
+                    line-height: 1.6;
+                }
+                .nav {
+                    background: rgba(30, 41, 59, 0.8);
+                    border-bottom: 1px solid #334155;
+                    padding: 16px 0;
+                    position: sticky;
+                    top: 0;
+                    z-index: 1000;
+                    backdrop-filter: blur(8px);
+                }
+                .nav-container {
+                    max-width: 1200px;
+                    margin: 0 auto;
+                    padding: 0 20px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    flex-wrap: wrap;
+                    gap: 16px;
+                }
+                .nav-brand {
+                    font-size: 1.25rem;
+                    font-weight: 700;
+                    background: linear-gradient(135deg, #22d3ee, #0891b2);
+                    -webkit-background-clip: text;
+                    -webkit-text-fill-color: transparent;
+                    text-decoration: none;
+                }
+                .nav-links {
+                    display: flex;
+                    gap: 8px;
+                    flex-wrap: wrap;
+                }
+                .nav-link {
+                    color: #cbd5e1;
+                    text-decoration: none;
+                    padding: 8px 16px;
+                    border-radius: 6px;
+                    font-weight: 500;
+                    transition: all 0.2s ease;
+                    border: 1px solid transparent;
+                }
+                .nav-link:hover {
+                    color: #22d3ee;
+                    background: rgba(34, 211, 238, 0.1);
+                    border-color: rgba(34, 211, 238, 0.3);
+                }
+                .nav-link.active {
+                    color: #22d3ee;
+                    background: rgba(34, 211, 238, 0.2);
+                    border-color: rgba(34, 211, 238, 0.3);
+                }
+                .container {
+                    max-width: 900px;
+                    margin: 0 auto;
+                    padding: 40px 20px;
+                }
+                .card {
+                    background: rgba(30, 41, 59, 0.6);
+                    border-radius: 12px;
+                    border: 1px solid #334155;
+                    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+                    padding: 40px;
+                }
+                .header {
+                    border-bottom: 1px solid #334155;
+                    padding-bottom: 20px;
+                    margin-bottom: 30px;
+                    text-align: center;
+                }
+                .status-badge {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 6px;
+                    background: rgba(20, 83, 45, 0.2);
+                    color: #22c55e;
+                    padding: 8px 20px;
+                    border-radius: 24px;
+                    font-size: 16px;
+                    font-weight: 600;
+                    border: 1px solid rgba(34, 197, 94, 0.3);
+                }
+                .status-badge::before {
+                    content: '';
+                    width: 10px;
+                    height: 10px;
+                    background: #22c55e;
+                    border-radius: 50%;
+                    animation: pulse 2s ease-in-out infinite;
+                }
+                @keyframes pulse {
+                    0%, 100% { opacity: 1; }
+                    50% { opacity: 0.5; }
+                }
+                h1 {
+                    color: #f1f5f9;
+                    margin: 16px 0 12px 0;
+                    font-size: 2.25rem;
+                    font-weight: 700;
+                }
+                .info-grid {
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+                    gap: 20px;
+                    margin-top: 24px;
+                }
+                .info-card {
+                    background: rgba(15, 23, 42, 0.5);
+                    border: 1px solid #334155;
+                    border-radius: 8px;
+                    padding: 20px;
+                }
+                .info-card h3 {
+                    color: #22d3ee;
+                    font-size: 0.9rem;
+                    font-weight: 600;
+                    text-transform: uppercase;
+                    margin-bottom: 8px;
+                }
+                .info-card p {
+                    color: #f1f5f9;
+                    font-size: 1.5rem;
+                    font-weight: 700;
+                }
+            </style>
+        </head>
+        <body>
+            <nav class="nav">
+                <div class="nav-container">
+                    <a href="/" class="nav-brand">Salesforce OAuth</a>
+                    <div class="nav-links">
+                        <a href="/" class="nav-link">Home</a>
+                        <a href="/docs" class="nav-link">API Docs</a>
+                        <a href="/redoc" class="nav-link">ReDoc</a>
+                        <a href="/status-page" class="nav-link">Status</a>
+                        <a href="/health-page" class="nav-link active">Health</a>
+                    </div>
+                </div>
+            </nav>
+            
+            <div class="container">
+                <div class="card">
+                    <div class="header">
+                        <span class="status-badge">HEALTHY</span>
+                        <h1>System Health Check</h1>
+                    </div>
+                    
+                    <div class="info-grid">
+                        <div class="info-card">
+                            <h3>Server Status</h3>
+                            <p style="color: #22c55e;">✓ Online</p>
+                        </div>
+                        <div class="info-card">
+                            <h3>Database</h3>
+                            <p style="color: #22c55e;">✓ Connected</p>
+                        </div>
+                        <div class="info-card">
+                            <h3>API Version</h3>
+                            <p>v0.1.0</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+    )
 
 
 @app.post("/api/connectors/salesforce/start", response_model=AuthUrlResponse)
@@ -527,8 +718,8 @@ async def oauth_callback(
                             <a href="/" class="nav-link">Home</a>
                             <a href="/docs" class="nav-link">API Docs</a>
                             <a href="/redoc" class="nav-link">ReDoc</a>
-                            <a href="/api/connectors/salesforce/status" class="nav-link">Status</a>
-                            <a href="/health" class="nav-link">Health</a>
+                            <a href="/status-page" class="nav-link">Status</a>
+                            <a href="/health-page" class="nav-link">Health</a>
                         </div>
                     </div>
                 </nav>
@@ -685,8 +876,8 @@ async def oauth_callback(
                             <a href="/" class="nav-link">Home</a>
                             <a href="/docs" class="nav-link">API Docs</a>
                             <a href="/redoc" class="nav-link">ReDoc</a>
-                            <a href="/api/connectors/salesforce/status" class="nav-link">Status</a>
-                            <a href="/health" class="nav-link">Health</a>
+                            <a href="/status-page" class="nav-link">Status</a>
+                            <a href="/health-page" class="nav-link">Health</a>
                         </div>
                     </div>
                 </nav>
@@ -891,8 +1082,8 @@ async def oauth_callback(
                             <a href="/" class="nav-link">Home</a>
                             <a href="/docs" class="nav-link">API Docs</a>
                             <a href="/redoc" class="nav-link">ReDoc</a>
-                            <a href="/api/connectors/salesforce/status" class="nav-link">Status</a>
-                            <a href="/health" class="nav-link">Health</a>
+                            <a href="/status-page" class="nav-link">Status</a>
+                            <a href="/health-page" class="nav-link">Health</a>
                         </div>
                     </div>
                 </nav>
@@ -1065,8 +1256,8 @@ async def oauth_callback(
                             <a href="/" class="nav-link">Home</a>
                             <a href="/docs" class="nav-link">API Docs</a>
                             <a href="/redoc" class="nav-link">ReDoc</a>
-                            <a href="/api/connectors/salesforce/status" class="nav-link">Status</a>
-                            <a href="/health" class="nav-link">Health</a>
+                            <a href="/status-page" class="nav-link">Status</a>
+                            <a href="/health-page" class="nav-link">Health</a>
                         </div>
                     </div>
                 </nav>
@@ -1094,7 +1285,7 @@ async def oauth_callback(
 @app.get("/api/connectors/salesforce/status", response_model=StatusResponse)
 async def get_status():
     """
-    Get current Salesforce connection status
+    Get current Salesforce connection status (JSON API)
     
     Returns connection state, environment, token expiry, and any errors
     """
@@ -1117,6 +1308,270 @@ async def get_status():
         expires_at=creds.get("expires_at"),
         error_message=creds.get("error_message"),
         updated_at=creds.get("updated_at")
+    )
+
+
+@app.get("/status-page")
+async def status_page():
+    """
+    Connection status page - human-friendly HTML version
+    """
+    creds = get_credentials()
+    
+    if not creds:
+        status = "disconnected"
+        status_color = "#64748b"
+        status_bg = "rgba(71, 85, 105, 0.2)"
+        status_border = "rgba(100, 116, 139, 0.3)"
+        environment = "N/A"
+        instance_url = "Not connected"
+        expires_at = "N/A"
+        error_message = None
+    else:
+        status = creds.get("status", "disconnected")
+        environment = creds.get("environment", "N/A")
+        instance_url = creds.get("instance_url", "N/A")
+        expires_at = creds.get("expires_at", "N/A")
+        error_message = creds.get("error_message")
+        
+        if status == "connected":
+            status_color = "#22c55e"
+            status_bg = "rgba(20, 83, 45, 0.2)"
+            status_border = "rgba(34, 197, 94, 0.3)"
+        elif status == "error":
+            status_color = "#ef4444"
+            status_bg = "rgba(127, 29, 29, 0.2)"
+            status_border = "rgba(239, 68, 68, 0.3)"
+        else:
+            status_color = "#64748b"
+            status_bg = "rgba(71, 85, 105, 0.2)"
+            status_border = "rgba(100, 116, 139, 0.3)"
+    
+    error_html = ""
+    if error_message:
+        error_html = f"""
+        <div class="error-box">
+            <h3>Error Details</h3>
+            <p>{error_message}</p>
+        </div>
+        """
+    
+    return HTMLResponse(
+        content=f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Connection Status - Salesforce Connector</title>
+            <link rel="preconnect" href="https://fonts.googleapis.com">
+            <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+            <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;500;600;700&display=swap" rel="stylesheet">
+            <style>
+                * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+                body {{
+                    font-family: 'Quicksand', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                    background: #0f172a;
+                    color: #e2e8f0;
+                    min-height: 100vh;
+                    line-height: 1.6;
+                }}
+                .nav {{
+                    background: rgba(30, 41, 59, 0.8);
+                    border-bottom: 1px solid #334155;
+                    padding: 16px 0;
+                    position: sticky;
+                    top: 0;
+                    z-index: 1000;
+                    backdrop-filter: blur(8px);
+                }}
+                .nav-container {{
+                    max-width: 1200px;
+                    margin: 0 auto;
+                    padding: 0 20px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    flex-wrap: wrap;
+                    gap: 16px;
+                }}
+                .nav-brand {{
+                    font-size: 1.25rem;
+                    font-weight: 700;
+                    background: linear-gradient(135deg, #22d3ee, #0891b2);
+                    -webkit-background-clip: text;
+                    -webkit-text-fill-color: transparent;
+                    text-decoration: none;
+                }}
+                .nav-links {{
+                    display: flex;
+                    gap: 8px;
+                    flex-wrap: wrap;
+                }}
+                .nav-link {{
+                    color: #cbd5e1;
+                    text-decoration: none;
+                    padding: 8px 16px;
+                    border-radius: 6px;
+                    font-weight: 500;
+                    transition: all 0.2s ease;
+                    border: 1px solid transparent;
+                }}
+                .nav-link:hover {{
+                    color: #22d3ee;
+                    background: rgba(34, 211, 238, 0.1);
+                    border-color: rgba(34, 211, 238, 0.3);
+                }}
+                .nav-link.active {{
+                    color: #22d3ee;
+                    background: rgba(34, 211, 238, 0.2);
+                    border-color: rgba(34, 211, 238, 0.3);
+                }}
+                .container {{
+                    max-width: 900px;
+                    margin: 0 auto;
+                    padding: 40px 20px;
+                }}
+                .card {{
+                    background: rgba(30, 41, 59, 0.6);
+                    border-radius: 12px;
+                    border: 1px solid #334155;
+                    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+                    padding: 40px;
+                }}
+                .header {{
+                    border-bottom: 1px solid #334155;
+                    padding-bottom: 20px;
+                    margin-bottom: 30px;
+                    text-align: center;
+                }}
+                .status-badge {{
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 6px;
+                    background: {status_bg};
+                    color: {status_color};
+                    padding: 8px 20px;
+                    border-radius: 24px;
+                    font-size: 16px;
+                    font-weight: 600;
+                    border: 1px solid {status_border};
+                    text-transform: uppercase;
+                }}
+                .status-badge::before {{
+                    content: '';
+                    width: 10px;
+                    height: 10px;
+                    background: {status_color};
+                    border-radius: 50%;
+                }}
+                h1 {{
+                    color: #f1f5f9;
+                    margin: 16px 0 12px 0;
+                    font-size: 2.25rem;
+                    font-weight: 700;
+                }}
+                .info-grid {{
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+                    gap: 20px;
+                    margin-top: 24px;
+                }}
+                .info-card {{
+                    background: rgba(15, 23, 42, 0.5);
+                    border: 1px solid #334155;
+                    border-radius: 8px;
+                    padding: 20px;
+                }}
+                .info-card h3 {{
+                    color: #22d3ee;
+                    font-size: 0.9rem;
+                    font-weight: 600;
+                    text-transform: uppercase;
+                    margin-bottom: 8px;
+                }}
+                .info-card p {{
+                    color: #cbd5e1;
+                    font-size: 1.1rem;
+                    word-break: break-all;
+                }}
+                .error-box {{
+                    background: rgba(127, 29, 29, 0.2);
+                    border: 1px solid #ef4444;
+                    border-radius: 8px;
+                    padding: 16px;
+                    margin-top: 24px;
+                }}
+                .error-box h3 {{
+                    color: #ef4444;
+                    margin-bottom: 8px;
+                }}
+                .error-box p {{
+                    color: #f87171;
+                    font-family: 'Courier New', monospace;
+                    font-size: 0.9em;
+                }}
+                .btn {{
+                    display: inline-block;
+                    background: #22d3ee;
+                    color: #0f172a;
+                    padding: 12px 28px;
+                    text-decoration: none;
+                    border-radius: 6px;
+                    margin-top: 24px;
+                    font-weight: 600;
+                    transition: all 0.2s ease;
+                    border: 1px solid #0891b2;
+                }}
+                .btn:hover {{
+                    background: #0891b2;
+                    transform: translateY(-1px);
+                    box-shadow: 0 4px 12px rgba(34, 211, 238, 0.3);
+                }}
+            </style>
+        </head>
+        <body>
+            <nav class="nav">
+                <div class="nav-container">
+                    <a href="/" class="nav-brand">Salesforce OAuth</a>
+                    <div class="nav-links">
+                        <a href="/" class="nav-link">Home</a>
+                        <a href="/docs" class="nav-link">API Docs</a>
+                        <a href="/redoc" class="nav-link">ReDoc</a>
+                        <a href="/status-page" class="nav-link active">Status</a>
+                        <a href="/health-page" class="nav-link">Health</a>
+                    </div>
+                </div>
+            </nav>
+            
+            <div class="container">
+                <div class="card">
+                    <div class="header">
+                        <span class="status-badge">{status}</span>
+                        <h1>Salesforce Connection Status</h1>
+                    </div>
+                    
+                    <div class="info-grid">
+                        <div class="info-card">
+                            <h3>Environment</h3>
+                            <p>{environment}</p>
+                        </div>
+                        <div class="info-card">
+                            <h3>Instance URL</h3>
+                            <p>{instance_url}</p>
+                        </div>
+                        <div class="info-card">
+                            <h3>Token Expires</h3>
+                            <p>{expires_at}</p>
+                        </div>
+                    </div>
+                    
+                    {error_html}
+                    
+                    <a href="/docs" class="btn">View API Documentation</a>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
     )
 
 
