@@ -60,6 +60,124 @@ class StatusResponse(BaseModel):
     updated_at: Optional[str] = None
 
 
+@app.get("/")
+async def root():
+    """
+    Root endpoint - Landing page with API documentation links
+    """
+    return HTMLResponse(
+        content="""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Salesforce OAuth Connector</title>
+            <style>
+                body {
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                    max-width: 800px;
+                    margin: 50px auto;
+                    padding: 20px;
+                    line-height: 1.6;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    min-height: 100vh;
+                }
+                .container {
+                    background: white;
+                    padding: 40px;
+                    border-radius: 10px;
+                    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+                }
+                h1 {
+                    color: #333;
+                    margin-top: 0;
+                }
+                .status {
+                    display: inline-block;
+                    background: #10b981;
+                    color: white;
+                    padding: 5px 15px;
+                    border-radius: 20px;
+                    font-size: 14px;
+                    margin-bottom: 20px;
+                }
+                .section {
+                    margin: 30px 0;
+                }
+                .btn {
+                    display: inline-block;
+                    background: #667eea;
+                    color: white;
+                    padding: 12px 24px;
+                    text-decoration: none;
+                    border-radius: 5px;
+                    margin: 10px 10px 10px 0;
+                    transition: background 0.3s;
+                }
+                .btn:hover {
+                    background: #5568d3;
+                }
+                .btn-secondary {
+                    background: #6b7280;
+                }
+                .btn-secondary:hover {
+                    background: #4b5563;
+                }
+                code {
+                    background: #f3f4f6;
+                    padding: 2px 6px;
+                    border-radius: 3px;
+                    font-family: 'Courier New', monospace;
+                }
+                ul {
+                    padding-left: 20px;
+                }
+                li {
+                    margin: 8px 0;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <span class="status">✓ ONLINE</span>
+                <h1>🔐 Salesforce OAuth Connector</h1>
+                <p>A simple, stable FastAPI backend for Salesforce OAuth2 integration.</p>
+                
+                <div class="section">
+                    <h2>📚 API Documentation</h2>
+                    <p>Interact with all endpoints through our interactive API documentation:</p>
+                    <a href="/docs" class="btn">Open Swagger UI</a>
+                    <a href="/redoc" class="btn btn-secondary">Open ReDoc</a>
+                </div>
+                
+                <div class="section">
+                    <h2>🚀 Available Endpoints</h2>
+                    <ul>
+                        <li><code>GET /health</code> - Health check</li>
+                        <li><code>POST /api/connectors/salesforce/start</code> - Start OAuth flow</li>
+                        <li><code>GET /oauth/callback/salesforce</code> - OAuth callback handler</li>
+                        <li><code>GET /api/connectors/salesforce/status</code> - Connection status</li>
+                        <li><code>GET /api/connectors/salesforce/test</code> - Test API connection</li>
+                        <li><code>POST /api/connectors/salesforce/disconnect</code> - Disconnect</li>
+                    </ul>
+                </div>
+                
+                <div class="section">
+                    <h2>📖 Setup Instructions</h2>
+                    <p>To use this connector:</p>
+                    <ol>
+                        <li>Create a Connected App in Salesforce</li>
+                        <li>Set <code>SALESFORCE_CALLBACK_URL</code> in Replit Secrets</li>
+                        <li>Use the Swagger UI to initiate OAuth flow</li>
+                    </ol>
+                    <p>See the <strong>README.md</strong> file for detailed instructions.</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+    )
+
+
 @app.get("/health")
 async def health_check():
     """
