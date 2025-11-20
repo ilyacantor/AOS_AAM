@@ -4,6 +4,7 @@ Simple, stable POC for OAuth handshake, token storage, auto-refresh, and API cal
 """
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
+from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
 from pydantic import BaseModel, Field
 from typing import Literal, Optional
 import os
@@ -22,7 +23,9 @@ load_dotenv()
 app = FastAPI(
     title="Salesforce OAuth Connector",
     description="Simple POC for Salesforce OAuth2 handshake with token management",
-    version="0.1.0"
+    version="0.1.0",
+    docs_url=None,  # Disable default docs
+    redoc_url=None  # Disable default redoc
 )
 
 # Initialize database on startup
@@ -311,6 +314,223 @@ async def root():
                     </div>
                 </div>
             </div>
+        </body>
+        </html>
+        """
+    )
+
+
+@app.get("/docs")
+async def custom_swagger_ui():
+    """
+    Custom Swagger UI with AutonomOS navigation
+    """
+    return HTMLResponse(
+        content="""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>API Documentation - Salesforce Connector</title>
+            <link rel="preconnect" href="https://fonts.googleapis.com">
+            <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+            <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;500;600;700&display=swap" rel="stylesheet">
+            <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css">
+            <style>
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                body {
+                    font-family: 'Quicksand', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                    background: #0f172a;
+                    color: #e2e8f0;
+                    min-height: 100vh;
+                }
+                .nav {
+                    background: rgba(30, 41, 59, 0.8);
+                    border-bottom: 1px solid #334155;
+                    padding: 16px 0;
+                    position: sticky;
+                    top: 0;
+                    z-index: 10000;
+                    backdrop-filter: blur(8px);
+                }
+                .nav-container {
+                    max-width: 1200px;
+                    margin: 0 auto;
+                    padding: 0 20px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    flex-wrap: wrap;
+                    gap: 16px;
+                }
+                .nav-brand {
+                    font-size: 1.25rem;
+                    font-weight: 700;
+                    background: linear-gradient(135deg, #22d3ee, #0891b2);
+                    -webkit-background-clip: text;
+                    -webkit-text-fill-color: transparent;
+                    text-decoration: none;
+                }
+                .nav-links {
+                    display: flex;
+                    gap: 8px;
+                    flex-wrap: wrap;
+                }
+                .nav-link {
+                    color: #cbd5e1;
+                    text-decoration: none;
+                    padding: 8px 16px;
+                    border-radius: 6px;
+                    font-weight: 500;
+                    transition: all 0.2s ease;
+                    border: 1px solid transparent;
+                }
+                .nav-link:hover {
+                    color: #22d3ee;
+                    background: rgba(34, 211, 238, 0.1);
+                    border-color: rgba(34, 211, 238, 0.3);
+                }
+                .nav-link.active {
+                    color: #22d3ee;
+                    background: rgba(34, 211, 238, 0.2);
+                    border-color: rgba(34, 211, 238, 0.3);
+                }
+                #swagger-ui {
+                    max-width: 1460px;
+                    margin: 0 auto;
+                }
+            </style>
+        </head>
+        <body>
+            <nav class="nav">
+                <div class="nav-container">
+                    <a href="/" class="nav-brand">Salesforce OAuth</a>
+                    <div class="nav-links">
+                        <a href="/" class="nav-link">Home</a>
+                        <a href="/docs" class="nav-link active">API Docs</a>
+                        <a href="/redoc" class="nav-link">ReDoc</a>
+                        <a href="/status-page" class="nav-link">Status</a>
+                        <a href="/health-page" class="nav-link">Health</a>
+                    </div>
+                </div>
+            </nav>
+            
+            <div id="swagger-ui"></div>
+            
+            <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+            <script>
+                window.onload = function() {
+                    window.ui = SwaggerUIBundle({
+                        url: '/openapi.json',
+                        dom_id: '#swagger-ui',
+                        deepLinking: true,
+                        presets: [
+                            SwaggerUIBundle.presets.apis,
+                            SwaggerUIBundle.SwaggerUIStandalonePreset
+                        ],
+                    })
+                }
+            </script>
+        </body>
+        </html>
+        """
+    )
+
+
+@app.get("/redoc")
+async def custom_redoc():
+    """
+    Custom ReDoc with AutonomOS navigation
+    """
+    return HTMLResponse(
+        content="""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>API Documentation - Salesforce Connector</title>
+            <link rel="preconnect" href="https://fonts.googleapis.com">
+            <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+            <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;500;600;700&display=swap" rel="stylesheet">
+            <style>
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                body {
+                    font-family: 'Quicksand', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                    background: #0f172a;
+                    color: #e2e8f0;
+                    min-height: 100vh;
+                }
+                .nav {
+                    background: rgba(30, 41, 59, 0.8);
+                    border-bottom: 1px solid #334155;
+                    padding: 16px 0;
+                    position: sticky;
+                    top: 0;
+                    z-index: 10000;
+                    backdrop-filter: blur(8px);
+                }
+                .nav-container {
+                    max-width: 1200px;
+                    margin: 0 auto;
+                    padding: 0 20px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    flex-wrap: wrap;
+                    gap: 16px;
+                }
+                .nav-brand {
+                    font-size: 1.25rem;
+                    font-weight: 700;
+                    background: linear-gradient(135deg, #22d3ee, #0891b2);
+                    -webkit-background-clip: text;
+                    -webkit-text-fill-color: transparent;
+                    text-decoration: none;
+                }
+                .nav-links {
+                    display: flex;
+                    gap: 8px;
+                    flex-wrap: wrap;
+                }
+                .nav-link {
+                    color: #cbd5e1;
+                    text-decoration: none;
+                    padding: 8px 16px;
+                    border-radius: 6px;
+                    font-weight: 500;
+                    transition: all 0.2s ease;
+                    border: 1px solid transparent;
+                }
+                .nav-link:hover {
+                    color: #22d3ee;
+                    background: rgba(34, 211, 238, 0.1);
+                    border-color: rgba(34, 211, 238, 0.3);
+                }
+                .nav-link.active {
+                    color: #22d3ee;
+                    background: rgba(34, 211, 238, 0.2);
+                    border-color: rgba(34, 211, 238, 0.3);
+                }
+                redoc {
+                    display: block;
+                }
+            </style>
+        </head>
+        <body>
+            <nav class="nav">
+                <div class="nav-container">
+                    <a href="/" class="nav-brand">Salesforce OAuth</a>
+                    <div class="nav-links">
+                        <a href="/" class="nav-link">Home</a>
+                        <a href="/docs" class="nav-link">API Docs</a>
+                        <a href="/redoc" class="nav-link active">ReDoc</a>
+                        <a href="/status-page" class="nav-link">Status</a>
+                        <a href="/health-page" class="nav-link">Health</a>
+                    </div>
+                </div>
+            </nav>
+            
+            <redoc spec-url='/openapi.json'></redoc>
+            
+            <script src="https://cdn.jsdelivr.net/npm/redoc@latest/bundles/redoc.standalone.js"></script>
         </body>
         </html>
         """
