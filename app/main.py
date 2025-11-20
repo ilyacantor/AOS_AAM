@@ -404,7 +404,146 @@ async def oauth_callback(
     creds = get_credentials()
     if not creds:
         return HTMLResponse(
-            content="<h1>Error</h1><p>No OAuth flow in progress. Please start with /api/connectors/salesforce/start</p>",
+            content="""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>OAuth Error - Salesforce Connector</title>
+                <link rel="preconnect" href="https://fonts.googleapis.com">
+                <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+                <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;500;600;700&display=swap" rel="stylesheet">
+                <style>
+                    * { margin: 0; padding: 0; box-sizing: border-box; }
+                    body {
+                        font-family: 'Quicksand', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                        background: #0f172a;
+                        color: #e2e8f0;
+                        min-height: 100vh;
+                        line-height: 1.6;
+                    }
+                    .nav {
+                        background: rgba(30, 41, 59, 0.8);
+                        border-bottom: 1px solid #334155;
+                        padding: 16px 0;
+                        backdrop-filter: blur(8px);
+                    }
+                    .nav-container {
+                        max-width: 1200px;
+                        margin: 0 auto;
+                        padding: 0 20px;
+                        display: flex;
+                        align-items: center;
+                        justify-content: space-between;
+                        flex-wrap: wrap;
+                        gap: 16px;
+                    }
+                    .nav-brand {
+                        font-size: 1.25rem;
+                        font-weight: 700;
+                        background: linear-gradient(135deg, #22d3ee, #0891b2);
+                        -webkit-background-clip: text;
+                        -webkit-text-fill-color: transparent;
+                        text-decoration: none;
+                    }
+                    .nav-links {
+                        display: flex;
+                        gap: 8px;
+                        flex-wrap: wrap;
+                    }
+                    .nav-link {
+                        color: #cbd5e1;
+                        text-decoration: none;
+                        padding: 8px 16px;
+                        border-radius: 6px;
+                        font-weight: 500;
+                        transition: all 0.2s ease;
+                        border: 1px solid transparent;
+                    }
+                    .nav-link:hover {
+                        color: #22d3ee;
+                        background: rgba(34, 211, 238, 0.1);
+                        border-color: rgba(34, 211, 238, 0.3);
+                    }
+                    .container {
+                        max-width: 700px;
+                        margin: 60px auto;
+                        padding: 40px 20px;
+                    }
+                    .card {
+                        background: rgba(30, 41, 59, 0.6);
+                        border-radius: 12px;
+                        border: 1px solid #334155;
+                        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+                        padding: 48px;
+                        text-align: center;
+                    }
+                    .error-icon {
+                        width: 80px;
+                        height: 80px;
+                        margin: 0 auto 24px;
+                        background: rgba(127, 29, 29, 0.2);
+                        border: 2px solid #ef4444;
+                        border-radius: 50%;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        font-size: 40px;
+                    }
+                    h1 {
+                        color: #ef4444;
+                        font-size: 2rem;
+                        font-weight: 700;
+                        margin-bottom: 16px;
+                    }
+                    p {
+                        color: #cbd5e1;
+                        margin-bottom: 24px;
+                        font-size: 1.1rem;
+                    }
+                    .btn {
+                        display: inline-block;
+                        background: #22d3ee;
+                        color: #0f172a;
+                        padding: 12px 28px;
+                        text-decoration: none;
+                        border-radius: 6px;
+                        margin-top: 24px;
+                        font-weight: 600;
+                        transition: all 0.2s ease;
+                        border: 1px solid #0891b2;
+                    }
+                    .btn:hover {
+                        background: #0891b2;
+                        transform: translateY(-1px);
+                        box-shadow: 0 4px 12px rgba(34, 211, 238, 0.3);
+                    }
+                </style>
+            </head>
+            <body>
+                <nav class="nav">
+                    <div class="nav-container">
+                        <a href="/" class="nav-brand">Salesforce OAuth</a>
+                        <div class="nav-links">
+                            <a href="/" class="nav-link">Home</a>
+                            <a href="/docs" class="nav-link">API Docs</a>
+                            <a href="/redoc" class="nav-link">ReDoc</a>
+                            <a href="/api/connectors/salesforce/status" class="nav-link">Status</a>
+                            <a href="/health" class="nav-link">Health</a>
+                        </div>
+                    </div>
+                </nav>
+                
+                <div class="container">
+                    <div class="card">
+                        <div class="error-icon">✗</div>
+                        <h1>No OAuth Flow in Progress</h1>
+                        <p>Please start the OAuth flow first using the API.</p>
+                        <a href="/docs" class="btn">Go to API Documentation</a>
+                    </div>
+                </div>
+            </body>
+            </html>
+            """,
             status_code=400
         )
     
@@ -415,7 +554,157 @@ async def oauth_callback(
             error_message="Invalid state parameter - possible CSRF attack"
         )
         return HTMLResponse(
-            content="<h1>Error</h1><p>Invalid state parameter. Please try again.</p>",
+            content="""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>OAuth Error - Salesforce Connector</title>
+                <link rel="preconnect" href="https://fonts.googleapis.com">
+                <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+                <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;500;600;700&display=swap" rel="stylesheet">
+                <style>
+                    * { margin: 0; padding: 0; box-sizing: border-box; }
+                    body {
+                        font-family: 'Quicksand', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                        background: #0f172a;
+                        color: #e2e8f0;
+                        min-height: 100vh;
+                        line-height: 1.6;
+                    }
+                    .nav {
+                        background: rgba(30, 41, 59, 0.8);
+                        border-bottom: 1px solid #334155;
+                        padding: 16px 0;
+                        backdrop-filter: blur(8px);
+                    }
+                    .nav-container {
+                        max-width: 1200px;
+                        margin: 0 auto;
+                        padding: 0 20px;
+                        display: flex;
+                        align-items: center;
+                        justify-content: space-between;
+                        flex-wrap: wrap;
+                        gap: 16px;
+                    }
+                    .nav-brand {
+                        font-size: 1.25rem;
+                        font-weight: 700;
+                        background: linear-gradient(135deg, #22d3ee, #0891b2);
+                        -webkit-background-clip: text;
+                        -webkit-text-fill-color: transparent;
+                        text-decoration: none;
+                    }
+                    .nav-links {
+                        display: flex;
+                        gap: 8px;
+                        flex-wrap: wrap;
+                    }
+                    .nav-link {
+                        color: #cbd5e1;
+                        text-decoration: none;
+                        padding: 8px 16px;
+                        border-radius: 6px;
+                        font-weight: 500;
+                        transition: all 0.2s ease;
+                        border: 1px solid transparent;
+                    }
+                    .nav-link:hover {
+                        color: #22d3ee;
+                        background: rgba(34, 211, 238, 0.1);
+                        border-color: rgba(34, 211, 238, 0.3);
+                    }
+                    .container {
+                        max-width: 700px;
+                        margin: 60px auto;
+                        padding: 40px 20px;
+                    }
+                    .card {
+                        background: rgba(30, 41, 59, 0.6);
+                        border-radius: 12px;
+                        border: 1px solid #334155;
+                        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+                        padding: 48px;
+                        text-align: center;
+                    }
+                    .error-icon {
+                        width: 80px;
+                        height: 80px;
+                        margin: 0 auto 24px;
+                        background: rgba(127, 29, 29, 0.2);
+                        border: 2px solid #ef4444;
+                        border-radius: 50%;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        font-size: 40px;
+                    }
+                    h1 {
+                        color: #ef4444;
+                        font-size: 2rem;
+                        font-weight: 700;
+                        margin-bottom: 16px;
+                    }
+                    p {
+                        color: #cbd5e1;
+                        margin-bottom: 24px;
+                        font-size: 1.1rem;
+                    }
+                    .warning {
+                        background: rgba(124, 45, 18, 0.2);
+                        border: 1px solid #f97316;
+                        border-radius: 8px;
+                        padding: 16px;
+                        margin-top: 24px;
+                        color: #fb923c;
+                    }
+                    .btn {
+                        display: inline-block;
+                        background: #22d3ee;
+                        color: #0f172a;
+                        padding: 12px 28px;
+                        text-decoration: none;
+                        border-radius: 6px;
+                        margin-top: 24px;
+                        font-weight: 600;
+                        transition: all 0.2s ease;
+                        border: 1px solid #0891b2;
+                    }
+                    .btn:hover {
+                        background: #0891b2;
+                        transform: translateY(-1px);
+                        box-shadow: 0 4px 12px rgba(34, 211, 238, 0.3);
+                    }
+                </style>
+            </head>
+            <body>
+                <nav class="nav">
+                    <div class="nav-container">
+                        <a href="/" class="nav-brand">Salesforce OAuth</a>
+                        <div class="nav-links">
+                            <a href="/" class="nav-link">Home</a>
+                            <a href="/docs" class="nav-link">API Docs</a>
+                            <a href="/redoc" class="nav-link">ReDoc</a>
+                            <a href="/api/connectors/salesforce/status" class="nav-link">Status</a>
+                            <a href="/health" class="nav-link">Health</a>
+                        </div>
+                    </div>
+                </nav>
+                
+                <div class="container">
+                    <div class="card">
+                        <div class="error-icon">✗</div>
+                        <h1>Invalid State Parameter</h1>
+                        <p>The OAuth callback failed validation.</p>
+                        <div class="warning">
+                            <strong>Security Warning:</strong> This may indicate a CSRF attack attempt. Please try the OAuth flow again.
+                        </div>
+                        <a href="/docs" class="btn">Start New OAuth Flow</a>
+                    </div>
+                </div>
+            </body>
+            </html>
+            """,
             status_code=400
         )
     
