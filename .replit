@@ -8,8 +8,7 @@ packages = ["libxcrypt"]
 
 [deployment]
 deploymentTarget = "autoscale"
-build = ["npm", "run", "build"]
-run = ["npm", "run", "start"]
+run = ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "5000"]
 
 [[ports]]
 localPort = 5000
