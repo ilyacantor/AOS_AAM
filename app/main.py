@@ -273,6 +273,813 @@ async def custom_redoc():
 """)
 
 
+# ============================================================================
+# OPERATOR UI - AAM v1 Screens
+# ============================================================================
+
+UI_STYLE = """
+<style>
+    .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
+    h1 { font-size: 1.75rem; font-weight: 700; margin-bottom: 24px; color: #e2e8f0; }
+    h2 { font-size: 1.25rem; font-weight: 600; margin-bottom: 16px; color: #e2e8f0; }
+    h3 { font-size: 1rem; font-weight: 600; margin-bottom: 12px; color: #cbd5e1; }
+    .controls { display: flex; gap: 12px; margin-bottom: 24px; flex-wrap: wrap; align-items: center; }
+    .btn {
+        background: rgba(34, 211, 238, 0.1);
+        color: #22d3ee;
+        border: 1px solid rgba(34, 211, 238, 0.3);
+        padding: 8px 16px;
+        border-radius: 6px;
+        font-weight: 500;
+        cursor: pointer;
+        font-family: inherit;
+        font-size: 0.875rem;
+        transition: all 0.2s ease;
+        text-decoration: none;
+        display: inline-block;
+    }
+    .btn:hover { background: rgba(34, 211, 238, 0.2); border-color: rgba(34, 211, 238, 0.5); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-sm { padding: 4px 10px; font-size: 0.75rem; }
+    .btn-danger { color: #f87171; border-color: rgba(248, 113, 113, 0.3); background: rgba(248, 113, 113, 0.1); }
+    .btn-danger:hover { background: rgba(248, 113, 113, 0.2); border-color: rgba(248, 113, 113, 0.5); }
+    select {
+        background: #1e293b;
+        color: #ffffff;
+        border: 1px solid #334155;
+        padding: 8px 12px;
+        border-radius: 6px;
+        font-family: inherit;
+        font-size: 0.875rem;
+        cursor: pointer;
+    }
+    select:focus { outline: none; border-color: #22d3ee; }
+    table { width: 100%; border-collapse: collapse; background: rgba(30, 41, 59, 0.6); border-radius: 8px; overflow: hidden; }
+    th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #334155; }
+    th { background: rgba(30, 41, 59, 0.9); font-weight: 600; color: #94a3b8; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
+    tr:hover { background: rgba(34, 211, 238, 0.05); }
+    tr:last-child td { border-bottom: none; }
+    a { color: #22d3ee; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        font-weight: 500;
+    }
+    .badge-new { background: rgba(59, 130, 246, 0.2); color: #60a5fa; }
+    .badge-triaged { background: rgba(251, 191, 36, 0.2); color: #fbbf24; }
+    .badge-connected { background: rgba(34, 197, 94, 0.2); color: #22c55e; }
+    .badge-deferred { background: rgba(148, 163, 184, 0.2); color: #94a3b8; }
+    .badge-open { background: rgba(248, 113, 113, 0.2); color: #f87171; }
+    .badge-acknowledged { background: rgba(251, 191, 36, 0.2); color: #fbbf24; }
+    .badge-suppressed { background: rgba(148, 163, 184, 0.2); color: #94a3b8; }
+    .badge-high { background: rgba(248, 113, 113, 0.2); color: #f87171; }
+    .badge-medium { background: rgba(251, 191, 36, 0.2); color: #fbbf24; }
+    .badge-low { background: rgba(34, 197, 94, 0.2); color: #22c55e; }
+    .panel { background: rgba(30, 41, 59, 0.6); border: 1px solid #334155; border-radius: 8px; padding: 20px; margin-bottom: 20px; }
+    .panel-title { font-size: 1rem; font-weight: 600; color: #e2e8f0; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid #334155; }
+    .field { margin-bottom: 12px; }
+    .field-label { font-size: 0.75rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+    .field-value { color: #e2e8f0; font-size: 0.9rem; word-break: break-word; }
+    .field-value.mono { font-family: 'Consolas', 'Monaco', monospace; font-size: 0.8rem; background: rgba(15, 23, 42, 0.5); padding: 8px; border-radius: 4px; }
+    .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+    .section { margin-bottom: 32px; }
+    .empty-state { text-align: center; padding: 48px; color: #64748b; }
+    .toast { position: fixed; bottom: 24px; right: 24px; background: #1e293b; border: 1px solid #334155; padding: 12px 20px; border-radius: 8px; z-index: 1000; display: none; }
+    .toast.success { border-color: rgba(34, 197, 94, 0.5); color: #22c55e; }
+    .toast.error { border-color: rgba(248, 113, 113, 0.5); color: #f87171; }
+    .loading { opacity: 0.5; pointer-events: none; }
+    .actions { display: flex; gap: 8px; }
+    @media (max-width: 768px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
+</style>
+"""
+
+def ui_nav(active: str = "") -> str:
+    """Generate navigation for operator UI screens"""
+    def active_class(page: str) -> str:
+        return " active" if page == active else ""
+    return f"""
+<nav class="nav">
+    <a href="/" class="nav-brand">AAM</a>
+    <div class="nav-links">
+        <a href="/ui/pipes" class="nav-link{active_class('pipes')}" data-testid="nav-pipes">Pipes</a>
+        <a href="/ui/candidates" class="nav-link{active_class('candidates')}" data-testid="nav-candidates">Candidates</a>
+        <a href="/ui/drift" class="nav-link{active_class('drift')}" data-testid="nav-drift">Drift & Health</a>
+        <a href="/docs" class="nav-link{active_class('docs')}" data-testid="nav-api">API</a>
+    </div>
+</nav>
+"""
+
+
+@app.get("/ui/pipes", response_class=HTMLResponse, include_in_schema=False)
+async def ui_pipes_list(
+    source_system: Optional[str] = Query(None),
+    modality: Optional[str] = Query(None)
+):
+    """Pipes Inventory Screen"""
+    pipes = list_pipes(source_system=source_system)
+    if modality:
+        pipes = [p for p in pipes if p.get("modality") == modality]
+    
+    all_pipes = list_pipes()
+    source_systems = sorted(set(p.get("source_system", "") for p in all_pipes if p.get("source_system")))
+    modalities = sorted(set(p.get("modality", "") for p in all_pipes if p.get("modality")))
+    
+    all_drift = list_all_drift_events(limit=1000)
+    drift_by_pipe = {}
+    for d in all_drift:
+        pid = d.get("pipe_id")
+        if pid:
+            if pid not in drift_by_pipe:
+                drift_by_pipe[pid] = {"open": 0, "total": 0}
+            drift_by_pipe[pid]["total"] += 1
+            if d.get("status") == "open":
+                drift_by_pipe[pid]["open"] += 1
+    
+    rows_html = ""
+    for p in pipes:
+        pipe_id = p.get("pipe_id", "")
+        entity_scope = p.get("entity_scope", [])
+        trust_labels = p.get("trust_labels", [])
+        owner_signals = p.get("owner_signals", [])
+        drift_info = drift_by_pipe.get(pipe_id, {"open": 0, "total": 0})
+        drift_status = f"{drift_info['open']} open" if drift_info['open'] > 0 else "OK"
+        drift_class = "badge-open" if drift_info['open'] > 0 else "badge-connected"
+        
+        rows_html += f"""
+        <tr data-testid="pipe-row-{pipe_id}">
+            <td><a href="/ui/pipes/{pipe_id}" data-testid="pipe-link-{pipe_id}">{p.get('display_name', 'Unnamed')}</a></td>
+            <td>{p.get('source_system', '-')}</td>
+            <td>{p.get('transport_kind', '-')}</td>
+            <td>{p.get('modality', '-')}</td>
+            <td>{', '.join(entity_scope[:3])}{'...' if len(entity_scope) > 3 else ''}</td>
+            <td>{len(trust_labels)}</td>
+            <td>{p.get('freshness', '-')}</td>
+            <td><span class="badge {drift_class}">{drift_status}</span></td>
+            <td>{', '.join(owner_signals[:2]) if owner_signals else '-'}</td>
+        </tr>
+        """
+    
+    if not pipes:
+        rows_html = '<tr><td colspan="9" class="empty-state">No pipes found. Run Mock Collector to generate sample data.</td></tr>'
+    
+    source_options = '<option value="">All Sources</option>' + ''.join(
+        f'<option value="{s}"{" selected" if s == source_system else ""}>{s}</option>' for s in source_systems
+    )
+    modality_options = '<option value="">All Modalities</option>' + ''.join(
+        f'<option value="{m}"{" selected" if m == modality else ""}>{m}</option>' for m in modalities
+    )
+    
+    return HTMLResponse(content=f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Pipes - AAM</title>
+    {NAV_STYLE}
+    {UI_STYLE}
+</head>
+<body>
+    {ui_nav('pipes')}
+    <div class="container">
+        <h1>Pipes Inventory</h1>
+        <div class="controls">
+            <button class="btn" id="btn-run-collector" data-testid="btn-run-collector">Run Mock Collector</button>
+            <button class="btn" id="btn-export-dcl" data-testid="btn-export-dcl">Export to DCL</button>
+            <select id="filter-source" data-testid="filter-source" onchange="applyFilters()">{source_options}</select>
+            <select id="filter-modality" data-testid="filter-modality" onchange="applyFilters()">{modality_options}</select>
+        </div>
+        <table data-testid="pipes-table">
+            <thead>
+                <tr>
+                    <th>Pipe Name</th>
+                    <th>Source System</th>
+                    <th>Transport</th>
+                    <th>Modality</th>
+                    <th>Entity Scope</th>
+                    <th>Trust Labels</th>
+                    <th>Freshness</th>
+                    <th>Drift</th>
+                    <th>Owner</th>
+                </tr>
+            </thead>
+            <tbody id="pipes-body">{rows_html}</tbody>
+        </table>
+    </div>
+    <div id="toast" class="toast"></div>
+    <script>
+        function showToast(message, type) {{
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = 'toast ' + type;
+            toast.style.display = 'block';
+            setTimeout(() => toast.style.display = 'none', 3000);
+        }}
+        
+        function applyFilters() {{
+            const source = document.getElementById('filter-source').value;
+            const modality = document.getElementById('filter-modality').value;
+            const params = new URLSearchParams();
+            if (source) params.set('source_system', source);
+            if (modality) params.set('modality', modality);
+            window.location.href = '/ui/pipes' + (params.toString() ? '?' + params.toString() : '');
+        }}
+        
+        document.getElementById('btn-run-collector').addEventListener('click', async function() {{
+            this.disabled = true;
+            this.textContent = 'Running...';
+            try {{
+                const res = await fetch('/api/collect/mock/run', {{ method: 'POST', headers: {{ 'Content-Type': 'application/json' }}, body: '{{}}' }});
+                const data = await res.json();
+                if (res.ok) {{
+                    showToast('Collector ran: ' + data.observations_created + ' observations created', 'success');
+                    const inferRes = await fetch('/api/aam/infer', {{ method: 'POST' }});
+                    const inferData = await inferRes.json();
+                    showToast('Inferred ' + inferData.pipes_created + ' pipes', 'success');
+                    setTimeout(() => location.reload(), 1500);
+                }} else {{
+                    showToast('Error: ' + (data.detail || 'Failed'), 'error');
+                }}
+            }} catch (e) {{
+                showToast('Error: ' + e.message, 'error');
+            }}
+            this.disabled = false;
+            this.textContent = 'Run Mock Collector';
+        }});
+        
+        document.getElementById('btn-export-dcl').addEventListener('click', async function() {{
+            try {{
+                const res = await fetch('/api/export/dcl/declared-pipes');
+                const data = await res.json();
+                const blob = new Blob([JSON.stringify(data, null, 2)], {{ type: 'application/json' }});
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'dcl-export-' + new Date().toISOString().slice(0,10) + '.json';
+                a.click();
+                showToast('Exported ' + data.pipe_count + ' pipes', 'success');
+            }} catch (e) {{
+                showToast('Export failed: ' + e.message, 'error');
+            }}
+        }});
+    </script>
+</body>
+</html>
+""")
+
+
+@app.get("/ui/pipes/{pipe_id}", response_class=HTMLResponse, include_in_schema=False)
+async def ui_pipe_detail(pipe_id: str):
+    """Pipe Detail Screen"""
+    pipe = get_pipe(pipe_id)
+    if not pipe:
+        return HTMLResponse(content=f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Pipe Not Found - AAM</title>
+    {NAV_STYLE}
+    {UI_STYLE}
+</head>
+<body>
+    {ui_nav('pipes')}
+    <div class="container">
+        <h1>Pipe Not Found</h1>
+        <p>The pipe with ID "{pipe_id}" was not found.</p>
+        <a href="/ui/pipes" class="btn">Back to Pipes</a>
+    </div>
+</body>
+</html>
+""", status_code=404)
+    
+    versions = get_pipe_versions(pipe_id)
+    drift_events = get_drift_events(pipe_id)
+    
+    endpoint_ref = pipe.get("endpoint_ref", {})
+    provenance = pipe.get("provenance", {})
+    schema_info = pipe.get("schema_info")
+    entity_scope = pipe.get("entity_scope", [])
+    identity_keys = pipe.get("identity_keys", [])
+    trust_labels = pipe.get("trust_labels", [])
+    owner_signals = pipe.get("owner_signals", [])
+    
+    trust_labels_html = ''.join(f'<span class="badge badge-connected" style="margin-right:4px;">{t}</span>' for t in trust_labels) or '-'
+    
+    drift_rows = ""
+    for d in drift_events:
+        drift_rows += f"""
+        <tr>
+            <td>{d.get('drift_type', '-')}</td>
+            <td><span class="badge badge-{d.get('severity', 'medium')}">{d.get('severity', 'medium')}</span></td>
+            <td><span class="badge badge-{d.get('status', 'open')}">{d.get('status', 'open')}</span></td>
+            <td>{d.get('detected_at', '-')[:16] if d.get('detected_at') else '-'}</td>
+            <td style="font-size:0.75rem;max-width:200px;overflow:hidden;text-overflow:ellipsis;">{d.get('old_value', '-')[:30]}... → {d.get('new_value', '-')[:30]}...</td>
+        </tr>
+        """
+    if not drift_events:
+        drift_rows = '<tr><td colspan="5" class="empty-state">No drift events</td></tr>'
+    
+    versions_html = ""
+    for v in versions[:5]:
+        versions_html += f"<div style='margin-bottom:8px;'><strong>v{v.get('version', '?')}</strong> - {v.get('created_at', '')[:16]}</div>"
+    if not versions:
+        versions_html = "<div class='empty-state'>No versions</div>"
+    
+    import json as json_module
+    
+    return HTMLResponse(content=f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{pipe.get('display_name', 'Pipe')} - AAM</title>
+    {NAV_STYLE}
+    {UI_STYLE}
+</head>
+<body>
+    {ui_nav('pipes')}
+    <div class="container">
+        <div class="controls">
+            <a href="/ui/pipes" class="btn" data-testid="btn-back">← Back to Pipes</a>
+            <button class="btn" id="btn-recompute" data-testid="btn-recompute">Recompute Declaration</button>
+            <button class="btn" id="btn-create-tee" data-testid="btn-create-tee">Create Tee Request</button>
+        </div>
+        <h1 data-testid="pipe-title">{pipe.get('display_name', 'Unnamed Pipe')}</h1>
+        
+        <div class="grid-2">
+            <div class="panel">
+                <div class="panel-title">Pipe Info</div>
+                <div class="field">
+                    <div class="field-label">Pipe ID</div>
+                    <div class="field-value mono" data-testid="field-pipe-id">{pipe_id}</div>
+                </div>
+                <div class="field">
+                    <div class="field-label">Source System</div>
+                    <div class="field-value">{pipe.get('source_system', '-')}</div>
+                </div>
+                <div class="field">
+                    <div class="field-label">Transport Kind</div>
+                    <div class="field-value">{pipe.get('transport_kind', '-')}</div>
+                </div>
+                <div class="field">
+                    <div class="field-label">Modality</div>
+                    <div class="field-value">{pipe.get('modality', '-')}</div>
+                </div>
+                <div class="field">
+                    <div class="field-label">Change Semantics</div>
+                    <div class="field-value">{pipe.get('change_semantics', '-')}</div>
+                </div>
+                <div class="field">
+                    <div class="field-label">Freshness</div>
+                    <div class="field-value">{pipe.get('freshness', '-')}</div>
+                </div>
+                <div class="field">
+                    <div class="field-label">Version</div>
+                    <div class="field-value">v{pipe.get('version', 1)}</div>
+                </div>
+            </div>
+            
+            <div class="panel">
+                <div class="panel-title">Endpoint Reference</div>
+                <div class="field-value mono" data-testid="field-endpoint">{json_module.dumps(endpoint_ref, indent=2) if endpoint_ref else 'No endpoint reference'}</div>
+            </div>
+        </div>
+        
+        <div class="grid-2">
+            <div class="panel">
+                <div class="panel-title">Provenance</div>
+                <div class="field">
+                    <div class="field-label">Discovered By</div>
+                    <div class="field-value">{provenance.get('discovered_by', '-')}</div>
+                </div>
+                <div class="field">
+                    <div class="field-label">Discovered At</div>
+                    <div class="field-value">{provenance.get('discovered_at', '-')}</div>
+                </div>
+                <div class="field">
+                    <div class="field-label">Lineage Hints</div>
+                    <div class="field-value">{', '.join(provenance.get('lineage_hints', [])) or '-'}</div>
+                </div>
+            </div>
+            
+            <div class="panel">
+                <div class="panel-title">Entity & Identity</div>
+                <div class="field">
+                    <div class="field-label">Entity Scope</div>
+                    <div class="field-value">{', '.join(entity_scope) or '-'}</div>
+                </div>
+                <div class="field">
+                    <div class="field-label">Identity Keys</div>
+                    <div class="field-value">{', '.join(identity_keys) or '-'}</div>
+                </div>
+                <div class="field">
+                    <div class="field-label">Owner Signals</div>
+                    <div class="field-value">{', '.join(owner_signals) or '-'}</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="grid-2">
+            <div class="panel">
+                <div class="panel-title">Trust Labels</div>
+                <div>{trust_labels_html}</div>
+            </div>
+            
+            <div class="panel">
+                <div class="panel-title">Schema Info</div>
+                {f'<div class="field-value mono">{json_module.dumps(schema_info, indent=2)}</div>' if schema_info else '<div class="empty-state">No schema info</div>'}
+            </div>
+        </div>
+        
+        <div class="grid-2">
+            <div class="panel">
+                <div class="panel-title">Version History</div>
+                {versions_html}
+            </div>
+            
+            <div class="panel">
+                <div class="panel-title">Drift Timeline</div>
+                <table>
+                    <thead>
+                        <tr><th>Type</th><th>Severity</th><th>Status</th><th>Detected</th><th>Evidence</th></tr>
+                    </thead>
+                    <tbody>{drift_rows}</tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <div id="toast" class="toast"></div>
+    <script>
+        function showToast(message, type) {{
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = 'toast ' + type;
+            toast.style.display = 'block';
+            setTimeout(() => toast.style.display = 'none', 3000);
+        }}
+        
+        document.getElementById('btn-recompute').addEventListener('click', async function() {{
+            this.disabled = true;
+            this.textContent = 'Recomputing...';
+            try {{
+                const res = await fetch('/api/aam/infer', {{ method: 'POST' }});
+                const data = await res.json();
+                showToast('Recomputed: ' + data.pipes_created + ' pipes processed', 'success');
+                setTimeout(() => location.reload(), 1500);
+            }} catch (e) {{
+                showToast('Error: ' + e.message, 'error');
+            }}
+            this.disabled = false;
+            this.textContent = 'Recompute Declaration';
+        }});
+        
+        document.getElementById('btn-create-tee').addEventListener('click', async function() {{
+            this.disabled = true;
+            try {{
+                const res = await fetch('/api/tee/requests', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{ pipe_id: '{pipe_id}', target_system: 'default', tee_type: 'api_proxy' }})
+                }});
+                const data = await res.json();
+                if (res.ok) {{
+                    showToast('Tee request created: ' + data.tee_id, 'success');
+                }} else {{
+                    showToast('Error: ' + (data.detail || 'Failed'), 'error');
+                }}
+            }} catch (e) {{
+                showToast('Error: ' + e.message, 'error');
+            }}
+            this.disabled = false;
+        }});
+    </script>
+</body>
+</html>
+""")
+
+
+@app.get("/ui/candidates", response_class=HTMLResponse, include_in_schema=False)
+async def ui_candidates_list(status: Optional[str] = Query(None)):
+    """Candidates Screen"""
+    candidates = list_candidates(status=status)
+    
+    all_candidates = list_candidates()
+    statuses = sorted(set(c.get("status", "") for c in all_candidates if c.get("status")))
+    
+    status_options = '<option value="">All Statuses</option>' + ''.join(
+        f'<option value="{s}"{" selected" if s == status else ""}>{s.title()}</option>' for s in statuses
+    )
+    
+    rows_html = ""
+    for c in candidates:
+        candidate_id = c.get("candidate_id", "")
+        findings = c.get("findings", [])
+        status_val = c.get("status", "new")
+        matched_pipe = c.get("matched_pipe_id")
+        priority = c.get("priority_score")
+        
+        match_btn = f'<button class="btn btn-sm" onclick="matchCandidate(\'{candidate_id}\')">Match</button>' if status_val not in ['connected', 'deferred'] else ''
+        defer_btn = f'<button class="btn btn-sm btn-danger" onclick="deferCandidate(\'{candidate_id}\')">Defer</button>' if status_val not in ['connected', 'deferred'] else ''
+        tee_btn = f'<button class="btn btn-sm" onclick="createTee(\'{candidate_id}\')">Tee</button>' if status_val == 'connected' else ''
+        
+        rows_html += f"""
+        <tr data-testid="candidate-row-{candidate_id}">
+            <td>{c.get('asset_key', '-')}</td>
+            <td>{c.get('vendor_name', '-')}</td>
+            <td>{c.get('category', '-')}</td>
+            <td>{priority if priority else '-'}</td>
+            <td><span class="badge badge-{status_val}">{status_val}</span></td>
+            <td>{f'<a href="/ui/pipes/{matched_pipe}">{matched_pipe[:8]}...</a>' if matched_pipe else '-'}</td>
+            <td>{len(findings)}</td>
+            <td class="actions">{match_btn}{defer_btn}{tee_btn}</td>
+        </tr>
+        """
+    
+    if not candidates:
+        rows_html = '<tr><td colspan="8" class="empty-state">No candidates found. Create candidates via the API.</td></tr>'
+    
+    return HTMLResponse(content=f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Candidates - AAM</title>
+    {NAV_STYLE}
+    {UI_STYLE}
+</head>
+<body>
+    {ui_nav('candidates')}
+    <div class="container">
+        <h1>Connection Candidates</h1>
+        <div class="controls">
+            <select id="filter-status" data-testid="filter-status" onchange="applyFilter()">{status_options}</select>
+        </div>
+        <table data-testid="candidates-table">
+            <thead>
+                <tr>
+                    <th>Asset Key</th>
+                    <th>Vendor</th>
+                    <th>Category</th>
+                    <th>Priority</th>
+                    <th>Status</th>
+                    <th>Matched Pipe</th>
+                    <th>Findings</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="candidates-body">{rows_html}</tbody>
+        </table>
+    </div>
+    <div id="toast" class="toast"></div>
+    <script>
+        function showToast(message, type) {{
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = 'toast ' + type;
+            toast.style.display = 'block';
+            setTimeout(() => toast.style.display = 'none', 3000);
+        }}
+        
+        function applyFilter() {{
+            const status = document.getElementById('filter-status').value;
+            const params = new URLSearchParams();
+            if (status) params.set('status', status);
+            window.location.href = '/ui/candidates' + (params.toString() ? '?' + params.toString() : '');
+        }}
+        
+        async function matchCandidate(candidateId) {{
+            const pipeId = prompt('Enter Pipe ID to match (leave empty for auto-match):');
+            try {{
+                const body = pipeId ? {{ pipe_id: pipeId }} : {{}};
+                const res = await fetch('/api/candidates/' + candidateId + '/match', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify(body)
+                }});
+                const data = await res.json();
+                if (res.ok) {{
+                    showToast('Matched to pipe: ' + data.matched_pipe_id, 'success');
+                    setTimeout(() => location.reload(), 1500);
+                }} else {{
+                    showToast('Error: ' + (data.detail || 'Match failed'), 'error');
+                }}
+            }} catch (e) {{
+                showToast('Error: ' + e.message, 'error');
+            }}
+        }}
+        
+        async function deferCandidate(candidateId) {{
+            const reason = prompt('Reason for deferring:');
+            if (!reason) return;
+            try {{
+                const res = await fetch('/api/candidates/' + candidateId + '/defer', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{ reason: reason }})
+                }});
+                const data = await res.json();
+                if (res.ok) {{
+                    showToast('Candidate deferred', 'success');
+                    setTimeout(() => location.reload(), 1500);
+                }} else {{
+                    showToast('Error: ' + (data.detail || 'Failed'), 'error');
+                }}
+            }} catch (e) {{
+                showToast('Error: ' + e.message, 'error');
+            }}
+        }}
+        
+        async function createTee(candidateId) {{
+            try {{
+                const res = await fetch('/api/tee/requests', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{ candidate_id: candidateId, target_system: 'default', tee_type: 'api_proxy' }})
+                }});
+                const data = await res.json();
+                if (res.ok) {{
+                    showToast('Tee request created: ' + data.tee_id, 'success');
+                }} else {{
+                    showToast('Error: ' + (data.detail || 'Failed'), 'error');
+                }}
+            }} catch (e) {{
+                showToast('Error: ' + e.message, 'error');
+            }}
+        }}
+    </script>
+</body>
+</html>
+""")
+
+
+@app.get("/ui/drift", response_class=HTMLResponse, include_in_schema=False)
+async def ui_drift_list(status: Optional[str] = Query(None)):
+    """Drift & Health Screen"""
+    all_events = list_all_drift_events(limit=500)
+    
+    if status:
+        all_events = [e for e in all_events if e.get("status") == status]
+    
+    schema_drift = [e for e in all_events if e.get("drift_type") == "schema"]
+    contract_drift = [e for e in all_events if e.get("drift_type") == "contract"]
+    freshness_drift = [e for e in all_events if e.get("drift_type") == "freshness"]
+    
+    status_options = f'''
+        <option value="">All Statuses</option>
+        <option value="open"{"selected" if status == "open" else ""}>Open</option>
+        <option value="acknowledged"{"selected" if status == "acknowledged" else ""}>Acknowledged</option>
+        <option value="suppressed"{"selected" if status == "suppressed" else ""}>Suppressed</option>
+    '''
+    
+    def make_drift_table(events, section_id):
+        if not events:
+            return '<div class="empty-state">No drift events in this category</div>'
+        
+        rows = ""
+        for e in events:
+            drift_id = e.get("drift_id", "")
+            pipe_id = e.get("pipe_id", "")
+            severity = e.get("severity", "medium")
+            status_val = e.get("status", "open")
+            detected = e.get("detected_at", "")[:16] if e.get("detected_at") else "-"
+            evidence = f"{e.get('old_value', '')[:20]}→{e.get('new_value', '')[:20]}" if e.get('old_value') else "-"
+            
+            ack_btn = f'<button class="btn btn-sm" onclick="ackDrift(\'{drift_id}\')">Ack</button>' if status_val == "open" else ""
+            supp_btn = f'<button class="btn btn-sm btn-danger" onclick="suppressDrift(\'{drift_id}\')">Suppress</button>' if status_val in ["open", "acknowledged"] else ""
+            
+            rows += f"""
+            <tr data-testid="drift-row-{drift_id}">
+                <td><a href="/ui/pipes/{pipe_id}">{pipe_id[:12]}...</a></td>
+                <td>{e.get('drift_type', '-')}</td>
+                <td><span class="badge badge-{severity}">{severity}</span></td>
+                <td><span class="badge badge-{status_val}">{status_val}</span></td>
+                <td>{detected}</td>
+                <td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;font-size:0.75rem;">{evidence}</td>
+                <td class="actions">{ack_btn}{supp_btn}</td>
+            </tr>
+            """
+        
+        return f"""
+        <table>
+            <thead>
+                <tr><th>Pipe ID</th><th>Type</th><th>Severity</th><th>Status</th><th>First Seen</th><th>Evidence</th><th>Actions</th></tr>
+            </thead>
+            <tbody>{rows}</tbody>
+        </table>
+        """
+    
+    return HTMLResponse(content=f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Drift & Health - AAM</title>
+    {NAV_STYLE}
+    {UI_STYLE}
+</head>
+<body>
+    {ui_nav('drift')}
+    <div class="container">
+        <h1>Drift & Health</h1>
+        <div class="controls">
+            <button class="btn" id="btn-rerun-collector" data-testid="btn-rerun-collector">Re-run Collector</button>
+            <select id="filter-status" data-testid="filter-drift-status" onchange="applyFilter()">{status_options}</select>
+        </div>
+        
+        <div class="section">
+            <h2>Schema Drift ({len(schema_drift)})</h2>
+            {make_drift_table(schema_drift, 'schema')}
+        </div>
+        
+        <div class="section">
+            <h2>Contract Drift ({len(contract_drift)})</h2>
+            {make_drift_table(contract_drift, 'contract')}
+        </div>
+        
+        <div class="section">
+            <h2>Freshness Drift ({len(freshness_drift)})</h2>
+            {make_drift_table(freshness_drift, 'freshness')}
+        </div>
+    </div>
+    <div id="toast" class="toast"></div>
+    <script>
+        function showToast(message, type) {{
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = 'toast ' + type;
+            toast.style.display = 'block';
+            setTimeout(() => toast.style.display = 'none', 3000);
+        }}
+        
+        function applyFilter() {{
+            const status = document.getElementById('filter-status').value;
+            const params = new URLSearchParams();
+            if (status) params.set('status', status);
+            window.location.href = '/ui/drift' + (params.toString() ? '?' + params.toString() : '');
+        }}
+        
+        async function ackDrift(driftId) {{
+            try {{
+                const res = await fetch('/api/drift/' + driftId + '/ack', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{ by: 'operator' }})
+                }});
+                const data = await res.json();
+                if (res.ok) {{
+                    showToast('Drift acknowledged', 'success');
+                    setTimeout(() => location.reload(), 1000);
+                }} else {{
+                    showToast('Error: ' + (data.detail || 'Failed'), 'error');
+                }}
+            }} catch (e) {{
+                showToast('Error: ' + e.message, 'error');
+            }}
+        }}
+        
+        async function suppressDrift(driftId) {{
+            const notes = prompt('Suppression reason (optional):');
+            try {{
+                const res = await fetch('/api/drift/' + driftId + '/suppress', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{ by: 'operator', notes: notes || '' }})
+                }});
+                const data = await res.json();
+                if (res.ok) {{
+                    showToast('Drift suppressed', 'success');
+                    setTimeout(() => location.reload(), 1000);
+                }} else {{
+                    showToast('Error: ' + (data.detail || 'Failed'), 'error');
+                }}
+            }} catch (e) {{
+                showToast('Error: ' + e.message, 'error');
+            }}
+        }}
+        
+        document.getElementById('btn-rerun-collector').addEventListener('click', async function() {{
+            this.disabled = true;
+            this.textContent = 'Running...';
+            try {{
+                const res = await fetch('/api/collect/mock/run', {{ method: 'POST', headers: {{ 'Content-Type': 'application/json' }}, body: '{{}}' }});
+                const data = await res.json();
+                if (res.ok) {{
+                    showToast('Collector ran: ' + data.observations_created + ' observations', 'success');
+                    setTimeout(() => location.reload(), 1500);
+                }} else {{
+                    showToast('Error: ' + (data.detail || 'Failed'), 'error');
+                }}
+            }} catch (e) {{
+                showToast('Error: ' + e.message, 'error');
+            }}
+            this.disabled = false;
+            this.textContent = 'Re-run Collector';
+        }});
+    </script>
+</body>
+</html>
+""")
+
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
