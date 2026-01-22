@@ -193,6 +193,9 @@ def init_db():
     _add_column_if_not_exists(cursor, "connection_candidates", "match_reason", "TEXT")
     _add_column_if_not_exists(cursor, "connection_candidates", "deferred_reason", "TEXT")
     
+    # Add fabric_plane column to declared_pipes (Framework Stability phase)
+    _add_column_if_not_exists(cursor, "declared_pipes", "fabric_plane", "TEXT DEFAULT 'API_GATEWAY'")
+    
     # Create indexes
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_candidates_status ON connection_candidates(status)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_candidates_asset_key ON connection_candidates(asset_key)")
@@ -359,14 +362,15 @@ def create_pipe(pipe_data: dict) -> dict:
     
     cursor.execute("""
         INSERT INTO declared_pipes (
-            pipe_id, display_name, modality, source_system, transport_kind,
+            pipe_id, display_name, fabric_plane, modality, source_system, transport_kind,
             endpoint_ref, entity_scope, identity_keys, change_semantics,
             provenance, owner_signals, trust_labels, schema_info, freshness,
             access_info, version, schema_hash, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         pipe_id,
         pipe_data["display_name"],
+        pipe_data.get("fabric_plane", "API_GATEWAY"),
         pipe_data["modality"],
         pipe_data["source_system"],
         pipe_data["transport_kind"],
@@ -412,21 +416,30 @@ def get_pipe(pipe_id: str) -> Optional[dict]:
     return None
 
 
-def list_pipes(source_system: Optional[str] = None, limit: int = 100) -> list[dict]:
-    """List pipes with optional source filter"""
+def list_pipes(source_system: Optional[str] = None, fabric_plane: Optional[str] = None, limit: int = 100) -> list[dict]:
+    """List pipes with optional source and fabric_plane filters"""
     conn = get_connection()
     cursor = conn.cursor()
     
+    conditions = []
+    params = []
+    
     if source_system:
-        cursor.execute(
-            "SELECT * FROM declared_pipes WHERE source_system = ? ORDER BY created_at DESC LIMIT ?",
-            (source_system, limit)
-        )
+        conditions.append("source_system = ?")
+        params.append(source_system)
+    
+    if fabric_plane:
+        conditions.append("fabric_plane = ?")
+        params.append(fabric_plane)
+    
+    if conditions:
+        where_clause = " WHERE " + " AND ".join(conditions)
+        query = f"SELECT * FROM declared_pipes{where_clause} ORDER BY fabric_plane, source_system, created_at DESC LIMIT ?"
     else:
-        cursor.execute(
-            "SELECT * FROM declared_pipes ORDER BY created_at DESC LIMIT ?",
-            (limit,)
-        )
+        query = "SELECT * FROM declared_pipes ORDER BY fabric_plane, source_system, created_at DESC LIMIT ?"
+    
+    params.append(limit)
+    cursor.execute(query, params)
     
     rows = cursor.fetchall()
     conn.close()
@@ -529,9 +542,14 @@ def _row_to_pipe(row) -> dict:
     schema_info = json.loads(row["schema_info"]) if row["schema_info"] else None
     access_info = json.loads(row["access_info"]) if row["access_info"] else None
     
+    # Handle fabric_plane with fallback for older records
+    keys = row.keys()
+    fabric_plane = row["fabric_plane"] if "fabric_plane" in keys and row["fabric_plane"] else "API_GATEWAY"
+    
     return {
         "pipe_id": row["pipe_id"],
         "display_name": row["display_name"],
+        "fabric_plane": fabric_plane,
         "modality": row["modality"],
         "source_system": row["source_system"],
         "transport_kind": row["transport_kind"],

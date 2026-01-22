@@ -71,6 +71,9 @@ def infer_single_pipe(observation: dict) -> Optional[dict]:
     schema_sample = observation.get("schema_sample")
     metadata = observation.get("metadata", {})
     
+    # Infer fabric plane
+    fabric_plane = infer_fabric_plane(endpoint_info, metadata)
+    
     # Infer modality
     modality = infer_modality(endpoint_info, metadata)
     
@@ -115,6 +118,7 @@ def infer_single_pipe(observation: dict) -> Optional[dict]:
     return {
         "pipe_id": str(uuid.uuid4()),
         "display_name": display_name,
+        "fabric_plane": fabric_plane,
         "modality": modality,
         "source_system": source_system,
         "transport_kind": transport_kind,
@@ -129,6 +133,39 @@ def infer_single_pipe(observation: dict) -> Optional[dict]:
         "freshness": None,
         "access": None
     }
+
+
+def infer_fabric_plane(endpoint_info: dict, metadata: dict) -> str:
+    """Infer the integration fabric control plane"""
+    url = endpoint_info.get("url", "").lower()
+    vendor = metadata.get("vendor", "").lower()
+    category = metadata.get("category", "").lower()
+    fabric = metadata.get("fabric_plane", "").upper()
+    
+    # If explicitly set in metadata, use that
+    if fabric in ["IPAAS", "API_GATEWAY", "EVENT_BUS", "DATA_WAREHOUSE"]:
+        return fabric
+    
+    # iPaaS indicators
+    if category == "ipaas" or vendor in ["workato", "mulesoft", "boomi", "zapier", "tray", "celigo"]:
+        return "IPAAS"
+    
+    # Event bus indicators
+    if any(x in url for x in ["kafka", "event", "pubsub", "queue", "stream", "sns", "sqs"]):
+        return "EVENT_BUS"
+    if any(x in vendor for x in ["kafka", "confluent", "rabbitmq", "eventbridge"]):
+        return "EVENT_BUS"
+    
+    # Data warehouse indicators
+    if any(x in url for x in ["warehouse", "bigquery", "snowflake", "redshift", "databricks", "synapse"]):
+        return "DATA_WAREHOUSE"
+    if any(x in vendor for x in ["snowflake", "bigquery", "redshift", "databricks"]):
+        return "DATA_WAREHOUSE"
+    if category in ["data_warehouse", "analytics", "bi"]:
+        return "DATA_WAREHOUSE"
+    
+    # Default to API Gateway for REST/API endpoints
+    return "API_GATEWAY"
 
 
 def infer_modality(endpoint_info: dict, metadata: dict) -> str:
