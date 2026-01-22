@@ -24,7 +24,18 @@ from .db import (
     list_all_drift_events,
     list_collectors,
     get_unprocessed_observations,
-    mark_observation_processed
+    mark_observation_processed,
+    create_collector_run,
+    complete_collector_run,
+    get_collector_run,
+    list_collector_runs,
+    update_drift_status,
+    update_candidate_match,
+    update_candidate_deferred,
+    list_tee_requests,
+    update_tee_request_status,
+    create_tee_request,
+    get_drift_event
 )
 from .collectors.mock import run_mock_collector
 from .inference import infer_pipes_from_observations
@@ -431,3 +442,230 @@ async def get_all_drift_events(limit: int = Query(100, description="Maximum numb
     """List all drift events"""
     events = list_all_drift_events(limit=limit)
     return {"drift_events": events, "count": len(events)}
+
+
+# ============================================================================
+# AAM V1 PRACTICAL INTERFACE ENDPOINTS
+# ============================================================================
+
+# --- Collector Run Tracking ---
+
+@app.post("/api/collect/{collector}/run", tags=["Collectors"])
+async def run_collector(collector: str, request: Optional[MockCollectorRequest] = None):
+    """Run a collector and track the run"""
+    collector_id = f"{collector}-collector-001" if collector == "mock" else collector
+    
+    run_id = create_collector_run(collector_id)
+    
+    try:
+        if collector == "mock":
+            candidate_id = request.candidate_id if request else None
+            observations = run_mock_collector(candidate_id=candidate_id)
+            complete_collector_run(run_id, "completed", len(observations))
+            return {
+                "run_id": run_id,
+                "collector": collector,
+                "status": "completed",
+                "observations_created": len(observations),
+                "observations": observations
+            }
+        else:
+            complete_collector_run(run_id, "failed", 0, f"Unknown collector: {collector}")
+            raise HTTPException(status_code=400, detail=f"Unknown collector: {collector}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        complete_collector_run(run_id, "failed", 0, str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/collect/runs", tags=["Collectors"])
+async def get_collector_runs(
+    collector_id: Optional[str] = Query(None, description="Filter by collector ID"),
+    limit: int = Query(100, description="Maximum number of runs")
+):
+    """List collector runs"""
+    runs = list_collector_runs(collector_id=collector_id, limit=limit)
+    return {"runs": runs, "count": len(runs)}
+
+
+@app.get("/api/collect/runs/{run_id}", tags=["Collectors"])
+async def get_single_collector_run(run_id: str):
+    """Get a specific collector run"""
+    run = get_collector_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return run
+
+
+# --- Candidate Match/Defer ---
+
+class MatchRequest(BaseModel):
+    pipe_id: Optional[str] = None
+
+
+class DeferRequest(BaseModel):
+    reason: str
+
+
+@app.post("/api/candidates/{candidate_id}/match", tags=["Candidates"])
+async def match_candidate(candidate_id: str, request: MatchRequest):
+    """Attempt to match candidate to a pipe"""
+    candidate = get_candidate(candidate_id)
+    if not candidate:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    
+    pipe_id = request.pipe_id
+    score = 1.0
+    reason = "Manual match"
+    
+    if not pipe_id:
+        pipes = list_pipes(source_system=candidate.get("vendor_name"))
+        if pipes:
+            pipe_id = pipes[0]["pipe_id"]
+            score = 0.8
+            reason = "Auto-matched by vendor name"
+        else:
+            raise HTTPException(
+                status_code=400, 
+                detail="No pipe_id provided and no auto-match found. Provide a pipe_id or defer the candidate."
+            )
+    else:
+        pipe = get_pipe(pipe_id)
+        if not pipe:
+            raise HTTPException(status_code=404, detail="Pipe not found")
+    
+    updated = update_candidate_match(candidate_id, pipe_id, score, reason)
+    if not updated:
+        raise HTTPException(status_code=500, detail="Failed to update candidate")
+    
+    return {
+        "candidate_id": candidate_id,
+        "matched_pipe_id": pipe_id,
+        "match_score": score,
+        "match_reason": reason,
+        "status": "connected"
+    }
+
+
+@app.post("/api/candidates/{candidate_id}/defer", tags=["Candidates"])
+async def defer_candidate(candidate_id: str, request: DeferRequest):
+    """Defer a candidate with a reason"""
+    candidate = get_candidate(candidate_id)
+    if not candidate:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    
+    updated = update_candidate_deferred(candidate_id, request.reason)
+    if not updated:
+        raise HTTPException(status_code=500, detail="Failed to defer candidate")
+    
+    return {
+        "candidate_id": candidate_id,
+        "status": "deferred",
+        "deferred_reason": request.reason
+    }
+
+
+# --- Drift Ack/Suppress ---
+
+class DriftActionRequest(BaseModel):
+    by: Optional[str] = "operator"
+    notes: Optional[str] = None
+
+
+@app.post("/api/drift/{drift_id}/ack", tags=["Drift"])
+async def acknowledge_drift(drift_id: str, request: DriftActionRequest):
+    """Acknowledge a drift event"""
+    drift = get_drift_event(drift_id)
+    if not drift:
+        raise HTTPException(status_code=404, detail="Drift event not found")
+    
+    updated = update_drift_status(drift_id, "acknowledged", by=request.by, notes=request.notes)
+    if not updated:
+        raise HTTPException(status_code=500, detail="Failed to acknowledge drift event")
+    
+    return updated
+
+
+@app.post("/api/drift/{drift_id}/suppress", tags=["Drift"])
+async def suppress_drift(drift_id: str, request: DriftActionRequest):
+    """Suppress a drift event"""
+    drift = get_drift_event(drift_id)
+    if not drift:
+        raise HTTPException(status_code=404, detail="Drift event not found")
+    
+    updated = update_drift_status(drift_id, "suppressed", by=request.by, notes=request.notes)
+    if not updated:
+        raise HTTPException(status_code=500, detail="Failed to suppress drift event")
+    
+    return updated
+
+
+# --- Tee Requests ---
+
+class TeeRequestCreate(BaseModel):
+    pipe_id: Optional[str] = None
+    candidate_id: Optional[str] = None
+    target_system: str
+    tee_type: str = "api_proxy"
+    configuration: dict = {}
+    notes: Optional[str] = None
+
+
+class TeeStatusUpdate(BaseModel):
+    status: str
+
+
+@app.post("/api/tee/requests", tags=["Tee Requests"])
+async def create_tee_request_endpoint(request: TeeRequestCreate):
+    """Create a new tee request"""
+    pipe_id = request.pipe_id
+    
+    if request.candidate_id and not pipe_id:
+        candidate = get_candidate(request.candidate_id)
+        if not candidate:
+            raise HTTPException(status_code=404, detail="Candidate not found")
+        if candidate.get("matched_pipe_id"):
+            pipe_id = candidate["matched_pipe_id"]
+        else:
+            raise HTTPException(
+                status_code=400, 
+                detail="Candidate has no matched pipe. Provide pipe_id or match the candidate first."
+            )
+    
+    if not pipe_id:
+        raise HTTPException(status_code=400, detail="Either pipe_id or a matched candidate_id is required")
+    
+    pipe = get_pipe(pipe_id)
+    if not pipe:
+        raise HTTPException(status_code=404, detail="Pipe not found")
+    
+    tee_data = {
+        "pipe_id": pipe_id,
+        "target_system": request.target_system,
+        "tee_type": request.tee_type,
+        "configuration": request.configuration
+    }
+    
+    result = create_tee_request(tee_data)
+    return result
+
+
+@app.get("/api/tee/requests", tags=["Tee Requests"])
+async def get_tee_requests(status: Optional[str] = Query(None, description="Filter by status")):
+    """List tee requests"""
+    requests = list_tee_requests(status=status)
+    return {"tee_requests": requests, "count": len(requests)}
+
+
+@app.post("/api/tee/requests/{tee_id}/status", tags=["Tee Requests"])
+async def update_tee_status(tee_id: str, request: TeeStatusUpdate):
+    """Update tee request status"""
+    if request.status not in ["approved", "verified"]:
+        raise HTTPException(status_code=400, detail="Status must be 'approved' or 'verified'")
+    
+    updated = update_tee_request_status(tee_id, request.status)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Tee request not found")
+    
+    return updated

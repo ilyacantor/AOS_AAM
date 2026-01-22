@@ -977,6 +977,57 @@ def list_tee_requests(status: Optional[str] = None) -> list[dict]:
     } for row in rows]
 
 
+def get_drift_event(drift_id: str) -> Optional[dict]:
+    """Get a drift event by ID"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM drift_events WHERE drift_id = ?", (drift_id,))
+    row = cursor.fetchone()
+    conn.close()
+    
+    if row:
+        return _row_to_drift_event(row)
+    return None
+
+
+def create_tee_request(tee_data: dict) -> dict:
+    """Create a new tee request"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    tee_id = str(uuid.uuid4())
+    now = datetime.utcnow().isoformat()
+    
+    cursor.execute("""
+        INSERT INTO tee_requests (
+            tee_id, pipe_id, target_system, tee_type, configuration, status, requested_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (
+        tee_id,
+        tee_data["pipe_id"],
+        tee_data["target_system"],
+        tee_data.get("tee_type", "api_proxy"),
+        json.dumps(tee_data.get("configuration", {})),
+        "requested",
+        now
+    ))
+    
+    conn.commit()
+    conn.close()
+    
+    return {
+        "tee_id": tee_id,
+        "pipe_id": tee_data["pipe_id"],
+        "target_system": tee_data["target_system"],
+        "tee_type": tee_data.get("tee_type", "api_proxy"),
+        "configuration": tee_data.get("configuration", {}),
+        "status": "requested",
+        "requested_at": now,
+        "approved_at": None,
+        "verified_at": None
+    }
+
+
 def update_tee_request_status(tee_id: str, status: str) -> Optional[dict]:
     """Update tee request status (requested, approved, verified)"""
     conn = get_connection()
