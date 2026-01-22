@@ -109,6 +109,41 @@ samples/
 | freshness | string? | Data freshness indicator |
 | access | object? | Access information (NO SECRETS) |
 
+## Operator UI (v1 Practical Interface)
+
+**The only 3 operator jobs AAM supports:**
+1. See what pipes exist (inventory + metadata + trust state)
+2. See what's wrong (drift/health/coverage gaps, with evidence)
+3. Take a bounded action (re-run collectors, approve/track tee requests, set owner tags, export to DCL)
+
+### UI Screens
+
+| Route | Screen | Purpose |
+|-------|--------|---------|
+| `/ui/pipes` | Pipes Inventory | View all pipes, run collectors, export to DCL |
+| `/ui/pipes/{id}` | Pipe Detail | View pipe details, provenance, drift timeline |
+| `/ui/candidates` | Candidates | View AOD candidates, match/defer, create tee requests |
+| `/ui/drift` | Drift & Health | View drift events, acknowledge/suppress |
+
+### UI Controls (Real Actions Only)
+
+**Allowed v1 actions:**
+- Run collectors (with run tracking)
+- Rerun inference
+- Tag/override owner metadata
+- Create/track tee request artifacts
+- Suppress/ack drift alerts
+- Export declared pipes snapshot
+- Match candidate to pipe
+- Defer candidate with reason
+
+**Not allowed (not implemented):**
+- "Fix drift automatically"
+- "Connect now"
+- "Provision connector"
+- "Rotate secrets"
+- "Deploy tee"
+
 ## API Endpoints
 
 ### Candidate Intake (from AOD)
@@ -119,6 +154,8 @@ samples/
 | GET | `/api/aam/candidates` | List candidates (optional status filter) |
 | GET | `/api/aam/candidates/{id}` | Get single candidate |
 | PATCH | `/api/aam/candidates/{id}/status` | Update candidate status |
+| POST | `/api/candidates/{id}/match` | Match candidate to pipe |
+| POST | `/api/candidates/{id}/defer` | Defer candidate with reason |
 
 **Candidate Statuses:** `new`, `triaged`, `connected`, `deferred`
 
@@ -127,7 +164,9 @@ samples/
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/api/aam/collectors` | List all collectors |
-| POST | `/api/aam/collectors/mock/run` | Run mock collector |
+| POST | `/api/collect/{collector}/run` | Run collector (with tracking) |
+| GET | `/api/collect/runs` | List collector runs |
+| GET | `/api/collect/runs/{run_id}` | Get specific run details |
 | POST | `/api/aam/infer` | Process observations into pipes |
 
 ### Pipe Registry (for DCL)
@@ -150,6 +189,16 @@ samples/
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/api/drift` | List all drift events |
+| POST | `/api/drift/{drift_id}/ack` | Acknowledge drift event |
+| POST | `/api/drift/{drift_id}/suppress` | Suppress drift event |
+
+### Tee Requests
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/tee/requests` | Create tee request |
+| GET | `/api/tee/requests` | List tee requests |
+| POST | `/api/tee/requests/{id}/status` | Update tee request status |
 
 ### Health
 
@@ -224,14 +273,21 @@ GET /api/export/dcl/declared-pipes
 
 ## MVP Roadmap
 
-### MVP-0 (Current)
+### MVP-0 (Complete)
 - ✅ Candidate intake API
 - ✅ Mock collector
 - ✅ DeclaredPipe inference
 - ✅ Pipe registry APIs
 - ✅ Schema hash + drift detection
 
-### MVP-1 (Next)
+### MVP-1 (Current - Practical Interface)
+- ✅ 4 operator UI screens (Pipes, Pipe Detail, Candidates, Drift & Health)
+- ✅ Collector run tracking
+- ✅ Candidate match/defer workflows
+- ✅ Drift acknowledge/suppress
+- ✅ Tee request management
+
+### MVP-2 (Next)
 - One real collector (Salesforce API inventory)
 - Freshness drift detection
 - Ownership inference improvements
