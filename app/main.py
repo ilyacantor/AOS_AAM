@@ -570,6 +570,71 @@ async def ui_pipes_list(
             color: #94a3b8;
             text-transform: uppercase;
         }}
+        .modal-overlay {{
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(4px);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }}
+        .modal-overlay.active {{
+            display: flex;
+        }}
+        .modal-box {{
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 24px;
+            max-width: 400px;
+            width: 90%;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+        }}
+        .modal-title {{
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 12px;
+            color: #f1f5f9;
+        }}
+        .modal-message {{
+            font-size: 0.9rem;
+            color: #94a3b8;
+            margin-bottom: 20px;
+            line-height: 1.5;
+        }}
+        .modal-actions {{
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+        }}
+        .modal-btn {{
+            padding: 8px 20px;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s;
+        }}
+        .modal-btn-cancel {{
+            background: #334155;
+            color: #94a3b8;
+        }}
+        .modal-btn-cancel:hover {{
+            background: #475569;
+        }}
+        .modal-btn-confirm {{
+            background: #22d3ee;
+            color: #0f172a;
+        }}
+        .modal-btn-confirm:hover {{
+            background: #06b6d4;
+        }}
     </style>
 </head>
 <body>
@@ -610,7 +675,47 @@ async def ui_pipes_list(
         </table>
     </div>
     <div id="toast" class="toast"></div>
+    
+    <div id="confirm-modal" class="modal-overlay" data-testid="confirm-modal">
+        <div class="modal-box">
+            <div class="modal-title" id="modal-title">Confirm Action</div>
+            <div class="modal-message" id="modal-message">Are you sure?</div>
+            <div class="modal-actions">
+                <button class="modal-btn modal-btn-cancel" id="modal-cancel" data-testid="modal-cancel">Cancel</button>
+                <button class="modal-btn modal-btn-confirm" id="modal-confirm" data-testid="modal-confirm">Continue</button>
+            </div>
+        </div>
+    </div>
+    
     <script>
+        let modalResolve = null;
+        
+        function showConfirmModal(title, message) {{
+            return new Promise((resolve) => {{
+                modalResolve = resolve;
+                document.getElementById('modal-title').textContent = title;
+                document.getElementById('modal-message').textContent = message;
+                document.getElementById('confirm-modal').classList.add('active');
+            }});
+        }}
+        
+        document.getElementById('modal-cancel').addEventListener('click', () => {{
+            document.getElementById('confirm-modal').classList.remove('active');
+            if (modalResolve) modalResolve(false);
+        }});
+        
+        document.getElementById('modal-confirm').addEventListener('click', () => {{
+            document.getElementById('confirm-modal').classList.remove('active');
+            if (modalResolve) modalResolve(true);
+        }});
+        
+        document.getElementById('confirm-modal').addEventListener('click', (e) => {{
+            if (e.target.id === 'confirm-modal') {{
+                document.getElementById('confirm-modal').classList.remove('active');
+                if (modalResolve) modalResolve(false);
+            }}
+        }});
+        
         function showToast(message, type) {{
             const toast = document.getElementById('toast');
             toast.textContent = message;
@@ -651,7 +756,11 @@ async def ui_pipes_list(
         }}
         
         async function loadPreset(presetId) {{
-            if (!confirm('This will replace all existing data with the preset. Continue?')) return;
+            const confirmed = await showConfirmModal(
+                'Load Preset',
+                'This will replace all existing data with the preset. Any current pipes, candidates, and drift events will be cleared.'
+            );
+            if (!confirmed) return;
             try {{
                 const res = await fetch('/api/presets/' + presetId + '/load', {{ method: 'POST' }});
                 const data = await res.json();
