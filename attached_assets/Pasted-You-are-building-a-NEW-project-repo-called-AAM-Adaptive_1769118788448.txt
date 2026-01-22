@@ -1,0 +1,181 @@
+You are building a NEW project/repo called AAM (Adaptive API Mesh).
+
+This repo is independent.
+You cannot assume access to AOD or DCL codebases.
+You ONLY rely on the contracts defined below.
+
+AAM’s role:
+- ingest connection intent from AOD
+- attach to existing enterprise integration fabric (control planes)
+- inventory reusable data pipes
+- infer minimal semantics about those pipes
+- publish DeclaredPipes for DCL to consume
+
+AAM must NOT:
+- move data
+- transform data
+- act as an iPaaS
+- act as a Kafka / streaming platform
+- build per-app SaaS connectors
+
+Positioning rule:
+“We do not change how data moves. We make its behavior and meaning explicit.”
+
+---
+
+## INPUT CONTRACT (FROM AOD)
+
+You must accept ConnectionCandidate objects via:
+
+POST /api/aam/candidates
+
+ConnectionCandidate fields:
+- asset_key
+- vendor_name
+- display_name
+- category
+- governance_status
+- findings[]
+- sor_tagging
+- evidence_refs[]
+- signals_summary
+- known_endpoints
+- preferred_modality
+- priority_score
+
+AAM must treat these as INTENT + CONTEXT.
+AAM decides how (or whether) connectivity exists.
+
+---
+
+## OUTPUT CONTRACT (TO DCL)
+
+AAM’s ONLY product is a registry of DeclaredPipes.
+
+DeclaredPipe model:
+
+DeclaredPipe:
+- pipe_id: uuid
+- display_name: str
+- modality: enum
+    CONTROL_PLANE
+    DECLARED_INTERFACE
+    PASSIVE_SUBSCRIPTION
+    MINIMAL_TEE
+- source_system: str
+- transport_kind: enum
+    API | EVENT_STREAM | TABLE | FILE | WEBHOOK
+- endpoint_ref: dict           # opaque reference only
+- entity_scope: list[str]
+- identity_keys: list[str]
+- change_semantics: enum
+    SNAPSHOT | APPEND_ONLY | CDC_UPSERT | UNKNOWN
+- provenance:
+    discovered_by
+    discovered_at
+    lineage_hints[]
+- owner_signals: list[str]
+- trust_labels: list[str]
+- schema: optional
+    schema_hash
+    schema_ref
+    schema_version
+- freshness: optional
+- access: optional
+    auth_ref (NO SECRETS)
+
+Unknown or weak signals MUST become trust_labels, not blockers.
+
+---
+
+## ARCHITECTURE REQUIREMENTS
+
+1) Candidate Intake
+   - POST /api/aam/candidates
+   - persist candidates with status (new / triaged / connected / deferred)
+
+2) Collectors (READ-ONLY)
+   Implement collectors that attach to EXISTING FABRIC CONTROL PLANES:
+   - iPaaS (Workato / MuleSoft / Boomi) inventory
+   - API Gateway / API Manager inventory
+   - Data Warehouse metadata
+   - (Event bus later)
+
+   Start with:
+   - mock collector (JSON)
+   - ONE real collector if feasible
+
+3) Inference Engine
+   Convert observations into DeclaredPipes by inferring:
+   - entity scope
+   - identity keys
+   - change semantics
+   - provenance
+   - ownership signals
+
+4) Pipe Registry
+   - store current DeclaredPipes
+   - version history
+   - drift events (schema, freshness, contract)
+
+5) Export for DCL
+   - GET /api/pipes
+   - GET /api/pipes/{pipe_id}
+   - GET /api/export/dcl/declared-pipes
+
+   DCL will pull. Do NOT push in v1.
+
+6) Minimal Tee
+   - generate TeeRequest artifacts ONLY
+   - track status (requested / approved / verified)
+   - do NOT modify client systems
+
+---
+
+## TECH STACK
+
+- Reuse structure and principles from prior “AOS Mesh” Replit project
+  (FastAPI + Pydantic + httpx, simple DB, no UI)
+- Prefer Postgres; SQLite acceptable for MVP
+- Deterministic, testable inference functions
+
+---
+
+## MVP DEFINITION
+
+MVP-0:
+- Candidate intake
+- Mock collector
+- DeclaredPipe inference
+- Pipe registry APIs
+- Schema hash + drift detection
+
+MVP-1:
+- One real collector
+- Freshness drift
+- Ownership inference
+
+STOP after MVP-1 unless directed otherwise.
+
+---
+
+## GUARDRAILS (NON-NEGOTIABLE)
+
+- No data movement
+- No transformations
+- No per-app SaaS connectors
+- No streaming runtime
+- No UI
+
+If something feels like “we’re building an iPaaS,” stop and label instead.
+
+---
+
+## DELIVERABLES
+
+- Running AAM service
+- API docs via FastAPI
+- Sample ConnectionCandidate JSON
+- Sample DeclaredPipe JSON
+- README explaining:
+  “AOD emits intent → AAM declares pipes → DCL unifies meaning”
