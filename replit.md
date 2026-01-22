@@ -292,6 +292,12 @@ GET /api/export/dcl/declared-pipes
 - Freshness drift detection
 - Ownership inference improvements
 
+## Documentation
+
+- **User Guide**: `docs/USER_GUIDE.md` - Plain-English guide explaining each screen, element, and workflow
+- **API Documentation**: `/docs` (Swagger UI) - Complete API endpoint documentation
+- **Sample Data**: `samples/` directory contains example JSON for candidates and pipes
+
 ## Deployment
 
 **Port Configuration:**
