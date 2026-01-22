@@ -118,6 +118,7 @@ NAV_HTML = """
         <a href="/ui/pipes" class="nav-link{pipes_active}">Pipes</a>
         <a href="/ui/candidates" class="nav-link{candidates_active}">Candidates</a>
         <a href="/ui/drift" class="nav-link{drift_active}">Drift & Health</a>
+        <a href="/ui/guide" class="nav-link{guide_active}">Guide</a>
         <a href="/docs" class="nav-link{docs_active}">API</a>
     </div>
 </nav>
@@ -198,7 +199,7 @@ async def root():
     </style>
 </head>
 <body>
-    {NAV_HTML.format(pipes_active="", candidates_active="", drift_active="", docs_active="")}
+    {NAV_HTML.format(pipes_active="", candidates_active="", drift_active="", guide_active="", docs_active="")}
     <div class="container">
         <h1>Adaptive API Mesh</h1>
         <p class="subtitle">AAM v0.1.0</p>
@@ -234,7 +235,7 @@ async def custom_swagger_ui():
     </style>
 </head>
 <body>
-    {NAV_HTML.format(pipes_active="", candidates_active="", drift_active="", docs_active=" active")}
+    {NAV_HTML.format(pipes_active="", candidates_active="", drift_active="", guide_active="", docs_active=" active")}
     <div id="swagger-ui"></div>
     <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
     <script>
@@ -266,7 +267,7 @@ async def custom_redoc():
     </style>
 </head>
 <body>
-    {NAV_HTML.format(pipes_active="", candidates_active="", drift_active="", docs_active="")}
+    {NAV_HTML.format(pipes_active="", candidates_active="", drift_active="", guide_active="", docs_active="")}
     <redoc spec-url='/openapi.json'></redoc>
     <script src="https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js"></script>
 </body>
@@ -413,6 +414,7 @@ def ui_nav(active: str = "") -> str:
         <a href="/ui/pipes" class="nav-link{active_class('pipes')}" data-testid="nav-pipes">Pipes</a>
         <a href="/ui/candidates" class="nav-link{active_class('candidates')}" data-testid="nav-candidates">Candidates</a>
         <a href="/ui/drift" class="nav-link{active_class('drift')}" data-testid="nav-drift">Drift & Health</a>
+        <a href="/ui/guide" class="nav-link{active_class('guide')}" data-testid="nav-guide">Guide</a>
         <a href="/docs" class="nav-link{active_class('docs')}" data-testid="nav-api">API</a>
     </div>
 </nav>
@@ -952,6 +954,277 @@ async def ui_candidates_list(status: Optional[str] = Query(None)):
             }}
         }}
     </script>
+</body>
+</html>
+""")
+
+
+@app.get("/ui/guide", response_class=HTMLResponse, include_in_schema=False)
+async def ui_guide():
+    """User Guide Screen"""
+    guide_style = """
+    <style>
+        .guide-container { max-width: 900px; margin: 0 auto; padding: 32px 24px; }
+        .guide-section { margin-bottom: 40px; }
+        .guide-section h2 { 
+            color: var(--cyan-400); 
+            border-bottom: 1px solid var(--slate-700); 
+            padding-bottom: 8px; 
+            margin-bottom: 16px;
+        }
+        .guide-section h3 { color: #e2e8f0; margin-top: 24px; margin-bottom: 12px; }
+        .guide-section p { color: var(--slate-400); line-height: 1.7; margin-bottom: 12px; }
+        .guide-section ul, .guide-section ol { color: var(--slate-400); padding-left: 24px; margin-bottom: 16px; }
+        .guide-section li { margin-bottom: 8px; line-height: 1.6; }
+        .guide-table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+        .guide-table th, .guide-table td { 
+            padding: 10px 14px; 
+            text-align: left; 
+            border: 1px solid var(--slate-700);
+        }
+        .guide-table th { 
+            background: rgba(30, 41, 59, 0.8); 
+            color: var(--cyan-400); 
+            font-weight: 600;
+            font-size: 0.85rem;
+        }
+        .guide-table td { color: #e2e8f0; }
+        .guide-code { 
+            font-family: 'Consolas', 'Monaco', monospace; 
+            background: rgba(15, 23, 42, 0.7); 
+            padding: 2px 6px; 
+            border-radius: 4px;
+            font-size: 0.85rem;
+            color: var(--cyan-400);
+        }
+        .guide-diagram {
+            background: rgba(15, 23, 42, 0.5);
+            border: 1px solid var(--slate-700);
+            border-radius: 8px;
+            padding: 16px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.9rem;
+            color: var(--cyan-400);
+            text-align: center;
+            margin: 16px 0;
+        }
+        .highlight { color: var(--cyan-400); font-weight: 500; }
+        .guide-card {
+            background: rgba(30, 41, 59, 0.6);
+            border: 1px solid var(--slate-700);
+            border-radius: 8px;
+            padding: 16px;
+            margin: 16px 0;
+        }
+        .guide-card-title { color: var(--cyan-400); font-weight: 600; margin-bottom: 8px; }
+        .toc { margin-bottom: 32px; }
+        .toc a { color: var(--cyan-400); display: block; padding: 6px 0; }
+        .toc a:hover { color: #ffffff; }
+    </style>
+    """
+    
+    return HTMLResponse(content=f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>User Guide - AAM</title>
+    {NAV_STYLE}
+    {UI_STYLE}
+    {guide_style}
+</head>
+<body>
+    {ui_nav('guide')}
+    <div class="guide-container">
+        <h1>AAM Operator User Guide</h1>
+        
+        <div class="toc panel">
+            <div class="panel-title">Quick Navigation</div>
+            <a href="#what-is-aam">What is AAM?</a>
+            <a href="#three-jobs">The Three Operator Jobs</a>
+            <a href="#pipes-screen">Pipes Inventory Screen</a>
+            <a href="#pipe-detail">Pipe Detail Screen</a>
+            <a href="#candidates-screen">Candidates Screen</a>
+            <a href="#drift-screen">Drift & Health Screen</a>
+            <a href="#workflows">Common Workflows</a>
+            <a href="#glossary">Glossary</a>
+        </div>
+        
+        <div class="guide-section" id="what-is-aam">
+            <h2>What is AAM?</h2>
+            <p><strong>AAM (Adaptive API Mesh)</strong> is the integration layer that inventories your enterprise's reusable data pipes and makes their behavior and meaning explicit. Think of it as a catalog of all the ways data can flow between your systems.</p>
+            
+            <h3>The Big Picture</h3>
+            <p>AAM sits between two other systems:</p>
+            <div class="guide-diagram">
+                AOD (discovers what exists) → <span class="highlight">AAM (catalogs the pipes)</span> → DCL (unifies meaning)
+            </div>
+            <ul>
+                <li><strong>AOD</strong> discovers what systems and connections exist in your enterprise and sends "connection candidates" to AAM</li>
+                <li><strong>AAM</strong> (this system) catalogs those connections as "declared pipes" with metadata about how they behave</li>
+                <li><strong>DCL</strong> consumes those declared pipes to build a unified understanding of your data</li>
+            </ul>
+            
+            <div class="guide-card">
+                <div class="guide-card-title">What AAM Does NOT Do</div>
+                <p>AAM does not move data, transform data, or act as an integration platform. It only <strong>observes</strong> and <strong>documents</strong> what already exists.</p>
+            </div>
+        </div>
+        
+        <div class="guide-section" id="three-jobs">
+            <h2>The Three Operator Jobs</h2>
+            <p>As an operator, AAM supports exactly three jobs:</p>
+            <ol>
+                <li><strong>See what pipes exist</strong> - View the inventory of data pipes with their metadata and trust state</li>
+                <li><strong>See what's wrong</strong> - Identify drift, health issues, and coverage gaps with evidence</li>
+                <li><strong>Take bounded actions</strong> - Run collectors, acknowledge drift, tag ownership, export to DCL</li>
+            </ol>
+            <p>Nothing more, nothing less. AAM deliberately avoids "magic" actions like "fix automatically" or "connect now."</p>
+        </div>
+        
+        <div class="guide-section" id="pipes-screen">
+            <h2>Pipes Inventory Screen</h2>
+            <p>This is your main dashboard showing all discovered data pipes. Access it via the <span class="guide-code">Pipes</span> navigation link.</p>
+            
+            <h3>What You See</h3>
+            <table class="guide-table">
+                <tr><th>Element</th><th>What It Means</th></tr>
+                <tr><td>Pipe Name</td><td>Human-readable name for this data pipe (clickable to view details)</td></tr>
+                <tr><td>Source System</td><td>Where the data comes from (e.g., "Salesforce", "Workday")</td></tr>
+                <tr><td>Modality</td><td>How this pipe connects: CONTROL_PLANE, DECLARED_INTERFACE, PASSIVE_SUBSCRIPTION, or MINIMAL_TEE</td></tr>
+                <tr><td>Transport</td><td>How data moves: API, EVENT_STREAM, TABLE, FILE, or WEBHOOK</td></tr>
+                <tr><td>Trust Labels</td><td>Quality signals like data freshness, schema stability, ownership clarity</td></tr>
+            </table>
+            
+            <h3>Actions You Can Take</h3>
+            <table class="guide-table">
+                <tr><th>Button</th><th>What It Does</th></tr>
+                <tr><td>Run Collector</td><td>Triggers a collector to observe systems and update pipe information</td></tr>
+                <tr><td>Run Inference</td><td>Processes raw observations into declared pipes</td></tr>
+                <tr><td>Export to DCL</td><td>Generates a snapshot of all pipes in DCL format</td></tr>
+            </table>
+        </div>
+        
+        <div class="guide-section" id="pipe-detail">
+            <h2>Pipe Detail Screen</h2>
+            <p>Clicking on a pipe name takes you to its detail view with complete information.</p>
+            
+            <h3>Key Sections</h3>
+            <table class="guide-table">
+                <tr><th>Section</th><th>What It Shows</th></tr>
+                <tr><td>Identity & Classification</td><td>Pipe ID, display name, source system, modality, transport kind</td></tr>
+                <tr><td>Data Characteristics</td><td>Entity scope, identity keys, change semantics, freshness</td></tr>
+                <tr><td>Provenance</td><td>Discovery source, when discovered, lineage hints</td></tr>
+                <tr><td>Trust & Ownership</td><td>Trust labels, owner signals</td></tr>
+                <tr><td>Version History</td><td>How this pipe's definition has changed over time</td></tr>
+                <tr><td>Drift Events</td><td>Any drift events specific to this pipe</td></tr>
+            </table>
+        </div>
+        
+        <div class="guide-section" id="candidates-screen">
+            <h2>Candidates Screen</h2>
+            <p>Shows connection candidates from AOD that haven't been fully processed yet.</p>
+            
+            <h3>Candidate Statuses</h3>
+            <table class="guide-table">
+                <tr><th>Status</th><th>What It Means</th></tr>
+                <tr><td><span class="badge badge-new">New</span></td><td>Just arrived from AOD, not yet reviewed</td></tr>
+                <tr><td><span class="badge badge-triaged">Triaged</span></td><td>Reviewed but not yet connected to a pipe</td></tr>
+                <tr><td><span class="badge badge-connected">Connected</span></td><td>Successfully matched to a declared pipe</td></tr>
+                <tr><td><span class="badge badge-deferred">Deferred</span></td><td>Intentionally set aside (with a reason)</td></tr>
+            </table>
+            
+            <h3>Actions</h3>
+            <ul>
+                <li><strong>Match to Pipe</strong> - Links this candidate to an existing pipe (requires pipe ID)</li>
+                <li><strong>Defer</strong> - Sets the candidate aside with a reason</li>
+                <li><strong>Create Tee</strong> - Creates a minimal tee request artifact (for connected candidates)</li>
+            </ul>
+        </div>
+        
+        <div class="guide-section" id="drift-screen">
+            <h2>Drift & Health Screen</h2>
+            <p>Shows issues that need attention - places where reality has diverged from expectations.</p>
+            
+            <h3>Drift Types</h3>
+            <table class="guide-table">
+                <tr><th>Type</th><th>What It Means</th></tr>
+                <tr><td>SCHEMA</td><td>The structure of the data changed (fields added/removed/modified)</td></tr>
+                <tr><td>FRESHNESS</td><td>Data stopped updating at the expected rate</td></tr>
+                <tr><td>CONTRACT</td><td>The agreed behavior of the pipe changed</td></tr>
+            </table>
+            
+            <h3>Severity Levels</h3>
+            <table class="guide-table">
+                <tr><th>Level</th><th>What It Means</th><th>Response</th></tr>
+                <tr><td><span class="badge badge-critical">Critical</span></td><td>Major breaking change</td><td>Immediate action required</td></tr>
+                <tr><td><span class="badge badge-high">High</span></td><td>Significant change</td><td>Review within 24 hours</td></tr>
+                <tr><td><span class="badge badge-medium">Medium</span></td><td>Notable change</td><td>Review within a week</td></tr>
+                <tr><td><span class="badge badge-low">Low</span></td><td>Minor change</td><td>Review when convenient</td></tr>
+            </table>
+            
+            <h3>Drift Statuses</h3>
+            <ul>
+                <li><span class="badge badge-open">Open</span> - Needs attention, not yet reviewed</li>
+                <li><span class="badge badge-acknowledged">Acknowledged</span> - Reviewed and noted</li>
+                <li><span class="badge badge-suppressed">Suppressed</span> - Intentionally hidden</li>
+            </ul>
+        </div>
+        
+        <div class="guide-section" id="workflows">
+            <h2>Common Workflows</h2>
+            
+            <div class="guide-card">
+                <div class="guide-card-title">Processing New Candidates</div>
+                <ol>
+                    <li>Go to <strong>Candidates</strong> screen</li>
+                    <li>Review candidates with "New" status</li>
+                    <li>For each candidate: Match to a pipe, or Defer with a reason</li>
+                </ol>
+            </div>
+            
+            <div class="guide-card">
+                <div class="guide-card-title">Discovering New Pipes</div>
+                <ol>
+                    <li>Go to <strong>Pipes</strong> screen</li>
+                    <li>Click <strong>Run Collector</strong> to observe systems</li>
+                    <li>Click <strong>Run Inference</strong> to process observations</li>
+                    <li>Review newly created pipes</li>
+                </ol>
+            </div>
+            
+            <div class="guide-card">
+                <div class="guide-card-title">Investigating Drift</div>
+                <ol>
+                    <li>Go to <strong>Drift & Health</strong> screen</li>
+                    <li>Review items with "Open" status</li>
+                    <li>Click on the pipe name to see full details</li>
+                    <li>Acknowledge or Suppress as appropriate</li>
+                </ol>
+            </div>
+        </div>
+        
+        <div class="guide-section" id="glossary">
+            <h2>Glossary</h2>
+            <table class="guide-table">
+                <tr><th>Term</th><th>Definition</th></tr>
+                <tr><td>Candidate</td><td>A potential connection discovered by AOD that AAM might catalog</td></tr>
+                <tr><td>Collector</td><td>A component that observes enterprise systems and creates observations</td></tr>
+                <tr><td>Declared Pipe</td><td>A cataloged data connection with full metadata</td></tr>
+                <tr><td>DCL</td><td>Data Catalog Layer - consumes pipes from AAM to unify meaning</td></tr>
+                <tr><td>Drift</td><td>When reality diverges from what was previously observed</td></tr>
+                <tr><td>Modality</td><td>The approach for connecting (control plane, declared interface, etc.)</td></tr>
+                <tr><td>Observation</td><td>Raw data from a collector before being processed into a pipe</td></tr>
+                <tr><td>Pipe</td><td>A reusable data connection between systems</td></tr>
+                <tr><td>Provenance</td><td>Origin and lineage information about a pipe</td></tr>
+                <tr><td>Schema Hash</td><td>A fingerprint of the data structure for detecting changes</td></tr>
+                <tr><td>Transport</td><td>How data physically moves (API, events, files, etc.)</td></tr>
+            </table>
+        </div>
+        
+        <div style="text-align: center; padding: 24px; color: var(--slate-500);">
+            <p>Need more help? Check the <a href="/docs">API Documentation</a> for complete endpoint details.</p>
+        </div>
+    </div>
 </body>
 </html>
 """)
