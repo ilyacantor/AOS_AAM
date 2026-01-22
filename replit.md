@@ -95,6 +95,7 @@ samples/
 |-------|------|-------------|
 | pipe_id | uuid | Unique pipe identifier |
 | display_name | string | Human-readable name |
+| fabric_plane | enum | IPAAS, API_GATEWAY, EVENT_BUS, DATA_WAREHOUSE |
 | modality | enum | CONTROL_PLANE, DECLARED_INTERFACE, PASSIVE_SUBSCRIPTION, MINIMAL_TEE |
 | source_system | string | Source system identifier |
 | transport_kind | enum | API, EVENT_STREAM, TABLE, FILE, WEBHOOK |
@@ -206,6 +207,16 @@ samples/
 |--------|----------|-------------|
 | GET | `/health` | Health check |
 
+### Presets & Seed Data
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/presets` | List available enterprise maturity presets |
+| GET | `/api/presets/{id}` | Get preset details |
+| POST | `/api/presets/{id}/load` | Load preset into database (replaces existing data) |
+| GET | `/api/stats` | Get pipe statistics by fabric_plane/modality |
+| DELETE | `/api/data` | Clear all data (admin)
+
 ## Database Schema
 
 **Tables:**
@@ -227,13 +238,33 @@ samples/
 
 The inference engine converts observations into DeclaredPipes by inferring:
 
-1. **Modality** - Based on endpoint patterns and vendor type
-2. **Transport Kind** - From URL patterns (API, EVENT_STREAM, TABLE, FILE, WEBHOOK)
-3. **Entity Scope** - From entity hints and URL path segments
-4. **Identity Keys** - From schema field patterns (id, uuid, *_id)
-5. **Change Semantics** - From URL patterns and schema timestamps
-6. **Provenance** - Collector info, discovery time, lineage hints
-7. **Trust Labels** - Weak signals become labels, not blockers
+1. **Fabric Plane** - WHERE pipes live (IPAAS, API_GATEWAY, EVENT_BUS, DATA_WAREHOUSE)
+2. **Modality** - HOW pipes are accessed (CONTROL_PLANE, DECLARED_INTERFACE, etc.)
+3. **Transport Kind** - From URL patterns (API, EVENT_STREAM, TABLE, FILE, WEBHOOK)
+4. **Entity Scope** - From entity hints and URL path segments
+5. **Identity Keys** - From schema field patterns (id, uuid, *_id)
+6. **Change Semantics** - From URL patterns and schema timestamps
+7. **Provenance** - Collector info, discovery time, lineage hints
+8. **Trust Labels** - Weak signals become labels, not blockers
+
+### Fabric Plane Inference
+- **IPAAS** - Workato, MuleSoft, Boomi, Tray.io, Zapier vendors
+- **EVENT_BUS** - Kafka/EventBridge URLs, EVENT_STREAM transport
+- **DATA_WAREHOUSE** - Snowflake/BigQuery/Redshift vendors, TABLE/FILE transport
+- **API_GATEWAY** - Default for direct API access
+
+## Enterprise Maturity Presets
+
+AAM includes 4 realistic preset datasets representing different enterprise integration patterns:
+
+| Preset | Description | Pipes | Pattern |
+|--------|-------------|-------|---------|
+| early_scrappy | Point-to-point, direct API calls | 6 | API_GATEWAY heavy |
+| ipaas_centric | Workato/MuleSoft control plane | 8 | IPAAS + CONTROL_PLANE |
+| platform_oriented | Kafka/EventBridge backbone | 9 | EVENT_BUS + mixed modalities |
+| warehouse_centric | Snowflake/BigQuery as truth | 11 | DATA_WAREHOUSE + reverse ETL |
+
+Load via UI (Pipes Inventory → preset cards) or API (`POST /api/presets/{id}/load`)
 
 ## Usage Flow
 
