@@ -115,9 +115,10 @@ NAV_HTML = """
 <nav class="nav">
     <a href="/" class="nav-brand">AAM</a>
     <div class="nav-links">
-        <a href="/" class="nav-link{home_active}">Home</a>
-        <a href="/docs" class="nav-link{docs_active}">API Docs</a>
-        <a href="/redoc" class="nav-link{redoc_active}">ReDoc</a>
+        <a href="/ui/pipes" class="nav-link{pipes_active}">Pipes</a>
+        <a href="/ui/candidates" class="nav-link{candidates_active}">Candidates</a>
+        <a href="/ui/drift" class="nav-link{drift_active}">Drift & Health</a>
+        <a href="/docs" class="nav-link{docs_active}">API</a>
     </div>
 </nav>
 """
@@ -197,7 +198,7 @@ async def root():
     </style>
 </head>
 <body>
-    {NAV_HTML.format(home_active=" active", docs_active="", redoc_active="")}
+    {NAV_HTML.format(pipes_active="", candidates_active="", drift_active="", docs_active="")}
     <div class="container">
         <h1>Adaptive API Mesh</h1>
         <p class="subtitle">AAM v0.1.0</p>
@@ -233,7 +234,7 @@ async def custom_swagger_ui():
     </style>
 </head>
 <body>
-    {NAV_HTML.format(home_active="", docs_active=" active", redoc_active="")}
+    {NAV_HTML.format(pipes_active="", candidates_active="", drift_active="", docs_active=" active")}
     <div id="swagger-ui"></div>
     <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
     <script>
@@ -265,7 +266,7 @@ async def custom_redoc():
     </style>
 </head>
 <body>
-    {NAV_HTML.format(home_active="", docs_active="", redoc_active=" active")}
+    {NAV_HTML.format(pipes_active="", candidates_active="", drift_active="", docs_active="")}
     <redoc spec-url='/openapi.json'></redoc>
     <script src="https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js"></script>
 </body>
