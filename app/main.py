@@ -426,16 +426,18 @@ def ui_nav(active: str = "") -> str:
 @app.get("/ui/pipes", response_class=HTMLResponse, include_in_schema=False)
 async def ui_pipes_list(
     source_system: Optional[str] = Query(None),
-    modality: Optional[str] = Query(None)
+    modality: Optional[str] = Query(None),
+    fabric_plane: Optional[str] = Query(None)
 ):
     """Pipes Inventory Screen"""
-    pipes = list_pipes(source_system=source_system)
+    pipes = list_pipes(source_system=source_system, fabric_plane=fabric_plane)
     if modality:
         pipes = [p for p in pipes if p.get("modality") == modality]
     
     all_pipes = list_pipes()
     source_systems = sorted(set(p.get("source_system", "") for p in all_pipes if p.get("source_system")))
     modalities = sorted(set(p.get("modality", "") for p in all_pipes if p.get("modality")))
+    fabric_planes = ["IPAAS", "API_GATEWAY", "EVENT_BUS", "DATA_WAREHOUSE"]
     
     all_drift = list_all_drift_events(limit=1000)
     drift_by_pipe = {}
@@ -448,38 +450,49 @@ async def ui_pipes_list(
             if d.get("status") == "open":
                 drift_by_pipe[pid]["open"] += 1
     
+    fabric_plane_colors = {
+        "IPAAS": "#22d3ee",
+        "API_GATEWAY": "#a78bfa",
+        "EVENT_BUS": "#f97316",
+        "DATA_WAREHOUSE": "#10b981"
+    }
+    
     rows_html = ""
     for p in pipes:
         pipe_id = p.get("pipe_id", "")
         entity_scope = p.get("entity_scope", [])
         trust_labels = p.get("trust_labels", [])
         owner_signals = p.get("owner_signals", [])
+        pipe_fabric = p.get("fabric_plane", "API_GATEWAY")
+        fabric_color = fabric_plane_colors.get(pipe_fabric, "#64748b")
         drift_info = drift_by_pipe.get(pipe_id, {"open": 0, "total": 0})
         drift_status = f"{drift_info['open']} open" if drift_info['open'] > 0 else "OK"
         drift_class = "badge-open" if drift_info['open'] > 0 else "badge-connected"
         
         rows_html += f"""
         <tr data-testid="pipe-row-{pipe_id}">
+            <td><span class="fabric-badge" style="background:{fabric_color}20;color:{fabric_color};border:1px solid {fabric_color}40;">{pipe_fabric}</span></td>
             <td><a href="/ui/pipes/{pipe_id}" data-testid="pipe-link-{pipe_id}">{p.get('display_name', 'Unnamed')}</a></td>
             <td>{p.get('source_system', '-')}</td>
-            <td>{p.get('transport_kind', '-')}</td>
             <td>{p.get('modality', '-')}</td>
             <td>{', '.join(entity_scope[:3])}{'...' if len(entity_scope) > 3 else ''}</td>
             <td>{len(trust_labels)}</td>
-            <td>{p.get('freshness', '-')}</td>
             <td><span class="badge {drift_class}">{drift_status}</span></td>
             <td>{', '.join(owner_signals[:2]) if owner_signals else '-'}</td>
         </tr>
         """
     
     if not pipes:
-        rows_html = '<tr><td colspan="9" class="empty-state">No pipes found. Run Mock Collector to generate sample data.</td></tr>'
+        rows_html = '<tr><td colspan="8" class="empty-state">No pipes found. Load a preset or run Mock Collector to generate sample data.</td></tr>'
     
     source_options = '<option value="">All Sources</option>' + ''.join(
         f'<option value="{s}"{" selected" if s == source_system else ""}>{s}</option>' for s in source_systems
     )
     modality_options = '<option value="">All Modalities</option>' + ''.join(
         f'<option value="{m}"{" selected" if m == modality else ""}>{m}</option>' for m in modalities
+    )
+    fabric_options = '<option value="">All Fabric Planes</option>' + ''.join(
+        f'<option value="{f}"{" selected" if f == fabric_plane else ""}>{f}</option>' for f in fabric_planes
     )
     
     return HTMLResponse(content=f"""
@@ -489,27 +502,106 @@ async def ui_pipes_list(
     <title>Pipes - AAM</title>
     {NAV_STYLE}
     {UI_STYLE}
+    <style>
+        .fabric-badge {{
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }}
+        .preset-section {{
+            background: rgba(34, 211, 238, 0.1);
+            border: 1px solid rgba(34, 211, 238, 0.3);
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 24px;
+        }}
+        .preset-section h3 {{
+            margin: 0 0 12px 0;
+            font-size: 0.9rem;
+            color: #22d3ee;
+        }}
+        .preset-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 12px;
+        }}
+        .preset-card {{
+            background: rgba(30, 41, 59, 0.8);
+            border: 1px solid #334155;
+            border-radius: 6px;
+            padding: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }}
+        .preset-card:hover {{
+            border-color: #22d3ee;
+            background: rgba(34, 211, 238, 0.1);
+        }}
+        .preset-card h4 {{
+            margin: 0 0 4px 0;
+            font-size: 0.85rem;
+        }}
+        .preset-card p {{
+            margin: 0;
+            font-size: 0.7rem;
+            color: #94a3b8;
+        }}
+        .stats-bar {{
+            display: flex;
+            gap: 24px;
+            margin-bottom: 16px;
+            padding: 12px 16px;
+            background: rgba(30, 41, 59, 0.5);
+            border-radius: 8px;
+        }}
+        .stat-item {{
+            text-align: center;
+        }}
+        .stat-value {{
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #22d3ee;
+        }}
+        .stat-label {{
+            font-size: 0.7rem;
+            color: #94a3b8;
+            text-transform: uppercase;
+        }}
+    </style>
 </head>
 <body>
     {ui_nav('pipes')}
     <div class="container">
         <h1>Pipes Inventory</h1>
+        
+        <div class="preset-section" data-testid="preset-section">
+            <h3>Load Enterprise Preset</h3>
+            <div class="preset-grid" id="preset-grid">Loading presets...</div>
+        </div>
+        
+        <div class="stats-bar" id="stats-bar" data-testid="stats-bar">
+            <div class="stat-item"><div class="stat-value" id="stat-total">{len(pipes)}</div><div class="stat-label">Total Pipes</div></div>
+        </div>
+        
         <div class="controls">
             <button class="btn" id="btn-run-collector" data-testid="btn-run-collector">Run Mock Collector</button>
             <button class="btn" id="btn-export-dcl" data-testid="btn-export-dcl">Export to DCL</button>
+            <select id="filter-fabric" data-testid="filter-fabric" onchange="applyFilters()">{fabric_options}</select>
             <select id="filter-source" data-testid="filter-source" onchange="applyFilters()">{source_options}</select>
             <select id="filter-modality" data-testid="filter-modality" onchange="applyFilters()">{modality_options}</select>
         </div>
         <table data-testid="pipes-table">
             <thead>
                 <tr>
+                    <th>Fabric</th>
                     <th>Pipe Name</th>
                     <th>Source System</th>
-                    <th>Transport</th>
                     <th>Modality</th>
                     <th>Entity Scope</th>
                     <th>Trust Labels</th>
-                    <th>Freshness</th>
                     <th>Drift</th>
                     <th>Owner</th>
                 </tr>
@@ -528,13 +620,53 @@ async def ui_pipes_list(
         }}
         
         function applyFilters() {{
+            const fabric = document.getElementById('filter-fabric').value;
             const source = document.getElementById('filter-source').value;
             const modality = document.getElementById('filter-modality').value;
             const params = new URLSearchParams();
+            if (fabric) params.set('fabric_plane', fabric);
             if (source) params.set('source_system', source);
             if (modality) params.set('modality', modality);
             window.location.href = '/ui/pipes' + (params.toString() ? '?' + params.toString() : '');
         }}
+        
+        async function loadPresets() {{
+            try {{
+                const res = await fetch('/api/presets');
+                const data = await res.json();
+                const grid = document.getElementById('preset-grid');
+                if (data.presets && data.presets.length > 0) {{
+                    grid.innerHTML = data.presets.map(p => `
+                        <div class="preset-card" onclick="loadPreset('${{p.preset_id}}')" data-testid="preset-${{p.preset_id}}">
+                            <h4>${{p.name}}</h4>
+                            <p>${{p.pipe_count}} pipes, ${{p.candidate_count}} candidates</p>
+                        </div>
+                    `).join('');
+                }} else {{
+                    grid.innerHTML = '<p>No presets available</p>';
+                }}
+            }} catch (e) {{
+                document.getElementById('preset-grid').innerHTML = '<p>Failed to load presets</p>';
+            }}
+        }}
+        
+        async function loadPreset(presetId) {{
+            if (!confirm('This will replace all existing data with the preset. Continue?')) return;
+            try {{
+                const res = await fetch('/api/presets/' + presetId + '/load', {{ method: 'POST' }});
+                const data = await res.json();
+                if (res.ok) {{
+                    showToast(data.message, 'success');
+                    setTimeout(() => location.reload(), 1000);
+                }} else {{
+                    showToast('Error: ' + (data.detail || 'Failed'), 'error');
+                }}
+            }} catch (e) {{
+                showToast('Error: ' + e.message, 'error');
+            }}
+        }}
+        
+        loadPresets();
         
         document.getElementById('btn-run-collector').addEventListener('click', async function() {{
             this.disabled = true;
@@ -662,6 +794,10 @@ async def ui_pipe_detail(pipe_id: str):
                 <div class="field">
                     <div class="field-label">Pipe ID</div>
                     <div class="field-value mono" data-testid="field-pipe-id">{pipe_id}</div>
+                </div>
+                <div class="field">
+                    <div class="field-label">Fabric Plane</div>
+                    <div class="field-value" style="color: #22d3ee; font-weight: 600;">{pipe.get('fabric_plane', 'API_GATEWAY')}</div>
                 </div>
                 <div class="field">
                     <div class="field-label">Source System</div>
