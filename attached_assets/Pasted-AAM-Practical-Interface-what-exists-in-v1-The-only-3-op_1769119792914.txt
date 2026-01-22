@@ -1,0 +1,249 @@
+AAM Practical Interface: what exists in v1
+The only 3 operator jobs AAM supports
+
+See what pipes exist (inventory + metadata + trust state)
+
+See what’s wrong (drift/health/coverage gaps, with evidence)
+
+Take a bounded action (re-run collectors, approve/track tee requests, set owner tags, export to DCL)
+
+That’s it. No “connect now” magic button unless it truly performs a deterministic action.
+
+UI Surface (v1): 4 screens, all real
+1) Pipes Inventory
+
+Table (filterable):
+
+Pipe Name
+
+Source System
+
+Transport (API / Topic / Table)
+
+Modality (CONTROL_PLANE / DECLARED_INTERFACE / PASSIVE_SUBSCRIPTION / MINIMAL_TEE)
+
+Entity Scope (Account, Invoice…)
+
+Trust Score (derived from labels count + severity; must be explainable)
+
+Freshness (last seen success/update)
+
+Drift (None / Schema / Contract / Freshness)
+
+Owner (from owner_signals)
+
+Controls (real)
+
+“Run collectors now” (calls POST /collect/{collector}/run)
+
+“Export selected to DCL” (calls POST /export/dcl or shows pull URL)
+
+“Tag owner” (writes owner_signals override)
+
+No fake “auto-fix.”
+
+2) Pipe Detail (single pipe)
+
+Panels
+
+DeclaredPipe (render the real JSON fields in a human view)
+
+Provenance (which collector, when, what evidence)
+
+Schema (hash + last N changes, if any)
+
+Drift events timeline (actual drift rows)
+
+Trust labels (each label links to an explanation + evidence)
+
+Controls (real)
+
+“Recompute declaration” (rerun inference on latest observation)
+
+“Suppress alert” (creates a suppression rule tied to that pipe + drift type)
+
+“Create Tee Request” (only if a gap condition is true)
+
+3) Candidates (from AOD)
+
+Table
+
+asset_key / vendor / category
+
+priority_score
+
+governance_status
+
+key findings (top 1–3)
+
+status (new / triaged / mapped_to_pipe / deferred)
+
+recommended next step (existing pipe match? need tee request? need creds?)
+
+Controls (real)
+
+“Attempt match to existing pipes” (runs match job)
+
+“Mark deferred + reason”
+
+“Create Tee Request” (generates artifact + status tracking)
+
+“Request access” (creates a task record; does not pretend to fetch secrets)
+
+This is where AAM stays honest: it doesn’t magically connect; it routes work.
+
+4) Drift & Health
+
+Three sections
+
+Schema drift (hash changed)
+
+Contract drift (endpoint/topic/table missing; auth failures)
+
+Freshness drift (stale beyond threshold)
+
+Each row has:
+
+pipe_id
+
+drift type
+
+severity
+
+first seen / last seen
+
+evidence (real error strings, timestamps)
+
+status (open / acknowledged / suppressed / resolved)
+
+Controls (real)
+
+“Acknowledge”
+
+“Suppress”
+
+“Re-run collector”
+
+“Open Tee Request” (only if drift implies missing/changed pipe)
+
+The interface must be backed by real APIs (no fantasies)
+Required API endpoints (v1)
+
+Inventory
+
+GET /api/pipes
+
+GET /api/pipes/{pipe_id}
+
+Candidates
+
+POST /api/aam/candidates
+
+GET /api/candidates
+
+POST /api/candidates/{id}/match
+
+POST /api/candidates/{id}/defer
+
+Collectors
+
+POST /api/collect/{collector}/run
+
+GET /api/collect/runs
+
+GET /api/collect/runs/{run_id}
+
+Drift
+
+GET /api/drift
+
+POST /api/drift/{drift_id}/ack
+
+POST /api/drift/{drift_id}/suppress
+
+Tee Requests
+
+POST /api/tee/requests
+
+GET /api/tee/requests
+
+POST /api/tee/requests/{id}/status (manual updates)
+
+Export to DCL
+
+GET /api/export/dcl/declared-pipes
+(or POST /api/export/dcl if you want “push a snapshot file”)
+
+“Real indicators” definition (so the agent can’t cheat)
+
+A UI metric is allowed only if it can be computed from stored facts:
+
+Freshness = derived from last successful observation timestamp OR last updated metadata from collector.
+
+Trust labels = explicit labels from inference + rules.
+
+Drift = stored drift_events only.
+
+Coverage = number of declared pipes matched to candidates / total candidates by category.
+
+Owner = from collector metadata or operator overrides.
+
+No “confidence 92%” unless you can show the rule.
+
+Practical controls definition (so controls aren’t fake)
+
+Allowed operator actions in v1:
+
+Trigger collectors
+
+Rerun inference
+
+Tag/override owner metadata
+
+Create/track tee request artifacts
+
+Suppress/ack drift alerts
+
+Export declared pipes snapshot
+
+Not allowed (unless implemented):
+
+“Fix drift automatically”
+
+“Connect now”
+
+“Provision connector”
+
+“Rotate secrets”
+
+“Deploy tee”
+
+Prompt update for AAM Agent (UI requirement)
+
+Paste this addendum into the AAM agent prompt:
+
+ADD PRACTICAL INTERFACE (V1 REQUIRED)
+
+AAM must ship with a minimal operator UI (or at least an API surface that directly supports one), with ONLY real indicators and ONLY real controls.
+
+Implement these 4 operator screens (or their equivalent API primitives):
+
+1) Pipes Inventory: list/filter pipes with modality, transport_kind, entity_scope, freshness, drift summary, trust_labels, owner.
+Controls: run collectors; tag owner; export selected pipes.
+
+2) Pipe Detail: show declared pipe fields + provenance + drift timeline + trust labels with evidence.
+Controls: rerun inference; suppress drift; create tee request.
+
+3) Candidates (from AOD): list candidates, show findings, status, match results.
+Controls: attempt match; defer with reason; create tee request.
+
+4) Drift & Health: list drift events with severity + evidence.
+Controls: acknowledge; suppress; rerun collector.
+
+Hard rule:
+- Every indicator must be computed from persisted AAM data.
+- Every control must call a real endpoint that performs a real action.
+- No placeholder metrics (no fake “confidence scores”).
+- No “connect now” unless it truly provisions something (not in v1).
+
+UI can be very simple (server-rendered or minimal React), but must be functional and powered by the
