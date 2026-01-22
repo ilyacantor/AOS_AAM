@@ -1089,3 +1089,58 @@ def update_tee_request_status(tee_id: str, status: str) -> Optional[dict]:
     
     conn.close()
     return None
+
+
+# ============================================================================
+# PRESET / SEED DATA OPERATIONS
+# ============================================================================
+
+def clear_all_data():
+    """Clear all data from the database (for preset loading)"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("DELETE FROM drift_events")
+    cursor.execute("DELETE FROM pipe_versions")
+    cursor.execute("DELETE FROM declared_pipes")
+    cursor.execute("DELETE FROM observations")
+    cursor.execute("DELETE FROM collector_runs")
+    cursor.execute("DELETE FROM connection_candidates")
+    cursor.execute("DELETE FROM tee_requests")
+    
+    conn.commit()
+    conn.close()
+    
+    return {"cleared": True}
+
+
+def get_pipe_stats() -> dict:
+    """Get statistics about pipes by fabric_plane and modality"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    stats = {
+        "total_pipes": 0,
+        "by_fabric_plane": {},
+        "by_modality": {},
+        "by_source_system": {}
+    }
+    
+    cursor.execute("SELECT COUNT(*) FROM declared_pipes")
+    stats["total_pipes"] = cursor.fetchone()[0]
+    
+    cursor.execute("SELECT fabric_plane, COUNT(*) FROM declared_pipes GROUP BY fabric_plane")
+    for row in cursor.fetchall():
+        plane = row[0] or "API_GATEWAY"
+        stats["by_fabric_plane"][plane] = row[1]
+    
+    cursor.execute("SELECT modality, COUNT(*) FROM declared_pipes GROUP BY modality")
+    for row in cursor.fetchall():
+        stats["by_modality"][row[0]] = row[1]
+    
+    cursor.execute("SELECT source_system, COUNT(*) FROM declared_pipes GROUP BY source_system")
+    for row in cursor.fetchall():
+        stats["by_source_system"][row[0]] = row[1]
+    
+    conn.close()
+    return stats

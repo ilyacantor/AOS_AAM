@@ -1,0 +1,105 @@
+{
+  "preset_id": "early_scrappy",
+  "name": "Early/Scrappy Startup",
+  "description": "Point-to-point integrations, direct API calls, minimal infrastructure. Typical of early-stage startups before formal integration patterns.",
+  "pipes": [
+    {
+      "display_name": "Salesforce - Account",
+      "fabric_plane": "API_GATEWAY",
+      "modality": "DECLARED_INTERFACE",
+      "source_system": "Salesforce",
+      "transport_kind": "API",
+      "endpoint_ref": {"url": "/services/data/v58.0/sobjects/Account", "method": "GET"},
+      "entity_scope": ["Account"],
+      "identity_keys": ["Id"],
+      "change_semantics": "CDC_UPSERT",
+      "owner_signals": ["vendor:Salesforce", "team:sales-ops"],
+      "trust_labels": ["source:direct_api", "inferred:schema_from_sample"]
+    },
+    {
+      "display_name": "Salesforce - Contact",
+      "fabric_plane": "API_GATEWAY",
+      "modality": "DECLARED_INTERFACE",
+      "source_system": "Salesforce",
+      "transport_kind": "API",
+      "endpoint_ref": {"url": "/services/data/v58.0/sobjects/Contact", "method": "GET"},
+      "entity_scope": ["Contact"],
+      "identity_keys": ["Id"],
+      "change_semantics": "CDC_UPSERT",
+      "owner_signals": ["vendor:Salesforce", "team:sales-ops"],
+      "trust_labels": ["source:direct_api"]
+    },
+    {
+      "display_name": "Stripe - Customers",
+      "fabric_plane": "API_GATEWAY",
+      "modality": "DECLARED_INTERFACE",
+      "source_system": "Stripe",
+      "transport_kind": "API",
+      "endpoint_ref": {"url": "/v1/customers", "method": "GET"},
+      "entity_scope": ["Customer"],
+      "identity_keys": ["id"],
+      "change_semantics": "CDC_UPSERT",
+      "owner_signals": ["vendor:Stripe", "team:finance"],
+      "trust_labels": ["source:direct_api"]
+    },
+    {
+      "display_name": "Stripe - Payment Webhook",
+      "fabric_plane": "API_GATEWAY",
+      "modality": "PASSIVE_SUBSCRIPTION",
+      "source_system": "Stripe",
+      "transport_kind": "WEBHOOK",
+      "endpoint_ref": {"url": "/webhooks/stripe/payments", "method": "POST"},
+      "entity_scope": ["Payment", "Invoice"],
+      "identity_keys": ["id"],
+      "change_semantics": "APPEND_ONLY",
+      "owner_signals": ["vendor:Stripe", "team:engineering"],
+      "trust_labels": ["source:webhook", "warning:no_retry_logic"]
+    },
+    {
+      "display_name": "HubSpot - Marketing Contacts",
+      "fabric_plane": "API_GATEWAY",
+      "modality": "DECLARED_INTERFACE",
+      "source_system": "HubSpot",
+      "transport_kind": "API",
+      "endpoint_ref": {"url": "/crm/v3/objects/contacts", "method": "GET"},
+      "entity_scope": ["Contact", "Lead"],
+      "identity_keys": ["id"],
+      "change_semantics": "CDC_UPSERT",
+      "owner_signals": ["vendor:HubSpot", "team:marketing"],
+      "trust_labels": ["source:direct_api", "warning:rate_limited"]
+    },
+    {
+      "display_name": "Internal DB - Users",
+      "fabric_plane": "API_GATEWAY",
+      "modality": "DECLARED_INTERFACE",
+      "source_system": "Internal-App",
+      "transport_kind": "API",
+      "endpoint_ref": {"url": "/api/v1/users", "method": "GET"},
+      "entity_scope": ["User"],
+      "identity_keys": ["user_id"],
+      "change_semantics": "CDC_UPSERT",
+      "owner_signals": ["team:engineering"],
+      "trust_labels": ["source:internal_api"]
+    }
+  ],
+  "candidates": [
+    {
+      "asset_key": "slack-001",
+      "vendor_name": "Slack",
+      "display_name": "Slack Workspace",
+      "category": "Collaboration",
+      "governance_status": "unmanaged",
+      "known_endpoints": ["/api/conversations.list"],
+      "priority_score": 40.0
+    },
+    {
+      "asset_key": "notion-001",
+      "vendor_name": "Notion",
+      "display_name": "Notion Wiki",
+      "category": "Documentation",
+      "governance_status": "shadow_it",
+      "known_endpoints": ["/v1/pages"],
+      "priority_score": 25.0
+    }
+  ]
+}

@@ -35,7 +35,9 @@ from .db import (
     list_tee_requests,
     update_tee_request_status,
     create_tee_request,
-    get_drift_event
+    get_drift_event,
+    clear_all_data,
+    get_pipe_stats
 )
 from .collectors.mock import run_mock_collector
 from .inference import infer_pipes_from_observations
@@ -1513,9 +1515,12 @@ async def infer_pipes():
 
 
 @app.get("/api/pipes", tags=["Pipes"])
-async def get_all_pipes(source_system: Optional[str] = Query(None, description="Filter by source system")):
+async def get_all_pipes(
+    source_system: Optional[str] = Query(None, description="Filter by source system"),
+    fabric_plane: Optional[str] = Query(None, description="Filter by fabric plane (IPAAS, API_GATEWAY, EVENT_BUS, DATA_WAREHOUSE)")
+):
     """List all declared pipes"""
-    pipes = list_pipes(source_system=source_system)
+    pipes = list_pipes(source_system=source_system, fabric_plane=fabric_plane)
     return {"pipes": pipes, "count": len(pipes)}
 
 
@@ -1794,3 +1799,104 @@ async def update_tee_status(tee_id: str, request: TeeStatusUpdate):
         raise HTTPException(status_code=404, detail="Tee request not found")
     
     return updated
+
+
+# ============================================================================
+# PRESETS / SEED DATA ENDPOINTS
+# ============================================================================
+
+import json
+import os
+
+PRESETS_DIR = os.path.join(os.path.dirname(__file__), "..", "samples", "presets")
+
+
+@app.get("/api/presets", tags=["Presets"])
+async def list_presets():
+    """List available enterprise maturity presets"""
+    presets = []
+    if os.path.exists(PRESETS_DIR):
+        for filename in os.listdir(PRESETS_DIR):
+            if filename.endswith(".json"):
+                filepath = os.path.join(PRESETS_DIR, filename)
+                with open(filepath, "r") as f:
+                    data = json.load(f)
+                    presets.append({
+                        "preset_id": data.get("preset_id", filename.replace(".json", "")),
+                        "name": data.get("name", filename),
+                        "description": data.get("description", ""),
+                        "pipe_count": len(data.get("pipes", [])),
+                        "candidate_count": len(data.get("candidates", []))
+                    })
+    return {"presets": presets, "count": len(presets)}
+
+
+@app.get("/api/presets/{preset_id}", tags=["Presets"])
+async def get_preset(preset_id: str):
+    """Get details of a specific preset"""
+    filepath = os.path.join(PRESETS_DIR, f"{preset_id}.json")
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail="Preset not found")
+    
+    with open(filepath, "r") as f:
+        data = json.load(f)
+    return data
+
+
+@app.post("/api/presets/{preset_id}/load", tags=["Presets"])
+async def load_preset(preset_id: str, clear_existing: bool = Query(True, description="Clear existing data before loading")):
+    """Load a preset - populates database with sample data"""
+    filepath = os.path.join(PRESETS_DIR, f"{preset_id}.json")
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail="Preset not found")
+    
+    with open(filepath, "r") as f:
+        data = json.load(f)
+    
+    if clear_existing:
+        clear_all_data()
+    
+    pipes_created = 0
+    candidates_created = 0
+    
+    for pipe_data in data.get("pipes", []):
+        provenance = {
+            "discovered_by": f"preset:{preset_id}",
+            "discovered_at": datetime.utcnow().isoformat(),
+            "lineage_hints": [f"preset:{preset_id}"]
+        }
+        pipe_data["provenance"] = provenance
+        create_pipe(pipe_data)
+        pipes_created += 1
+    
+    for candidate_data in data.get("candidates", []):
+        create_candidate(candidate_data)
+        candidates_created += 1
+    
+    return {
+        "preset_id": preset_id,
+        "name": data.get("name"),
+        "pipes_created": pipes_created,
+        "candidates_created": candidates_created,
+        "message": f"Preset '{data.get('name')}' loaded successfully"
+    }
+
+
+@app.get("/api/stats", tags=["Stats"])
+async def get_stats():
+    """Get statistics about pipes by fabric_plane and modality"""
+    stats = get_pipe_stats()
+    candidates = list_candidates()
+    stats["total_candidates"] = len(candidates)
+    stats["candidates_by_status"] = {}
+    for c in candidates:
+        status = c.get("status", "new")
+        stats["candidates_by_status"][status] = stats["candidates_by_status"].get(status, 0) + 1
+    return stats
+
+
+@app.delete("/api/data", tags=["Admin"])
+async def clear_data():
+    """Clear all data (use with caution)"""
+    result = clear_all_data()
+    return {"message": "All data cleared", **result}
