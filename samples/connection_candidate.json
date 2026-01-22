@@ -1,0 +1,27 @@
+{
+  "asset_key": "sf-crm-001",
+  "vendor_name": "Salesforce",
+  "display_name": "Salesforce CRM Production",
+  "category": "CRM",
+  "governance_status": "approved",
+  "findings": [
+    {
+      "finding_type": "api_endpoint",
+      "description": "REST API v58.0 available",
+      "severity": "info",
+      "evidence": "API documentation verified"
+    }
+  ],
+  "sor_tagging": "customer_master",
+  "evidence_refs": [
+    "https://docs.salesforce.com/api/v58.0"
+  ],
+  "signals_summary": "Primary CRM with 500k+ accounts, OAuth2 enabled",
+  "known_endpoints": [
+    "/services/data/v58.0/sobjects/Account",
+    "/services/data/v58.0/sobjects/Contact",
+    "/services/data/v58.0/sobjects/Opportunity"
+  ],
+  "preferred_modality": "DECLARED_INTERFACE",
+  "priority_score": 85.0
+}

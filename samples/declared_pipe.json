@@ -1,0 +1,40 @@
+{
+  "pipe_id": "cdb583b2-6efb-434f-8e33-c48440a331af",
+  "display_name": "Salesforce - Account",
+  "modality": "DECLARED_INTERFACE",
+  "source_system": "Salesforce",
+  "transport_kind": "API",
+  "endpoint_ref": {
+    "url": "/services/data/v58.0/sobjects/Account",
+    "method": "GET",
+    "discovered_via": "mock_collector"
+  },
+  "entity_scope": ["Account", "Customer", "Organization"],
+  "identity_keys": ["Id"],
+  "change_semantics": "CDC_UPSERT",
+  "provenance": {
+    "discovered_by": "mock-collector-001",
+    "discovered_at": "2026-01-22T22:04:02.507898",
+    "lineage_hints": [
+      "vendor:Salesforce",
+      "category:CRM",
+      "discovered_via:mock_collector"
+    ]
+  },
+  "owner_signals": ["system:Salesforce", "vendor:Salesforce"],
+  "trust_labels": [
+    "inferred:schema_from_sample",
+    "inferred:modality_declared_interface",
+    "source:mock_collector"
+  ],
+  "schema_info": {
+    "schema_hash": "e138ea252b53e511",
+    "schema_ref": null,
+    "schema_version": "inferred"
+  },
+  "freshness": null,
+  "access": null,
+  "version": 1,
+  "created_at": "2026-01-22T22:04:02.601607",
+  "updated_at": "2026-01-22T22:04:02.601607"
+}

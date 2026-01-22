@@ -500,7 +500,7 @@ def _row_to_pipe(row) -> dict:
 # DRIFT OPERATIONS
 # ============================================================================
 
-def create_drift_event(pipe_id: str, drift_type: str, old_value: str, new_value: str, details: dict = None) -> str:
+def create_drift_event(pipe_id: str, drift_type: str, old_value: str, new_value: str, details: Optional[dict] = None) -> str:
     """Create a drift event"""
     conn = get_connection()
     cursor = conn.cursor()
