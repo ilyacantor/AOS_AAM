@@ -1,0 +1,192 @@
+You are working in the AAM (Adaptive API Mesh) repository.
+
+GOAL OF THIS PHASE
+Your goal is NOT to add new features.
+Your goal is to make AAM’s core mental model legible and stable by:
+1) exercising all integration fabric control planes,
+2) exercising all four connectivity modalities,
+3) representing different enterprise maturity patterns,
+using REALISTIC, CONTRASTING TEST DATA.
+
+Do NOT optimize for completeness.
+Do NOT worry about drift sophistication yet.
+Do NOT add automation or new abstractions.
+
+This phase is about FRAMEWORK STABILITY.
+
+---
+
+## CORE CONCEPTS (NON-NEGOTIABLE)
+
+AAM exists to make **variation visible** across three dimensions:
+
+1) Integration Fabric Control Planes
+   - iPaaS
+   - API Gateway / API Manager
+   - Event Bus
+   - Data Warehouse
+
+2) Connectivity Modalities
+   - CONTROL_PLANE
+   - DECLARED_INTERFACE
+   - PASSIVE_SUBSCRIPTION
+   - MINIMAL_TEE
+
+3) Enterprise Maturity Patterns
+   - Different orgs use different mixes of the above
+
+The UI must clearly reflect these dimensions through DATA, not explanation text.
+
+---
+
+## TASK 1: Introduce Integration Fabric as First-Class
+
+Update the data model and seed data so that EVERY DeclaredPipe is explicitly associated with:
+
+- fabric_plane: enum
+    IPaaS
+    API_GATEWAY
+    EVENT_BUS
+    DATA_WAREHOUSE
+
+This is not cosmetic.
+This is a core analytical dimension.
+
+If this field does not exist yet:
+- add it to DeclaredPipe
+- backfill existing test pipes
+
+The Pipes Inventory must be filterable or groupable by fabric_plane.
+This can be a simple dropdown or grouped table sections.
+Do not add a new screen.
+
+---
+
+## TASK 2: Exercise ALL Connectivity Modalities (with intent)
+
+Seed data so that ALL four modalities are visible simultaneously and meaningful:
+
+- CONTROL_PLANE
+  Example: iPaaS recipe or managed gateway routing
+
+- DECLARED_INTERFACE
+  Example: versioned REST API exposed via gateway
+
+- PASSIVE_SUBSCRIPTION
+  Example: Kafka topic or warehouse table consumed read-only
+
+- MINIMAL_TEE
+  Example: explicit tee request required to surface data
+
+Each modality must appear multiple times and be associated with different fabric planes where realistic.
+
+Avoid “toy” examples.
+Each pipe should plausibly exist in a real enterprise.
+
+---
+
+## TASK 3: Introduce Enterprise Maturity Presets (DATA-ONLY)
+
+Define 3–4 named **enterprise maturity presets**.
+These are NOT configuration flags; they are **seed datasets**.
+
+Examples (you may rename, but keep intent):
+
+Preset A: "Early / Scrappy"
+- Mostly direct SaaS APIs
+- Little to no iPaaS
+- No event bus
+- Weak ownership signals
+
+Preset B: "iPaaS-Centric"
+- Heavy iPaaS usage
+- Few direct APIs
+- No event bus
+- Centralized ops ownership
+
+Preset C: "Platform-Oriented"
+- API Gateway + Event Bus
+- Product-owned APIs
+- Minimal iPaaS
+- Strong ownership signals
+
+Preset D: "Warehouse-Centric"
+- Data warehouse as integration backbone
+- Batch-first
+- Limited real-time signals
+
+Implement these presets as:
+- separate seed files, OR
+- a simple preset selector that swaps datasets (dev-only is fine)
+
+The operator must be able to clearly tell:
+“What kind of enterprise am I looking at?”
+
+---
+
+## TASK 4: Make the UI Reflect REALITY, Not MECHANICS
+
+Minimal UI changes only.
+Prefer labels, grouping, and ordering over new components.
+
+Required outcomes:
+- Pipes view clearly shows:
+  - which fabric planes dominate
+  - which modalities dominate
+- Candidates view clearly shows:
+  - gaps relative to maturity pattern
+- Drift view can remain simple (schema/freshness only)
+
+Do NOT:
+- add scores
+- add dashboards
+- add automation
+- add narrative explanations
+
+Let the DATA do the talking.
+
+---
+
+## TASK 5: Defer Drift Sophistication (Explicitly)
+
+For now:
+- keep schema drift
+- keep freshness drift
+- do NOT add new drift types
+- do NOT add alerting logic
+- do NOT optimize drift UI
+
+Drift exists only to support later Farm variability.
+It is NOT a focus of this phase.
+
+---
+
+## DEFINITION OF DONE
+
+This phase is complete when:
+
+1) All four fabric planes are visible in Pipes
+2) All four connectivity modalities are visible and meaningful
+3) Switching between maturity presets clearly changes:
+   - pipe distribution
+   - modality mix
+   - candidate backlog shape
+4) The UI feels *obvious* once data is rich
+5) No new automation or speculative features were added
+
+If the UI still feels confusing AFTER this, stop and report findings.
+Do not “fix” with features.
+
+---
+
+## DELIVERABLES
+
+- Updated DeclaredPipe schema (if needed)
+- Seed data for 3–4 enterprise maturity presets
+- Minimal UI adjustments to expose fabric_plane + presets
+- Short README note explaining:
+  “AAM is validated against multiple enterprise maturity patterns before Farm variability.”
+
+Do not touch AOD or DCL.
+Do not assume future Farm behavior.
+Stabilize the conceptual frame first.

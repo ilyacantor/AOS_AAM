@@ -100,6 +100,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS declared_pipes (
             pipe_id TEXT PRIMARY KEY,
             display_name TEXT NOT NULL,
+            fabric_plane TEXT NOT NULL DEFAULT 'API_GATEWAY',
             modality TEXT NOT NULL,
             source_system TEXT NOT NULL,
             transport_kind TEXT NOT NULL,

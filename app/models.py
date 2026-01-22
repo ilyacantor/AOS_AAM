@@ -17,6 +17,14 @@ import uuid
 # ENUMS
 # ============================================================================
 
+class FabricPlane(str, Enum):
+    """Integration fabric control plane"""
+    IPAAS = "IPAAS"
+    API_GATEWAY = "API_GATEWAY"
+    EVENT_BUS = "EVENT_BUS"
+    DATA_WAREHOUSE = "DATA_WAREHOUSE"
+
+
 class Modality(str, Enum):
     """How AAM interacts with the data source"""
     CONTROL_PLANE = "CONTROL_PLANE"
@@ -132,6 +140,7 @@ class DeclaredPipe(BaseModel):
     """
     pipe_id: str = Field(default_factory=lambda: str(uuid.uuid4()), description="Unique pipe identifier")
     display_name: str = Field(..., description="Human-readable pipe name")
+    fabric_plane: FabricPlane = Field(..., description="Integration fabric control plane")
     modality: Modality = Field(..., description="How AAM interacts with this pipe")
     source_system: str = Field(..., description="Source system identifier")
     transport_kind: TransportKind = Field(..., description="Type of data transport")
@@ -150,6 +159,7 @@ class DeclaredPipe(BaseModel):
 class DeclaredPipeCreate(BaseModel):
     """Request model for manually declaring a pipe"""
     display_name: str
+    fabric_plane: FabricPlane
     modality: Modality
     source_system: str
     transport_kind: TransportKind
