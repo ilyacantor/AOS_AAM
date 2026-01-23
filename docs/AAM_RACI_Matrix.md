@@ -11,7 +11,6 @@
 | **AOD** | Autonomous Operations Director - emits connection intent as ConnectionCandidates to AAM. |
 | **AAM** | Inventories reusable data pipes, infers minimal semantics, publishes DeclaredPipes for DCL consumption. Does NOT move data. |
 | **DCL** | Ingests schemas and data from routed pipes, performs semantic mapping to unified ontology. |
-| **Farm** | Provides synthetic data streams and source of truth for verification. |
 
 ## Core Philosophy
 
@@ -41,56 +40,54 @@ AOD emits intent → AAM declares pipes → DCL unifies meaning
 | DCL Export | FUNCTIONAL | Export declared pipes JSON |
 | Enterprise Presets | FUNCTIONAL | 4 maturity patterns |
 | Operator UI | FUNCTIONAL | 4 screens (Pipes, Detail, Candidates, Drift) |
-| Real Collectors | PLANNED | Salesforce API inventory next |
-| Freshness Drift | PLANNED | Time-based staleness detection |
 
 ## RACI Matrix
 
-| Activity/Process | AAM | AOD | DCL | Database |
-|-----------------|-----|-----|-----|----------|
+| Activity/Process | AAM | AOD | DCL |
+|-----------------|-----|-----|-----|
 | **Candidate Management** |
-| Emit Connection Intent | C | R/A | I | I |
-| Receive ConnectionCandidate | R/A | C | I | C |
-| Triage Candidates | R/A | I | I | C |
-| Match Candidate to Pipe | R/A | I | C | C |
-| Defer Candidate | R/A | I | I | C |
+| Emit Connection Intent | C | A | I |
+| Receive ConnectionCandidate | A | R | I |
+| Triage Candidates | A | I | I |
+| Match Candidate to Pipe | A | I | C |
+| Defer Candidate | A | I | I |
 | **Collector Operations** |
-| Register Collectors | R/A | I | I | C |
-| Run Collectors | R/A | I | I | C |
-| Track Collector Runs | R/A | I | I | C |
-| Generate Observations | R/A | I | I | C |
+| Register Collectors | A | I | I |
+| Run Collectors | A | I | I |
+| Track Collector Runs | A | I | I |
+| Generate Observations | A | I | I |
 | **Pipe Inference** |
-| Infer Fabric Plane | R/A | I | I | I |
-| Infer Modality | R/A | I | I | I |
-| Infer Transport Kind | R/A | I | I | I |
-| Infer Entity Scope | R/A | I | I | I |
-| Infer Identity Keys | R/A | I | I | I |
-| Infer Change Semantics | R/A | I | I | I |
-| Create DeclaredPipe | R/A | I | C | C |
+| Infer Fabric Plane | A | I | I |
+| Infer Modality | A | I | I |
+| Infer Transport Kind | A | I | I |
+| Infer Entity Scope | A | I | I |
+| Infer Identity Keys | A | I | I |
+| Infer Change Semantics | A | I | I |
+| Create DeclaredPipe | A | I | C |
 | **Pipe Registry** |
-| Store Declared Pipes | R/A | I | I | A |
-| Version Pipe Changes | R/A | I | I | C |
-| Compute Schema Hash | R/A | I | I | I |
-| Serve Pipe Queries | R/A | I | C | C |
+| Store Declared Pipes | A | I | I |
+| Version Pipe Changes | A | I | I |
+| Compute Schema Hash | A | I | I |
+| Serve Pipe Queries | A | I | C |
 | **Drift Detection** |
-| Detect Schema Drift | R/A | I | C | C |
-| Detect Freshness Drift | R/A | I | C | C |
-| Detect Contract Drift | R/A | I | C | C |
-| Acknowledge Drift | R/A | I | I | C |
-| Suppress Drift | R/A | I | I | C |
+| Detect Schema Drift | A | I | C |
+| Detect Freshness Drift | A | I | C |
+| Detect Contract Drift | A | I | C |
+| Acknowledge Drift | A | I | I |
+| Suppress Drift | A | I | I |
 | **Tee Request Management** |
-| Create Tee Request | R/A | I | I | C |
-| Track Tee Status | R/A | I | I | C |
-| Approve/Reject Tee | R/A | C | I | C |
+| Create Tee Request | A | I | I |
+| Track Tee Status | A | I | I |
+| Approve/Reject Tee | A | C | I |
 | **DCL Integration** |
-| Export Declared Pipes | R/A | I | C | C |
-| Route Pipes to DCL | R/A | I | C | I |
-| Provision Connector Info | R/A | I | C | C |
+| Export Declared Pipes | A | I | R |
+| Route Pipes to DCL | A | I | R |
+| Provision Connector Info | A | I | R |
 | **Operator UI** |
-| Display Pipe Inventory | R/A | I | I | C |
-| Display Drift Events | R/A | I | I | C |
-| Display Candidates | R/A | I | I | C |
-| Load Enterprise Presets | R/A | I | I | C |
+| Display Pipe Inventory | A | I | I |
+| Display Drift Events | A | I | I |
+| Display Candidates | A | I | I |
+| Load Enterprise Presets | A | I | I |
 
 ## Legend
 - **R** = Responsible (does the work)
@@ -107,9 +104,6 @@ AOD emits intent → AAM declares pipes → DCL unifies meaning
 | Connector Provisioning | Provider | DCL | Consumer | FUNCTIONAL |
 | Pipe Routing | Provider | DCL | Consumer | FUNCTIONAL |
 | Mock Collector | Internal | - | - | FUNCTIONAL |
-| Salesforce Collector | Consumer | Salesforce | Provider | PLANNED |
-| iPaaS Collector | Consumer | Workato/MuleSoft | Provider | PLANNED |
-| SQLite Storage | Consumer | - | Provider | FUNCTIONAL |
 
 ## Fabric Plane Distribution
 
@@ -128,18 +122,6 @@ AOD emits intent → AAM declares pipes → DCL unifies meaning
 | iPaaS-Centric | 8 | Workato/MuleSoft control plane | Mid-market, IT-led |
 | Platform-Oriented | 9 | Kafka/EventBridge backbone | Enterprise, platform team |
 | Warehouse-Centric | 11 | Snowflake as truth | Analytics-first org |
-
-## Verified Metrics (Sample Data)
-
-| Metric | Value |
-|--------|-------|
-| Pipes Declared | 6-11 (varies by preset) |
-| Candidates Tracked | 2-3 per preset |
-| Collectors Registered | 1 (mock) |
-| Observations Generated | Per collector run |
-| Drift Events | Schema changes tracked |
-| Fabric Planes | 4 types |
-| Modalities | 4 types |
 
 ## What AAM Does NOT Do
 
