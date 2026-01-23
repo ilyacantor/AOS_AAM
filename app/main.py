@@ -1661,8 +1661,28 @@ async def ui_drift_list(status: Optional[str] = Query(None)):
 @app.get("/ui/topology", response_class=HTMLResponse, include_in_schema=False)
 async def ui_topology():
     """Topology Visualization Screen - Interactive graph of pipes, planes, and sources"""
-    topology = get_topology_data()
-    stats = topology["stats"]
+    try:
+        topology = get_topology_data()
+        stats = topology["stats"]
+    except Exception as e:
+        return HTMLResponse(content=f"""
+<!DOCTYPE html>
+<html>
+<head><title>Topology Error - AAM</title>{NAV_STYLE}{UI_STYLE}</head>
+<body>
+    {ui_nav("topology")}
+    <div class="container">
+        <h1>Topology Error</h1>
+        <div class="panel">
+            <p>Error loading topology data:</p>
+            <pre style="color: #f87171; background: #1e293b; padding: 16px; border-radius: 8px; overflow-x: auto;">{str(e)}</pre>
+            <p style="margin-top: 16px;">Try running the mock collector first to generate some data:</p>
+            <a href="/ui/drift" class="btn">Go to Drift & Health</a>
+        </div>
+    </div>
+</body>
+</html>
+""")
 
     return HTMLResponse(content=f"""
 <!DOCTYPE html>
@@ -2025,7 +2045,7 @@ async def ui_topology():
                     if (Array.isArray(value)) {{
                         displayValue = value.length > 0 ? value.join(', ') : '(none)';
                     }}
-                    const label = key.replace(/_/g, ' ').replace(/\\b\\w/g, l => l.toUpperCase());
+                    const label = key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
                     html += `<div class="field"><div class="field-label">${{label}}</div><div class="field-value">${{displayValue}}</div></div>`;
                 }}
             }}
