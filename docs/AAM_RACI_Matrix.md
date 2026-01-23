@@ -40,47 +40,47 @@
 | Activity/Process | AAM | Farm |
 |-----------------|-----|------|
 | **Candidate Management** |
-| Receive ConnectionCandidate | A | I |
-| Triage Candidates | A | I |
-| Match Candidate to Pipe | A | I |
-| Defer Candidate | A | I |
+| Receive ConnectionCandidate | R/A | I |
+| Triage Candidates | R/A | I |
+| Match Candidate to Pipe | R/A | I |
+| Defer Candidate | R/A | I |
 | **Collector Operations** |
-| Register Collectors | A | I |
-| Run Collectors | A | C |
-| Track Collector Runs | A | I |
-| Generate Observations | A | C |
+| Register Collectors | R/A | I |
+| Run Collectors | R/A | C |
+| Track Collector Runs | R/A | I |
+| Generate Observations | R/A | C |
 | **Pipe Inference** |
-| Infer Fabric Plane | A | I |
-| Infer Modality | A | I |
-| Infer Transport Kind | A | I |
-| Infer Entity Scope | A | I |
-| Infer Identity Keys | A | I |
-| Infer Change Semantics | A | I |
-| Create DeclaredPipe | A | I |
+| Infer Fabric Plane | R/A | I |
+| Infer Modality | R/A | I |
+| Infer Transport Kind | R/A | I |
+| Infer Entity Scope | R/A | I |
+| Infer Identity Keys | R/A | I |
+| Infer Change Semantics | R/A | I |
+| Create DeclaredPipe | R/A | I |
 | **Pipe Registry** |
-| Store Declared Pipes | A | I |
-| Version Pipe Changes | A | I |
-| Compute Schema Hash | A | I |
-| Serve Pipe Queries | A | I |
+| Store Declared Pipes | R/A | I |
+| Version Pipe Changes | R/A | I |
+| Compute Schema Hash | R/A | I |
+| Serve Pipe Queries | R/A | I |
 | **Drift Detection** |
-| Detect Schema Drift | A | C |
-| Detect Freshness Drift | A | C |
-| Detect Contract Drift | A | C |
-| Acknowledge Drift | A | I |
-| Suppress Drift | A | I |
+| Detect Schema Drift | R/A | C |
+| Detect Freshness Drift | R/A | C |
+| Detect Contract Drift | R/A | C |
+| Acknowledge Drift | R/A | I |
+| Suppress Drift | R/A | I |
 | **Tee Request Management** |
-| Create Tee Request | A | I |
-| Track Tee Status | A | I |
-| Approve/Reject Tee | A | I |
+| Create Tee Request | R/A | I |
+| Track Tee Status | R/A | I |
+| Approve/Reject Tee | R/A | I |
 | **Verification** |
-| Provide Source of Truth | C | A |
+| Provide Source of Truth | C | R/A |
 | Verify Against Truth | R | A |
-| Generate Test Data | I | A |
+| Generate Test Data | I | R/A |
 | **Operator UI** |
-| Display Pipe Inventory | A | I |
-| Display Drift Events | A | I |
-| Display Candidates | A | I |
-| Load Enterprise Presets | A | I |
+| Display Pipe Inventory | R/A | I |
+| Display Drift Events | R/A | I |
+| Display Candidates | R/A | I |
+| Load Enterprise Presets | R/A | I |
 
 ## Legend
 - **R** = Responsible (does the work)
