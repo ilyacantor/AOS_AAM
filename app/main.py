@@ -45,8 +45,13 @@ from .models import (
     ConnectionCandidateCreate,
     CandidateIntakeResponse,
     CandidateStatus,
-    ExportResponse
+    ExportResponse,
+    FabricPlane
 )
+from .preset_config import PresetConfigLoader, EnterpriseMaturity
+from .fabric_drift import FabricDriftDetector, FabricDriftType
+from .adapters.factory import get_adapter_for_plane
+from .adapters.base import AdapterStatus, PlaneHealth
 
 app = FastAPI(
     title="AAM - Adaptive API Mesh",
@@ -55,6 +60,11 @@ app = FastAPI(
     docs_url=None,
     redoc_url=None
 )
+
+# Global component instances
+preset_loader = PresetConfigLoader()
+drift_detector = FabricDriftDetector()
+adapter_registry: dict = {}  # plane_type -> adapter instance
 
 
 @app.on_event("startup")
@@ -2042,6 +2052,280 @@ async def update_tee_status(tee_id: str, request: TeeStatusUpdate):
         raise HTTPException(status_code=404, detail="Tee request not found")
     
     return updated
+
+
+# ============================================================================
+# FABRIC ADAPTER ENDPOINTS
+# ============================================================================
+
+@app.get("/api/adapters", tags=["Fabric Adapters"])
+async def list_adapters():
+    """List all registered fabric plane adapters and their status"""
+    result = []
+    for plane_type, adapter in adapter_registry.items():
+        health = await adapter.check_health()
+        result.append({
+            "plane_type": plane_type,
+            "vendor": adapter.plane_vendor,
+            "status": health.status.value,
+            "last_check": health.last_check.isoformat(),
+            "latency_ms": health.latency_ms
+        })
+    return {"adapters": result, "count": len(result), "current_preset": preset_loader.current_config.name}
+
+
+@app.post("/api/adapters/{plane_type}/connect", tags=["Fabric Adapters"])
+async def connect_adapter(plane_type: str):
+    """Connect to a fabric plane"""
+    if plane_type not in adapter_registry:
+        try:
+            plane_enum = FabricPlane(plane_type.upper())
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid plane type: {plane_type}")
+        
+        config = preset_loader.current_config.adapter_config.get(plane_type.lower(), {})
+        adapter = get_adapter_for_plane(plane_enum, config)
+        if not adapter:
+            raise HTTPException(status_code=400, detail=f"Could not create adapter for {plane_type}")
+        adapter_registry[plane_type] = adapter
+    
+    adapter = adapter_registry[plane_type]
+    success = await adapter.connect()
+    health = await adapter.check_health()
+    
+    return {
+        "plane_type": plane_type,
+        "connected": success,
+        "status": health.status.value,
+        "vendor": adapter.plane_vendor
+    }
+
+
+@app.post("/api/adapters/{plane_type}/disconnect", tags=["Fabric Adapters"])
+async def disconnect_adapter(plane_type: str):
+    """Disconnect from a fabric plane"""
+    if plane_type not in adapter_registry:
+        raise HTTPException(status_code=404, detail=f"Adapter not found: {plane_type}")
+    
+    adapter = adapter_registry[plane_type]
+    success = await adapter.disconnect()
+    return {"plane_type": plane_type, "disconnected": success}
+
+
+@app.get("/api/adapters/{plane_type}/health", tags=["Fabric Adapters"])
+async def check_adapter_health(plane_type: str):
+    """Check health of a fabric plane adapter"""
+    if plane_type not in adapter_registry:
+        raise HTTPException(status_code=404, detail=f"Adapter not found: {plane_type}")
+    
+    adapter = adapter_registry[plane_type]
+    health = await adapter.check_health()
+    
+    drift_event = drift_detector.detect_connection_drift(
+        plane_type=plane_type,
+        plane_vendor=adapter.plane_vendor,
+        is_connected=(health.status == AdapterStatus.CONNECTED)
+    )
+    
+    return {
+        "plane_type": plane_type,
+        "vendor": adapter.plane_vendor,
+        "status": health.status.value,
+        "latency_ms": health.latency_ms,
+        "last_check": health.last_check.isoformat(),
+        "metrics": health.metrics,
+        "drift_detected": drift_event is not None,
+        "drift_id": drift_event.drift_id if drift_event else None
+    }
+
+
+@app.post("/api/adapters/{plane_type}/discover", tags=["Fabric Adapters"])
+async def discover_from_adapter(plane_type: str):
+    """Discover pipes from a fabric plane adapter"""
+    if plane_type not in adapter_registry:
+        raise HTTPException(status_code=404, detail=f"Adapter not found: {plane_type}")
+    
+    adapter = adapter_registry[plane_type]
+    
+    health = await adapter.check_health()
+    if health.status != AdapterStatus.CONNECTED:
+        raise HTTPException(status_code=400, detail=f"Adapter not connected. Status: {health.status.value}")
+    
+    policies = preset_loader.get_governance_policies()
+    adapter.apply_governance_policy(policies)
+    
+    observations = await adapter.discover_pipes()
+    
+    return {
+        "plane_type": plane_type,
+        "observations_count": len(observations),
+        "observations": observations,
+        "governance_applied": list(policies.keys())
+    }
+
+
+@app.post("/api/adapters/{plane_type}/self-heal", tags=["Fabric Adapters"])
+async def trigger_self_heal(plane_type: str):
+    """Trigger self-healing for a fabric plane adapter"""
+    if plane_type not in adapter_registry:
+        raise HTTPException(status_code=404, detail=f"Adapter not found: {plane_type}")
+    
+    adapter = adapter_registry[plane_type]
+    
+    drifts = drift_detector.get_drift_by_plane(plane_type)
+    if not drifts:
+        return {"message": "No active drifts to heal", "healed": 0}
+    
+    healed = 0
+    results = []
+    for drift in drifts:
+        success = await drift_detector.attempt_self_heal(drift, adapter)
+        if success:
+            healed += 1
+        results.append({
+            "drift_id": drift.drift_id,
+            "drift_type": drift.drift_type.value,
+            "healed": success
+        })
+    
+    return {"healed": healed, "total_drifts": len(drifts), "results": results}
+
+
+# ============================================================================
+# FABRIC DRIFT ENDPOINTS
+# ============================================================================
+
+@app.get("/api/fabric-drift", tags=["Fabric Drift"])
+async def list_fabric_drift():
+    """List all fabric plane drift events (connectivity drift, not schema drift)"""
+    drifts = drift_detector.get_active_drifts()
+    return {
+        "drifts": [
+            {
+                "drift_id": d.drift_id,
+                "plane_type": d.plane_type,
+                "plane_vendor": d.plane_vendor,
+                "drift_type": d.drift_type.value,
+                "severity": d.severity.value,
+                "detected_at": d.detected_at.isoformat(),
+                "acknowledged": d.acknowledged,
+                "suppressed": d.suppressed,
+                "auto_heal_attempted": d.auto_heal_attempted,
+                "auto_heal_success": d.auto_heal_success
+            }
+            for d in drifts
+        ],
+        "count": len(drifts)
+    }
+
+
+@app.get("/api/fabric-drift/stats", tags=["Fabric Drift"])
+async def get_fabric_drift_stats():
+    """Get fabric drift statistics"""
+    return drift_detector.get_drift_stats()
+
+
+@app.get("/api/fabric-drift/heal-history", tags=["Fabric Drift"])
+async def get_heal_history():
+    """Get self-healing history"""
+    return {"history": drift_detector.get_heal_history()}
+
+
+@app.post("/api/fabric-drift/{drift_id}/ack", tags=["Fabric Drift"])
+async def acknowledge_fabric_drift(drift_id: str):
+    """Acknowledge a fabric drift event"""
+    success = drift_detector.acknowledge_drift(drift_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Drift event not found")
+    return {"drift_id": drift_id, "acknowledged": True}
+
+
+@app.post("/api/fabric-drift/{drift_id}/suppress", tags=["Fabric Drift"])
+async def suppress_fabric_drift(drift_id: str):
+    """Suppress a fabric drift event"""
+    success = drift_detector.suppress_drift(drift_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Drift event not found")
+    return {"drift_id": drift_id, "suppressed": True}
+
+
+# ============================================================================
+# PRESET CONFIG ENDPOINTS (Enhanced)
+# ============================================================================
+
+@app.get("/api/preset-config", tags=["Preset Config"])
+async def get_current_preset_config():
+    """Get the current enterprise preset configuration"""
+    config = preset_loader.current_config
+    return {
+        "preset_id": config.preset_id,
+        "name": config.name,
+        "description": config.description,
+        "primary_plane": config.primary_plane.value,
+        "allowed_planes": [p.value for p in config.allowed_planes],
+        "direct_access_allowed": config.direct_app_access,
+        "policies": config.policies
+    }
+
+
+@app.post("/api/preset-config/{preset_name}/activate", tags=["Preset Config"])
+async def activate_preset(preset_name: str):
+    """Activate an enterprise preset (scrappy, ipaas_centric, platform_oriented, warehouse_centric)"""
+    preset_map = {
+        "scrappy": EnterpriseMaturity.SCRAPPY,
+        "early_scrappy": EnterpriseMaturity.SCRAPPY,
+        "ipaas_centric": EnterpriseMaturity.IPAAS_CENTRIC,
+        "ipaas-centric": EnterpriseMaturity.IPAAS_CENTRIC,
+        "platform_oriented": EnterpriseMaturity.PLATFORM_ORIENTED,
+        "platform-oriented": EnterpriseMaturity.PLATFORM_ORIENTED,
+        "warehouse_centric": EnterpriseMaturity.WAREHOUSE_CENTRIC,
+        "warehouse-centric": EnterpriseMaturity.WAREHOUSE_CENTRIC
+    }
+    
+    preset = preset_map.get(preset_name.lower())
+    if not preset:
+        raise HTTPException(status_code=400, detail=f"Unknown preset: {preset_name}. Valid: scrappy, ipaas_centric, platform_oriented, warehouse_centric")
+    
+    preset_loader.set_preset(preset)
+    
+    for adapter in adapter_registry.values():
+        await adapter.disconnect()
+    adapter_registry.clear()
+    
+    config = preset_loader.current_config
+    return {
+        "activated": preset_name,
+        "preset_id": config.preset_id,
+        "name": config.name,
+        "primary_plane": config.primary_plane.value,
+        "allowed_planes": [p.value for p in config.allowed_planes],
+        "direct_access_allowed": config.direct_app_access,
+        "adapters_cleared": True
+    }
+
+
+@app.get("/api/preset-config/all", tags=["Preset Config"])
+async def list_all_preset_configs():
+    """List all available enterprise preset configurations"""
+    return {"presets": preset_loader.list_all_presets()}
+
+
+@app.post("/api/preset-config/validate-routing", tags=["Preset Config"])
+async def validate_routing(vendor: str, target_plane: str):
+    """Validate if a routing decision is allowed under current preset"""
+    try:
+        plane_enum = FabricPlane(target_plane.upper())
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid plane: {target_plane}")
+    
+    allowed, reason = preset_loader.validate_candidate_routing(vendor, plane_enum)
+    return {
+        "vendor": vendor,
+        "target_plane": target_plane,
+        "allowed": allowed,
+        "reason": reason,
+        "current_preset": preset_loader.current_config.name
+    }
 
 
 # ============================================================================
