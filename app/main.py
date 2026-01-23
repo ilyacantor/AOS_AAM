@@ -36,12 +36,14 @@ from .db import (
     update_tee_request_status,
     create_tee_request,
     get_drift_event,
+    create_drift_event,
     clear_all_data,
     get_pipe_stats,
     create_observation,
     get_topology_data,
     get_topology_for_pipe,
-    get_topology_for_fabric_plane
+    get_topology_for_fabric_plane,
+    get_connection
 )
 from .collectors.mock import run_mock_collector
 from .inference import infer_pipes_from_observations
@@ -2834,16 +2836,18 @@ async def load_preset(preset_id: str, clear_existing: bool = Query(True, descrip
     filepath = os.path.join(PRESETS_DIR, f"{preset_id}.json")
     if not os.path.exists(filepath):
         raise HTTPException(status_code=404, detail="Preset not found")
-    
+
     with open(filepath, "r") as f:
         data = json.load(f)
-    
+
     if clear_existing:
         clear_all_data()
-    
+
     pipes_created = 0
     candidates_created = 0
-    
+    drift_events_created = 0
+    created_pipe_ids = []
+
     for pipe_data in data.get("pipes", []):
         provenance = {
             "discovered_by": f"preset:{preset_id}",
@@ -2851,18 +2855,45 @@ async def load_preset(preset_id: str, clear_existing: bool = Query(True, descrip
             "lineage_hints": [f"preset:{preset_id}"]
         }
         pipe_data["provenance"] = provenance
-        create_pipe(pipe_data)
+        pipe_id = create_pipe(pipe_data)
+        created_pipe_ids.append(pipe_id)
         pipes_created += 1
-    
+
     for candidate_data in data.get("candidates", []):
         create_candidate(candidate_data)
         candidates_created += 1
-    
+
+    # Generate sample drift events for some pipes
+    import random
+    drift_samples = [
+        ("schema", "field: user_id (integer)", "field: user_id (string)", "high", "Field type changed from integer to string"),
+        ("schema", "fields: [id, name, email]", "fields: [id, name, email, phone]", "low", "New field 'phone' added"),
+        ("freshness", "last_update: 2024-01-15", "last_update: 2023-12-01", "critical", "Data not updated for 45 days"),
+        ("contract", "rate_limit: 1000/min", "rate_limit: 100/min", "high", "API rate limit reduced by 90%"),
+        ("schema", "nullable: false", "nullable: true", "medium", "Field nullability changed"),
+        ("freshness", "sync_interval: 1h", "sync_interval: 24h", "medium", "Sync frequency reduced"),
+        ("contract", "auth: api_key", "auth: oauth2", "high", "Authentication method changed"),
+    ]
+
+    # Add drift events to ~30% of pipes
+    pipes_with_drift = random.sample(created_pipe_ids, min(len(created_pipe_ids) // 3 + 1, len(created_pipe_ids)))
+    for pipe_id in pipes_with_drift:
+        drift_type, old_val, new_val, severity, description = random.choice(drift_samples)
+        drift_id = create_drift_event(pipe_id, drift_type, old_val, new_val, {"description": description})
+        # Update severity (since create_drift_event uses defaults)
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE drift_events SET severity = ? WHERE drift_id = ?", (severity, drift_id))
+        conn.commit()
+        conn.close()
+        drift_events_created += 1
+
     return {
         "preset_id": preset_id,
         "name": data.get("name"),
         "pipes_created": pipes_created,
         "candidates_created": candidates_created,
+        "drift_events_created": drift_events_created,
         "message": f"Preset '{data.get('name')}' loaded successfully"
     }
 
