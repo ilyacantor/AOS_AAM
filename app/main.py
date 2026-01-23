@@ -1823,8 +1823,8 @@ async def ui_topology():
             <div class="filter-group">
                 <label>Layout:</label>
                 <select id="layout-select" onchange="changeLayout()">
-                    <option value="physics">Force-Directed</option>
                     <option value="hierarchical">Hierarchical</option>
+                    <option value="physics">Force-Directed</option>
                     <option value="circular">Circular</option>
                 </select>
             </div>
@@ -2063,7 +2063,7 @@ async def ui_topology():
 
         function resetView() {{
             document.getElementById('view-filter').value = 'all';
-            document.getElementById('layout-select').value = 'physics';
+            document.getElementById('layout-select').value = 'hierarchical';
             loadTopology('all');
         }}
 
