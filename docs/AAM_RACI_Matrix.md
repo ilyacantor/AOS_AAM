@@ -8,18 +8,12 @@
 
 | Component | Responsibility |
 |-----------|---------------|
-| **AOD** | Autonomous Operations Director - emits connection intent as ConnectionCandidates to AAM. |
-| **AAM** | Inventories reusable data pipes, infers minimal semantics, publishes DeclaredPipes for DCL consumption. Does NOT move data. |
-| **DCL** | Ingests schemas and data from routed pipes, performs semantic mapping to unified ontology. |
+| **AAM** | Inventories reusable data pipes, infers minimal semantics, publishes DeclaredPipes. Does NOT move data. |
+| **Farm** | Provides synthetic data streams and source of truth for verification and testing. |
 
 ## Core Philosophy
 
 > "We do not change how data moves. We make its behavior and meaning explicit."
-
-**Data Flow:**
-```
-AOD emits intent → AAM declares pipes → DCL unifies meaning
-```
 
 ## Feature Status Summary
 
@@ -43,51 +37,50 @@ AOD emits intent → AAM declares pipes → DCL unifies meaning
 
 ## RACI Matrix
 
-| Activity/Process | AAM | AOD | DCL |
-|-----------------|-----|-----|-----|
+| Activity/Process | AAM | Farm |
+|-----------------|-----|------|
 | **Candidate Management** |
-| Emit Connection Intent | C | A | I |
-| Receive ConnectionCandidate | A | R | I |
-| Triage Candidates | A | I | I |
-| Match Candidate to Pipe | A | I | C |
-| Defer Candidate | A | I | I |
+| Receive ConnectionCandidate | A | I |
+| Triage Candidates | A | I |
+| Match Candidate to Pipe | A | I |
+| Defer Candidate | A | I |
 | **Collector Operations** |
-| Register Collectors | A | I | I |
-| Run Collectors | A | I | I |
-| Track Collector Runs | A | I | I |
-| Generate Observations | A | I | I |
+| Register Collectors | A | I |
+| Run Collectors | A | C |
+| Track Collector Runs | A | I |
+| Generate Observations | A | C |
 | **Pipe Inference** |
-| Infer Fabric Plane | A | I | I |
-| Infer Modality | A | I | I |
-| Infer Transport Kind | A | I | I |
-| Infer Entity Scope | A | I | I |
-| Infer Identity Keys | A | I | I |
-| Infer Change Semantics | A | I | I |
-| Create DeclaredPipe | A | I | C |
+| Infer Fabric Plane | A | I |
+| Infer Modality | A | I |
+| Infer Transport Kind | A | I |
+| Infer Entity Scope | A | I |
+| Infer Identity Keys | A | I |
+| Infer Change Semantics | A | I |
+| Create DeclaredPipe | A | I |
 | **Pipe Registry** |
-| Store Declared Pipes | A | I | I |
-| Version Pipe Changes | A | I | I |
-| Compute Schema Hash | A | I | I |
-| Serve Pipe Queries | A | I | C |
+| Store Declared Pipes | A | I |
+| Version Pipe Changes | A | I |
+| Compute Schema Hash | A | I |
+| Serve Pipe Queries | A | I |
 | **Drift Detection** |
-| Detect Schema Drift | A | I | C |
-| Detect Freshness Drift | A | I | C |
-| Detect Contract Drift | A | I | C |
-| Acknowledge Drift | A | I | I |
-| Suppress Drift | A | I | I |
+| Detect Schema Drift | A | C |
+| Detect Freshness Drift | A | C |
+| Detect Contract Drift | A | C |
+| Acknowledge Drift | A | I |
+| Suppress Drift | A | I |
 | **Tee Request Management** |
-| Create Tee Request | A | I | I |
-| Track Tee Status | A | I | I |
-| Approve/Reject Tee | A | C | I |
-| **DCL Integration** |
-| Export Declared Pipes | A | I | R |
-| Route Pipes to DCL | A | I | R |
-| Provision Connector Info | A | I | R |
+| Create Tee Request | A | I |
+| Track Tee Status | A | I |
+| Approve/Reject Tee | A | I |
+| **Verification** |
+| Provide Source of Truth | C | A |
+| Verify Against Truth | R | A |
+| Generate Test Data | I | A |
 | **Operator UI** |
-| Display Pipe Inventory | A | I | I |
-| Display Drift Events | A | I | I |
-| Display Candidates | A | I | I |
-| Load Enterprise Presets | A | I | I |
+| Display Pipe Inventory | A | I |
+| Display Drift Events | A | I |
+| Display Candidates | A | I |
+| Load Enterprise Presets | A | I |
 
 ## Legend
 - **R** = Responsible (does the work)
@@ -99,10 +92,8 @@ AOD emits intent → AAM declares pipes → DCL unifies meaning
 
 | Integration | AAM Role | Partner | Partner Role | Status |
 |-------------|----------|---------|--------------|--------|
-| ConnectionCandidate Intake | Consumer | AOD | Provider | FUNCTIONAL |
-| DeclaredPipe Export | Provider | DCL | Consumer | FUNCTIONAL |
-| Connector Provisioning | Provider | DCL | Consumer | FUNCTIONAL |
-| Pipe Routing | Provider | DCL | Consumer | FUNCTIONAL |
+| Farm Source of Truth | Consumer | Farm | Provider | PLANNED |
+| Farm Test Data | Consumer | Farm | Provider | PLANNED |
 | Mock Collector | Internal | - | - | FUNCTIONAL |
 
 ## Fabric Plane Distribution
@@ -136,10 +127,9 @@ AOD emits intent → AAM declares pipes → DCL unifies meaning
 | Store Secrets | Access info contains NO credentials |
 
 ## Notes
-- AOD emits ConnectionCandidates representing discovery intent
 - AAM attaches to existing enterprise integration fabric via collectors
 - AAM infers minimal semantics from observations (transport, entities, freshness)
 - DeclaredPipes are the ONLY product AAM outputs
-- DCL consumes DeclaredPipes for semantic unification
+- Farm provides source of truth for verification and test data generation
 - Operators use UI to triage candidates, acknowledge drift, manage tee requests
 - "Weak signals become labels, not blockers" - trust labels don't gate pipes
