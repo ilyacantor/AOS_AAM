@@ -1,0 +1,32 @@
+"""
+AAM Fabric Plane Adapters
+
+AAM connects ONLY to Fabric Planes that aggregate data, NOT to individual SaaS apps.
+Exception: Preset 6 (Scrappy) mode allows direct Point-to-Point via GatewayAdapter.
+
+The 4 Fabric Planes:
+1. IPAAS: (Workato, MuleSoft) -> Control plane for integration flows
+2. API_GATEWAY: (Kong, Apigee) -> Direct managed API access
+3. EVENT_BUS: (Kafka, EventBridge) -> Streaming backbone
+4. DATA_WAREHOUSE: (Snowflake, BigQuery) -> Source of Truth storage
+
+AAM owns Self-Healing of Plane connections.
+"""
+
+from .base import FabricAdapter, AdapterStatus, PlaneHealth
+from .ipaas import IPaaSAdapter
+from .gateway import GatewayAdapter
+from .eventbus import EventBusAdapter
+from .warehouse import WarehouseAdapter
+from .factory import get_adapter_for_plane
+
+__all__ = [
+    "FabricAdapter",
+    "AdapterStatus", 
+    "PlaneHealth",
+    "IPaaSAdapter",
+    "GatewayAdapter",
+    "EventBusAdapter",
+    "WarehouseAdapter",
+    "get_adapter_for_plane",
+]
