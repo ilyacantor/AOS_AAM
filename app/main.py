@@ -121,7 +121,6 @@ NAV_HTML = """
         <a href="/ui/candidates" class="nav-link{candidates_active}">Candidates</a>
         <a href="/ui/drift" class="nav-link{drift_active}">Drift & Health</a>
         <a href="/ui/guide" class="nav-link{guide_active}">Guide</a>
-        <a href="/docs" class="nav-link{docs_active}">API</a>
     </div>
 </nav>
 """
@@ -417,7 +416,6 @@ def ui_nav(active: str = "") -> str:
         <a href="/ui/candidates" class="nav-link{active_class('candidates')}" data-testid="nav-candidates">Candidates</a>
         <a href="/ui/drift" class="nav-link{active_class('drift')}" data-testid="nav-drift">Drift & Health</a>
         <a href="/ui/guide" class="nav-link{active_class('guide')}" data-testid="nav-guide">Guide</a>
-        <a href="/docs" class="nav-link{active_class('docs')}" data-testid="nav-api">API</a>
     </div>
 </nav>
 """
