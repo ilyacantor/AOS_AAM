@@ -429,6 +429,7 @@ def ui_nav(active: str = "") -> str:
         <a href="/ui/pipes" class="nav-link{active_class('pipes')}" data-testid="nav-pipes">Pipes</a>
         <a href="/ui/candidates" class="nav-link{active_class('candidates')}" data-testid="nav-candidates">Candidates</a>
         <a href="/ui/drift" class="nav-link{active_class('drift')}" data-testid="nav-drift">Drift & Health</a>
+        <a href="/ui/topology" class="nav-link{active_class('topology')}" data-testid="nav-topology">Topology</a>
         <a href="/ui/guide" class="nav-link{active_class('guide')}" data-testid="nav-guide">Guide</a>
     </div>
 </nav>
@@ -1651,6 +1652,422 @@ async def ui_drift_list(status: Optional[str] = Query(None)):
             this.disabled = false;
             this.textContent = 'Re-run Collector';
         }});
+    </script>
+</body>
+</html>
+""")
+
+
+@app.get("/ui/topology", response_class=HTMLResponse, include_in_schema=False)
+async def ui_topology():
+    """Topology Visualization Screen - Interactive graph of pipes, planes, and sources"""
+    topology = get_topology_data()
+    stats = topology["stats"]
+
+    return HTMLResponse(content=f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Topology - AAM</title>
+    {NAV_STYLE}
+    {UI_STYLE}
+    <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <style>
+        #topology-container {{
+            width: 100%;
+            height: 600px;
+            border: 1px solid var(--slate-700);
+            border-radius: 8px;
+            background: rgba(15, 23, 42, 0.8);
+        }}
+        .topology-controls {{
+            display: flex;
+            gap: 12px;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+            align-items: center;
+        }}
+        .legend {{
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            margin-bottom: 16px;
+            padding: 12px;
+            background: rgba(30, 41, 59, 0.6);
+            border-radius: 8px;
+        }}
+        .legend-item {{
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.85rem;
+        }}
+        .legend-dot {{
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }}
+        .legend-line {{
+            width: 24px;
+            height: 2px;
+        }}
+        .node-details {{
+            position: absolute;
+            top: 100px;
+            right: 24px;
+            width: 300px;
+            background: rgba(30, 41, 59, 0.95);
+            border: 1px solid var(--slate-700);
+            border-radius: 8px;
+            padding: 16px;
+            display: none;
+            z-index: 100;
+        }}
+        .node-details.visible {{
+            display: block;
+        }}
+        .node-details h3 {{
+            margin-bottom: 12px;
+            color: var(--cyan-400);
+        }}
+        .node-details .close-btn {{
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background: none;
+            border: none;
+            color: var(--slate-400);
+            cursor: pointer;
+            font-size: 1.2rem;
+        }}
+        .filter-group {{
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }}
+        .filter-group label {{
+            font-size: 0.85rem;
+            color: var(--slate-400);
+        }}
+    </style>
+</head>
+<body>
+    {ui_nav("topology")}
+    <div class="container">
+        <h1>Topology Visualization</h1>
+
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-value">{stats.get('total_nodes', 0)}</div>
+                <div class="stat-label">Total Nodes</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{stats.get('total_edges', 0)}</div>
+                <div class="stat-label">Connections</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{stats.get('nodes_by_type', {{}}).get('pipe', 0)}</div>
+                <div class="stat-label">Pipes</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{stats.get('nodes_by_type', {{}}).get('candidate', 0)}</div>
+                <div class="stat-label">Candidates</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{stats.get('pipes_with_drift', 0)}</div>
+                <div class="stat-label">With Drift</div>
+            </div>
+        </div>
+
+        <div class="legend">
+            <div class="legend-item">
+                <div class="legend-dot" style="background: #a78bfa;"></div>
+                <span>API Gateway</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-dot" style="background: #22d3ee;"></div>
+                <span>iPaaS</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-dot" style="background: #f97316;"></div>
+                <span>Event Bus</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-dot" style="background: #10b981;"></div>
+                <span>Data Warehouse</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-dot" style="background: #60a5fa;"></div>
+                <span>Pipe</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-dot" style="background: #94a3b8;"></div>
+                <span>Source System</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-dot" style="background: #c084fc;"></div>
+                <span>Candidate</span>
+            </div>
+        </div>
+
+        <div class="topology-controls">
+            <div class="filter-group">
+                <label>View:</label>
+                <select id="view-filter" onchange="changeView()">
+                    <option value="all">All Nodes</option>
+                    <option value="API_GATEWAY">API Gateway Plane</option>
+                    <option value="IPAAS">iPaaS Plane</option>
+                    <option value="EVENT_BUS">Event Bus Plane</option>
+                    <option value="DATA_WAREHOUSE">Data Warehouse Plane</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Layout:</label>
+                <select id="layout-select" onchange="changeLayout()">
+                    <option value="physics">Force-Directed</option>
+                    <option value="hierarchical">Hierarchical</option>
+                    <option value="circular">Circular</option>
+                </select>
+            </div>
+            <button class="btn" onclick="resetView()">Reset View</button>
+            <button class="btn" onclick="fitToScreen()">Fit to Screen</button>
+            <button class="btn btn-success" onclick="refreshData()">Refresh Data</button>
+        </div>
+
+        <div id="topology-container"></div>
+
+        <div id="node-details" class="node-details">
+            <button class="close-btn" onclick="closeDetails()">&times;</button>
+            <h3 id="detail-title">Node Details</h3>
+            <div id="detail-content"></div>
+        </div>
+    </div>
+
+    <script>
+        let network = null;
+        let allNodes = [];
+        let allEdges = [];
+
+        const nodeColors = {{
+            fabric_plane: {{
+                'IPAAS': '#22d3ee',
+                'API_GATEWAY': '#a78bfa',
+                'EVENT_BUS': '#f97316',
+                'DATA_WAREHOUSE': '#10b981'
+            }},
+            pipe: '#60a5fa',
+            source_system: '#94a3b8',
+            candidate: '#c084fc'
+        }};
+
+        const nodeShapes = {{
+            fabric_plane: 'diamond',
+            pipe: 'dot',
+            source_system: 'square',
+            candidate: 'triangle'
+        }};
+
+        async function loadTopology(filter = 'all') {{
+            let url = '/api/topology';
+            if (filter !== 'all') {{
+                url = `/api/topology/plane/${{filter}}`;
+            }}
+
+            const response = await fetch(url);
+            const data = await response.json();
+
+            allNodes = data.nodes.map(n => ({{
+                id: n.id,
+                label: n.label,
+                shape: nodeShapes[n.type] || 'dot',
+                color: n.type === 'fabric_plane'
+                    ? nodeColors.fabric_plane[n.metadata.plane_type] || '#64748b'
+                    : nodeColors[n.type] || '#64748b',
+                size: n.type === 'fabric_plane' ? 30 : (n.type === 'pipe' ? 20 : 15),
+                font: {{ color: '#ffffff', size: 12 }},
+                title: buildTooltip(n),
+                nodeData: n
+            }}));
+
+            allEdges = data.edges.map(e => ({{
+                id: e.id,
+                from: e.source,
+                to: e.target,
+                color: {{ color: '#475569', opacity: 0.6 }},
+                width: e.type === 'candidate_to_pipe' ? 2 : 1,
+                dashes: e.type === 'candidate_for_source',
+                arrows: {{ to: {{ enabled: true, scaleFactor: 0.5 }} }}
+            }}));
+
+            renderNetwork();
+        }}
+
+        function buildTooltip(node) {{
+            let html = `<div style="background:#1e293b;padding:8px;border-radius:4px;color:#fff;">`;
+            html += `<strong>${{node.label}}</strong><br/>`;
+            html += `Type: ${{node.type}}<br/>`;
+            if (node.metadata.fabric_plane) html += `Plane: ${{node.metadata.fabric_plane}}<br/>`;
+            if (node.metadata.source_system) html += `Source: ${{node.metadata.source_system}}<br/>`;
+            if (node.metadata.modality) html += `Modality: ${{node.metadata.modality}}<br/>`;
+            if (node.metadata.status) html += `Status: ${{node.metadata.status}}<br/>`;
+            html += `</div>`;
+            return html;
+        }}
+
+        function renderNetwork() {{
+            const container = document.getElementById('topology-container');
+            const data = {{
+                nodes: new vis.DataSet(allNodes),
+                edges: new vis.DataSet(allEdges)
+            }};
+
+            const options = getLayoutOptions();
+
+            network = new vis.Network(container, data, options);
+
+            network.on('click', function(params) {{
+                if (params.nodes.length > 0) {{
+                    const nodeId = params.nodes[0];
+                    const node = allNodes.find(n => n.id === nodeId);
+                    if (node) showNodeDetails(node);
+                }} else {{
+                    closeDetails();
+                }}
+            }});
+
+            network.on('doubleClick', function(params) {{
+                if (params.nodes.length > 0) {{
+                    const nodeId = params.nodes[0];
+                    const node = allNodes.find(n => n.id === nodeId);
+                    if (node && node.nodeData.type === 'pipe') {{
+                        window.location.href = `/ui/pipes/${{node.nodeData.metadata.pipe_id}}`;
+                    }}
+                }}
+            }});
+        }}
+
+        function getLayoutOptions() {{
+            const layoutType = document.getElementById('layout-select').value;
+
+            const baseOptions = {{
+                nodes: {{
+                    borderWidth: 2,
+                    shadow: true
+                }},
+                edges: {{
+                    smooth: {{ type: 'continuous' }}
+                }},
+                interaction: {{
+                    hover: true,
+                    tooltipDelay: 200,
+                    zoomView: true,
+                    dragView: true
+                }}
+            }};
+
+            if (layoutType === 'hierarchical') {{
+                return {{
+                    ...baseOptions,
+                    layout: {{
+                        hierarchical: {{
+                            direction: 'UD',
+                            sortMethod: 'hubsize',
+                            levelSeparation: 100,
+                            nodeSpacing: 150
+                        }}
+                    }},
+                    physics: false
+                }};
+            }} else if (layoutType === 'circular') {{
+                return {{
+                    ...baseOptions,
+                    layout: {{
+                        improvedLayout: true
+                    }},
+                    physics: {{
+                        enabled: true,
+                        solver: 'repulsion',
+                        repulsion: {{
+                            nodeDistance: 200
+                        }}
+                    }}
+                }};
+            }} else {{
+                return {{
+                    ...baseOptions,
+                    physics: {{
+                        enabled: true,
+                        solver: 'forceAtlas2Based',
+                        forceAtlas2Based: {{
+                            gravitationalConstant: -50,
+                            springLength: 100,
+                            springConstant: 0.08
+                        }},
+                        stabilization: {{ iterations: 100 }}
+                    }}
+                }};
+            }}
+        }}
+
+        function showNodeDetails(node) {{
+            const details = document.getElementById('node-details');
+            const title = document.getElementById('detail-title');
+            const content = document.getElementById('detail-content');
+
+            title.textContent = node.label;
+
+            let html = `<div class="field"><div class="field-label">Type</div><div class="field-value">${{node.nodeData.type}}</div></div>`;
+
+            const meta = node.nodeData.metadata;
+            for (const [key, value] of Object.entries(meta)) {{
+                if (value && key !== 'central' && key !== 'color') {{
+                    let displayValue = value;
+                    if (Array.isArray(value)) {{
+                        displayValue = value.length > 0 ? value.join(', ') : '(none)';
+                    }}
+                    const label = key.replace(/_/g, ' ').replace(/\\b\\w/g, l => l.toUpperCase());
+                    html += `<div class="field"><div class="field-label">${{label}}</div><div class="field-value">${{displayValue}}</div></div>`;
+                }}
+            }}
+
+            if (node.nodeData.type === 'pipe') {{
+                html += `<div style="margin-top:12px;"><a href="/ui/pipes/${{meta.pipe_id}}" class="btn btn-sm">View Pipe Details</a></div>`;
+            }}
+
+            content.innerHTML = html;
+            details.classList.add('visible');
+        }}
+
+        function closeDetails() {{
+            document.getElementById('node-details').classList.remove('visible');
+        }}
+
+        function changeView() {{
+            const filter = document.getElementById('view-filter').value;
+            loadTopology(filter);
+        }}
+
+        function changeLayout() {{
+            renderNetwork();
+        }}
+
+        function resetView() {{
+            document.getElementById('view-filter').value = 'all';
+            document.getElementById('layout-select').value = 'physics';
+            loadTopology('all');
+        }}
+
+        function fitToScreen() {{
+            if (network) network.fit();
+        }}
+
+        function refreshData() {{
+            const filter = document.getElementById('view-filter').value;
+            loadTopology(filter);
+        }}
+
+        // Initialize
+        loadTopology();
     </script>
 </body>
 </html>
