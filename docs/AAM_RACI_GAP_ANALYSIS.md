@@ -15,11 +15,13 @@ This document compares the AAM accountabilities defined in the RACI matrix (capa
 
 | Metric | Count | Percentage |
 |--------|-------|------------|
-| **Fully Implemented** | 42 | 71% |
+| **Fully Implemented** | 43 | 73% |
 | **Partially Implemented** | 12 | 20% |
-| **Not Implemented** | 5 | 9% |
+| **Not Implemented** | 4 | 7% |
 
 **Functional Status: MOSTLY FUNCTIONAL**
+
+> **Update:** Topology API has been implemented, moving one item from "Not Implemented" to "Fully Implemented".
 
 The AAM implementation is functional for core operations. The architecture is sound, APIs are working, and the main workflows (candidate intake, pipe inference, drift detection, adapter connectivity) operate correctly. However, several capabilities are mock implementations awaiting real integration, and some governance features are stubbed.
 
@@ -212,7 +214,7 @@ The AAM implementation is functional for core operations. The architecture is so
 |----------------|--------|---------------------|
 | Candidate Management (Receive/Match/Triage/Defer) | **IMPLEMENTED** | Full workflow in API and UI |
 | Pipe Inference full suite | **IMPLEMENTED** | Complete inference engine |
-| Visualization - Topology API Exposure | **NOT IMPLEMENTED** | No graph/topology API |
+| Visualization - Topology API Exposure | **IMPLEMENTED** | Full graph API with nodes/edges at `/api/topology/*` |
 
 ---
 
@@ -238,7 +240,7 @@ The AAM implementation is functional for core operations. The architecture is so
 
 ### Minor Gaps (Enhancement Opportunities)
 
-7. **Topology/Graph API** - No visualization backend for graph UI
+7. ~~**Topology/Graph API** - No visualization backend for graph UI~~ **IMPLEMENTED**
 8. **Real Self-Healing** - Mock healing, doesn't restart consumers
 
 ---
