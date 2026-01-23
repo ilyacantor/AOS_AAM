@@ -2855,8 +2855,8 @@ async def load_preset(preset_id: str, clear_existing: bool = Query(True, descrip
             "lineage_hints": [f"preset:{preset_id}"]
         }
         pipe_data["provenance"] = provenance
-        pipe_id = create_pipe(pipe_data)
-        created_pipe_ids.append(pipe_id)
+        result = create_pipe(pipe_data)
+        created_pipe_ids.append(result["pipe_id"])
         pipes_created += 1
 
     for candidate_data in data.get("candidates", []):
