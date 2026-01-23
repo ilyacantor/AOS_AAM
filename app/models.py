@@ -283,3 +283,61 @@ class ExportResponse(BaseModel):
     exported_at: datetime = Field(default_factory=datetime.utcnow)
     pipe_count: int
     pipes: list[DeclaredPipe]
+
+
+# ============================================================================
+# TOPOLOGY / GRAPH MODELS
+# ============================================================================
+
+class NodeType(str, Enum):
+    """Types of nodes in the topology graph"""
+    FABRIC_PLANE = "fabric_plane"
+    SOURCE_SYSTEM = "source_system"
+    PIPE = "pipe"
+    CANDIDATE = "candidate"
+
+
+class EdgeType(str, Enum):
+    """Types of edges in the topology graph"""
+    PIPE_IN_PLANE = "pipe_in_plane"           # Pipe belongs to fabric plane
+    PIPE_FROM_SOURCE = "pipe_from_source"     # Pipe originates from source
+    CANDIDATE_TO_PIPE = "candidate_to_pipe"   # Candidate matched to pipe
+    CANDIDATE_FOR_SOURCE = "candidate_for_source"  # Candidate targets source
+
+
+class TopologyNode(BaseModel):
+    """A node in the topology graph"""
+    id: str = Field(..., description="Unique node identifier")
+    type: NodeType = Field(..., description="Node type")
+    label: str = Field(..., description="Display label")
+    metadata: dict = Field(default_factory=dict, description="Additional node properties")
+
+
+class TopologyEdge(BaseModel):
+    """An edge connecting two nodes in the topology"""
+    id: str = Field(..., description="Unique edge identifier")
+    source: str = Field(..., description="Source node ID")
+    target: str = Field(..., description="Target node ID")
+    type: EdgeType = Field(..., description="Edge type")
+    metadata: dict = Field(default_factory=dict, description="Additional edge properties")
+
+
+class TopologyGraph(BaseModel):
+    """Complete topology graph for visualization"""
+    nodes: list[TopologyNode] = Field(default_factory=list)
+    edges: list[TopologyEdge] = Field(default_factory=list)
+    stats: dict = Field(default_factory=dict, description="Graph statistics")
+    generated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class TopologyStats(BaseModel):
+    """Statistics about the topology"""
+    total_nodes: int = 0
+    total_edges: int = 0
+    nodes_by_type: dict = Field(default_factory=dict)
+    edges_by_type: dict = Field(default_factory=dict)
+    fabric_planes: list[str] = Field(default_factory=list)
+    source_systems: list[str] = Field(default_factory=list)
+    connected_candidates: int = 0
+    unconnected_candidates: int = 0
+    pipes_with_drift: int = 0

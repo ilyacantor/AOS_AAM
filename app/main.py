@@ -38,7 +38,10 @@ from .db import (
     get_drift_event,
     clear_all_data,
     get_pipe_stats,
-    create_observation
+    create_observation,
+    get_topology_data,
+    get_topology_for_pipe,
+    get_topology_for_fabric_plane
 )
 from .collectors.mock import run_mock_collector
 from .inference import infer_pipes_from_observations
@@ -2470,6 +2473,184 @@ async def get_stats():
         status = c.get("status", "new")
         stats["candidates_by_status"][status] = stats["candidates_by_status"].get(status, 0) + 1
     return stats
+
+
+# ============================================================================
+# TOPOLOGY API (Graph/Visualization)
+# ============================================================================
+
+@app.get("/api/topology", tags=["Topology"])
+async def get_full_topology():
+    """
+    Get the complete topology graph for visualization.
+
+    Returns nodes (fabric planes, source systems, pipes, candidates) and
+    edges (relationships between them) suitable for graph visualization.
+
+    Node types:
+    - fabric_plane: Integration fabric (IPAAS, API_GATEWAY, EVENT_BUS, DATA_WAREHOUSE)
+    - source_system: Data source (Salesforce, Workato, etc.)
+    - pipe: Declared data pipe
+    - candidate: Connection candidate
+
+    Edge types:
+    - pipe_in_plane: Pipe belongs to a fabric plane
+    - pipe_from_source: Pipe originates from a source system
+    - candidate_to_pipe: Candidate matched to a pipe
+    - candidate_for_source: Candidate targets a source system
+    """
+    from datetime import datetime
+    topology = get_topology_data()
+    return {
+        "nodes": topology["nodes"],
+        "edges": topology["edges"],
+        "stats": topology["stats"],
+        "generated_at": datetime.utcnow().isoformat()
+    }
+
+
+@app.get("/api/topology/nodes", tags=["Topology"])
+async def get_topology_nodes(
+    node_type: Optional[str] = Query(None, description="Filter by node type (fabric_plane, source_system, pipe, candidate)")
+):
+    """Get just the nodes from the topology graph, optionally filtered by type."""
+    topology = get_topology_data()
+    nodes = topology["nodes"]
+
+    if node_type:
+        nodes = [n for n in nodes if n["type"] == node_type]
+
+    return {
+        "nodes": nodes,
+        "total": len(nodes),
+        "filter": node_type
+    }
+
+
+@app.get("/api/topology/edges", tags=["Topology"])
+async def get_topology_edges(
+    edge_type: Optional[str] = Query(None, description="Filter by edge type (pipe_in_plane, pipe_from_source, candidate_to_pipe, candidate_for_source)")
+):
+    """Get just the edges from the topology graph, optionally filtered by type."""
+    topology = get_topology_data()
+    edges = topology["edges"]
+
+    if edge_type:
+        edges = [e for e in edges if e["type"] == edge_type]
+
+    return {
+        "edges": edges,
+        "total": len(edges),
+        "filter": edge_type
+    }
+
+
+@app.get("/api/topology/stats", tags=["Topology"])
+async def get_topology_stats():
+    """
+    Get statistics about the topology.
+
+    Returns counts of nodes/edges by type, list of fabric planes and source systems,
+    and connectivity statistics.
+    """
+    topology = get_topology_data()
+    return topology["stats"]
+
+
+@app.get("/api/topology/pipe/{pipe_id}", tags=["Topology"])
+async def get_pipe_topology(pipe_id: str):
+    """
+    Get topology centered on a specific pipe.
+
+    Returns the pipe, its fabric plane, source system, and any connected candidates.
+    Useful for focused visualization of a single pipe's context.
+    """
+    result = get_topology_for_pipe(pipe_id)
+    if not result["nodes"]:
+        raise HTTPException(status_code=404, detail=f"Pipe {pipe_id} not found")
+
+    from datetime import datetime
+    return {
+        **result,
+        "generated_at": datetime.utcnow().isoformat()
+    }
+
+
+@app.get("/api/topology/plane/{fabric_plane}", tags=["Topology"])
+async def get_plane_topology(fabric_plane: str):
+    """
+    Get topology for a specific fabric plane.
+
+    Returns all pipes in the specified plane and their source systems.
+    Valid planes: IPAAS, API_GATEWAY, EVENT_BUS, DATA_WAREHOUSE
+    """
+    valid_planes = ["IPAAS", "API_GATEWAY", "EVENT_BUS", "DATA_WAREHOUSE"]
+    if fabric_plane.upper() not in valid_planes:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid fabric plane. Must be one of: {', '.join(valid_planes)}"
+        )
+
+    result = get_topology_for_fabric_plane(fabric_plane.upper())
+
+    from datetime import datetime
+    return {
+        **result,
+        "generated_at": datetime.utcnow().isoformat()
+    }
+
+
+@app.get("/api/topology/source/{source_system}", tags=["Topology"])
+async def get_source_topology(source_system: str):
+    """
+    Get topology for a specific source system.
+
+    Returns all pipes and candidates connected to the specified source system.
+    """
+    topology = get_topology_data()
+
+    # Filter to nodes connected to this source
+    source_node_id = f"source:{source_system}"
+
+    # Check if source exists
+    source_exists = any(n["id"] == source_node_id for n in topology["nodes"])
+    if not source_exists:
+        raise HTTPException(status_code=404, detail=f"Source system '{source_system}' not found")
+
+    # Get connected node IDs
+    connected_ids = {source_node_id}
+    for edge in topology["edges"]:
+        if edge["target"] == source_node_id:
+            connected_ids.add(edge["source"])
+        elif edge["source"] == source_node_id:
+            connected_ids.add(edge["target"])
+
+    # Also include fabric planes for connected pipes
+    for edge in topology["edges"]:
+        if edge["source"] in connected_ids and edge["type"] == "pipe_in_plane":
+            connected_ids.add(edge["target"])
+
+    nodes = [n for n in topology["nodes"] if n["id"] in connected_ids]
+    edges = [e for e in topology["edges"]
+             if e["source"] in connected_ids and e["target"] in connected_ids]
+
+    # Mark the source as central
+    for node in nodes:
+        if node["id"] == source_node_id:
+            node["metadata"]["central"] = True
+
+    from datetime import datetime
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "stats": {
+            "total_nodes": len(nodes),
+            "total_edges": len(edges),
+            "pipes": len([n for n in nodes if n["type"] == "pipe"]),
+            "candidates": len([n for n in nodes if n["type"] == "candidate"])
+        },
+        "generated_at": datetime.utcnow().isoformat()
+    }
 
 
 @app.delete("/api/data", tags=["Admin"])
