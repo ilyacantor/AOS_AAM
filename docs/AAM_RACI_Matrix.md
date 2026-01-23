@@ -4,16 +4,27 @@
 
 **Last Verified:** January 23, 2026
 
+## Global Architecture Pivot
+
+> **Self-Healing Mesh + Zero-Trust Vision**
+
+| Component | New Role | Boundary |
+|-----------|----------|----------|
+| **AAM** | The Mesh | Owns Self-Healing and Repair |
+| **Farm** | The Verifier | Strictly a Test Oracle |
+| **DCL** | The Brain | Metadata-Only (no raw data buffering) |
+| **AOA** | The Orchestrator | Owns Execution and Infrastructure |
+
 ## System Architecture Context
 
 | Component | Responsibility |
 |-----------|---------------|
-| **AAM** | Inventories reusable data pipes, infers minimal semantics, publishes DeclaredPipes. Does NOT move data. |
-| **Farm** | Provides synthetic data streams and source of truth for verification and testing. |
+| **AAM** | The Self-Healing Mesh. Inventories pipes, infers semantics, AND owns repair operations. Active, not passive. |
+| **Farm** | The Test Oracle. Provides synthetic data and source of truth for verification. Does NOT handle ops. |
 
 ## Core Philosophy
 
-> "We do not change how data moves. We make its behavior and meaning explicit."
+> "We do not change how data moves. We make its behavior and meaning explicit. We self-heal when things drift."
 
 ## Feature Status Summary
 
@@ -29,6 +40,7 @@
 | Schema Hash Detection | FUNCTIONAL | Tracks schema changes |
 | Drift Detection | FUNCTIONAL | Schema, freshness, contract drift |
 | Drift Ack/Suppress | FUNCTIONAL | Operator workflow |
+| Self-Healing Repair | PLANNED | AAM now owns this |
 | Tee Request Management | FUNCTIONAL | Create/track tee artifacts |
 | Pipe Versioning | FUNCTIONAL | Version history per pipe |
 | DCL Export | FUNCTIONAL | Export declared pipes JSON |
@@ -46,9 +58,9 @@
 | Defer Candidate | R/A | I |
 | **Collector Operations** |
 | Register Collectors | R/A | I |
-| Run Collectors | R/A | C |
+| Run Collectors | R/A | I |
 | Track Collector Runs | R/A | I |
-| Generate Observations | R/A | C |
+| Generate Observations | R/A | I |
 | **Pipe Inference** |
 | Infer Fabric Plane | R/A | I |
 | Infer Modality | R/A | I |
@@ -68,11 +80,16 @@
 | Detect Contract Drift | R/A | C |
 | Acknowledge Drift | R/A | I |
 | Suppress Drift | R/A | I |
+| **Self-Healing (NEW - AAM Owns)** |
+| Identify Repair Candidates | R/A | C |
+| Execute Repair Action | R/A | I |
+| Validate Repair Success | R | A |
+| Log Repair History | R/A | I |
 | **Tee Request Management** |
 | Create Tee Request | R/A | I |
 | Track Tee Status | R/A | I |
 | Approve/Reject Tee | R/A | I |
-| **Verification** |
+| **Verification (Farm = Oracle)** |
 | Provide Source of Truth | C | R/A |
 | Verify Against Truth | R | A |
 | Generate Test Data | I | R/A |
@@ -88,12 +105,32 @@
 - **C** = Consulted (provides input)
 - **I** = Informed (kept updated)
 
+## Architectural Boundaries
+
+### AAM Owns (Self-Healing Mesh)
+- Pipe inventory and inference
+- Drift detection AND repair
+- Self-healing operations
+- Active mesh management
+
+### Farm Owns (Test Oracle Only)
+- Source of truth data
+- Verification responses
+- Test data generation
+- Does NOT handle ops or infrastructure
+
+### AAM Does NOT Own (Delegated to AOA)
+- Infrastructure provisioning
+- Execution orchestration
+- Runtime operations
+
 ## Key Integration Points
 
 | Integration | AAM Role | Partner | Partner Role | Status |
 |-------------|----------|---------|--------------|--------|
 | Farm Source of Truth | Consumer | Farm | Provider | PLANNED |
-| Farm Test Data | Consumer | Farm | Provider | PLANNED |
+| Farm Verification | Consumer | Farm | Oracle | PLANNED |
+| Self-Healing Repair | Owner | - | - | PLANNED |
 | Mock Collector | Internal | - | - | FUNCTIONAL |
 
 ## Fabric Plane Distribution
@@ -123,13 +160,14 @@
 | Act as iPaaS | We inventory iPaaS, not replace it |
 | Act as Kafka | We observe streams, not run them |
 | Build SaaS Connectors | We catalog existing fabric |
-| Provision Infrastructure | We document what exists |
+| Provision Infrastructure | Delegated to AOA |
 | Store Secrets | Access info contains NO credentials |
+| Handle Ops | Delegated to AOA (formerly Farm's burden) |
 
 ## Notes
-- AAM attaches to existing enterprise integration fabric via collectors
-- AAM infers minimal semantics from observations (transport, entities, freshness)
+- AAM is now ACTIVE, not passive - owns self-healing and repair
+- Farm is strictly a Test Oracle - no ops responsibilities
+- DCL receives metadata only from AAM (zero-trust, no raw data)
+- AOA owns execution and infrastructure (picked up from Farm)
 - DeclaredPipes are the ONLY product AAM outputs
-- Farm provides source of truth for verification and test data generation
-- Operators use UI to triage candidates, acknowledge drift, manage tee requests
 - "Weak signals become labels, not blockers" - trust labels don't gate pipes

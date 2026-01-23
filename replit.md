@@ -1,23 +1,32 @@
 # AAM - Adaptive API Mesh
 
+## Global Architecture Pivot (January 2026)
+
+> **Self-Healing Mesh + Zero-Trust Vision**
+
+| Component | Role | Boundary |
+|-----------|------|----------|
+| **AAM** | The Mesh | Owns Self-Healing and Repair (ACTIVE, not passive) |
+| **Farm** | The Verifier | Strictly a Test Oracle (no ops) |
+| **DCL** | The Brain | Metadata-Only (no raw data buffering) |
+| **AOA** | The Orchestrator | Owns Execution and Infrastructure |
+
+All refactoring must adhere to these four boundary changes.
+
 ## Overview
 
-AAM (Adaptive API Mesh) is the integration layer that inventories reusable data pipes and makes their behavior and meaning explicit.
+AAM (Adaptive API Mesh) is the self-healing integration mesh that inventories reusable data pipes, makes their behavior explicit, and owns repair operations.
 
 **Core Philosophy:**
-> "We do not change how data moves. We make its behavior and meaning explicit."
-
-**Data Flow:**
-```
-AOD emits intent → AAM declares pipes → DCL unifies meaning
-```
+> "We do not change how data moves. We make its behavior and meaning explicit. We self-heal when things drift."
 
 **AAM's Role:**
-- Ingest connection intent from AOD (ConnectionCandidates)
+- Ingest connection intent (ConnectionCandidates)
 - Attach to existing enterprise integration fabric (control planes)
 - Inventory reusable data pipes via collectors
 - Infer minimal semantics about those pipes
 - Publish DeclaredPipes for DCL to consume
+- **Own self-healing and repair operations**
 
 **AAM Does NOT:**
 - Move data
@@ -25,6 +34,8 @@ AOD emits intent → AAM declares pipes → DCL unifies meaning
 - Act as an iPaaS
 - Act as a Kafka / streaming platform
 - Build per-app SaaS connectors
+- Handle infrastructure (delegated to AOA)
+- Handle ops (delegated to AOA)
 
 ## User Preferences
 
