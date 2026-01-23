@@ -5,7 +5,7 @@ Inventory reusable data pipes and make their behavior explicit.
 AOD emits intent → AAM declares pipes → DCL unifies meaning.
 """
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
@@ -129,7 +129,7 @@ NAV_STYLE = """
 
 NAV_HTML = """
 <nav class="nav">
-    <a href="/" class="nav-brand">AAM</a>
+    <a href="/ui/topology" class="nav-brand">AAM</a>
     <div class="nav-links">
         <a href="/ui/pipes" class="nav-link{pipes_active}">Pipes</a>
         <a href="/ui/candidates" class="nav-link{candidates_active}">Candidates</a>
@@ -140,97 +140,10 @@ NAV_HTML = """
 """
 
 
-@app.get("/", response_class=HTMLResponse)
+@app.get("/")
 async def root():
-    """Landing page with AAM branding"""
-    return HTMLResponse(content=f"""
-<!DOCTYPE html>
-<html>
-<head>
-    <title>AAM - Adaptive API Mesh</title>
-    {NAV_STYLE}
-    <style>
-        .container {{
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 80px 20px;
-            text-align: center;
-        }}
-        h1 {{
-            font-size: 3rem;
-            font-weight: 700;
-            margin-bottom: 8px;
-            background: linear-gradient(135deg, #22d3ee, #0891b2);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }}
-        .subtitle {{
-            font-size: 1.25rem;
-            color: #94a3b8;
-            margin-bottom: 40px;
-        }}
-        .tagline {{
-            font-size: 1.5rem;
-            color: #e2e8f0;
-            line-height: 1.6;
-            margin-bottom: 48px;
-            font-weight: 500;
-        }}
-        .flow {{
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 16px;
-            margin-bottom: 48px;
-            flex-wrap: wrap;
-        }}
-        .flow-item {{
-            background: rgba(30, 41, 59, 0.6);
-            border: 1px solid #334155;
-            border-radius: 8px;
-            padding: 16px 24px;
-            font-weight: 600;
-        }}
-        .flow-arrow {{
-            color: #22d3ee;
-            font-size: 1.5rem;
-        }}
-        .cta {{
-            display: inline-block;
-            background: linear-gradient(135deg, #22d3ee, #0891b2);
-            color: #0f172a;
-            padding: 14px 32px;
-            border-radius: 8px;
-            text-decoration: none;
-            font-weight: 600;
-            font-size: 1.1rem;
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
-        }}
-        .cta:hover {{
-            transform: translateY(-2px);
-            box-shadow: 0 8px 20px rgba(34, 211, 238, 0.3);
-        }}
-    </style>
-</head>
-<body>
-    {NAV_HTML.format(pipes_active="", candidates_active="", drift_active="", guide_active="", docs_active="")}
-    <div class="container">
-        <h1>Adaptive API Mesh</h1>
-        <p class="subtitle">AAM v0.1.0</p>
-        <p class="tagline">We do not change how data moves.<br>We make its behavior and meaning explicit.</p>
-        <div class="flow">
-            <div class="flow-item">AOD emits intent</div>
-            <span class="flow-arrow">→</span>
-            <div class="flow-item">AAM declares pipes</div>
-            <span class="flow-arrow">→</span>
-            <div class="flow-item">DCL unifies meaning</div>
-        </div>
-        <a href="/docs" class="cta">Explore API Documentation</a>
-    </div>
-</body>
-</html>
-""")
+    """Redirect to Topology visualization"""
+    return RedirectResponse(url="/ui/topology")
 
 
 @app.get("/docs", response_class=HTMLResponse, include_in_schema=False)
@@ -426,12 +339,12 @@ def ui_nav(active: str = "") -> str:
         return " active" if page == active else ""
     return f"""
 <nav class="nav">
-    <a href="/" class="nav-brand">AAM</a>
+    <a href="/ui/topology" class="nav-brand">AAM</a>
     <div class="nav-links">
+        <a href="/ui/topology" class="nav-link{active_class('topology')}" data-testid="nav-topology">Topology</a>
         <a href="/ui/pipes" class="nav-link{active_class('pipes')}" data-testid="nav-pipes">Pipes</a>
         <a href="/ui/candidates" class="nav-link{active_class('candidates')}" data-testid="nav-candidates">Candidates</a>
         <a href="/ui/drift" class="nav-link{active_class('drift')}" data-testid="nav-drift">Drift & Health</a>
-        <a href="/ui/topology" class="nav-link{active_class('topology')}" data-testid="nav-topology">Topology</a>
         <a href="/ui/guide" class="nav-link{active_class('guide')}" data-testid="nav-guide">Guide</a>
     </div>
 </nav>
