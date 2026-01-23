@@ -1661,29 +1661,6 @@ async def ui_drift_list(status: Optional[str] = Query(None)):
 @app.get("/ui/topology", response_class=HTMLResponse, include_in_schema=False)
 async def ui_topology():
     """Topology Visualization Screen - Interactive graph of pipes, planes, and sources"""
-    try:
-        topology = get_topology_data()
-        stats = topology["stats"]
-    except Exception as e:
-        return HTMLResponse(content=f"""
-<!DOCTYPE html>
-<html>
-<head><title>Topology Error - AAM</title>{NAV_STYLE}{UI_STYLE}</head>
-<body>
-    {ui_nav("topology")}
-    <div class="container">
-        <h1>Topology Error</h1>
-        <div class="panel">
-            <p>Error loading topology data:</p>
-            <pre style="color: #f87171; background: #1e293b; padding: 16px; border-radius: 8px; overflow-x: auto;">{str(e)}</pre>
-            <p style="margin-top: 16px;">Try running the mock collector first to generate some data:</p>
-            <a href="/ui/drift" class="btn">Go to Drift & Health</a>
-        </div>
-    </div>
-</body>
-</html>
-""")
-
     return HTMLResponse(content=f"""
 <!DOCTYPE html>
 <html>
@@ -1776,25 +1753,25 @@ async def ui_topology():
     <div class="container">
         <h1>Topology Visualization</h1>
 
-        <div class="stats">
+        <div class="stats" id="stats-container">
             <div class="stat-card">
-                <div class="stat-value">{stats.get('total_nodes', 0)}</div>
+                <div class="stat-value" id="stat-nodes">-</div>
                 <div class="stat-label">Total Nodes</div>
             </div>
             <div class="stat-card">
-                <div class="stat-value">{stats.get('total_edges', 0)}</div>
+                <div class="stat-value" id="stat-edges">-</div>
                 <div class="stat-label">Connections</div>
             </div>
             <div class="stat-card">
-                <div class="stat-value">{stats.get('nodes_by_type', {{}}).get('pipe', 0)}</div>
+                <div class="stat-value" id="stat-pipes">-</div>
                 <div class="stat-label">Pipes</div>
             </div>
             <div class="stat-card">
-                <div class="stat-value">{stats.get('nodes_by_type', {{}}).get('candidate', 0)}</div>
+                <div class="stat-value" id="stat-candidates">-</div>
                 <div class="stat-label">Candidates</div>
             </div>
             <div class="stat-card">
-                <div class="stat-value">{stats.get('pipes_with_drift', 0)}</div>
+                <div class="stat-value" id="stat-drift">-</div>
                 <div class="stat-label">With Drift</div>
             </div>
         </div>
@@ -1918,6 +1895,15 @@ async def ui_topology():
                 dashes: e.type === 'candidate_for_source',
                 arrows: {{ to: {{ enabled: true, scaleFactor: 0.5 }} }}
             }}));
+
+            // Update stats
+            if (data.stats) {{
+                document.getElementById('stat-nodes').textContent = data.stats.total_nodes || 0;
+                document.getElementById('stat-edges').textContent = data.stats.total_edges || 0;
+                document.getElementById('stat-pipes').textContent = (data.stats.nodes_by_type && data.stats.nodes_by_type.pipe) || 0;
+                document.getElementById('stat-candidates').textContent = (data.stats.nodes_by_type && data.stats.nodes_by_type.candidate) || 0;
+                document.getElementById('stat-drift').textContent = data.stats.pipes_with_drift || 0;
+            }}
 
             renderNetwork();
         }}
