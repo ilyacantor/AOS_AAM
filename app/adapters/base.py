@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Optional, Dict, Any, List
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class AdapterStatus(str, Enum):
@@ -28,7 +28,7 @@ class PlaneHealth(BaseModel):
     last_check: datetime
     latency_ms: Optional[float] = None
     error_message: Optional[str] = None
-    metrics: Dict[str, Any] = {}
+    metrics: Dict[str, Any] = Field(default_factory=dict)
 
 
 class PlaneDrift(BaseModel):
@@ -37,7 +37,7 @@ class PlaneDrift(BaseModel):
     plane_type: str
     drift_type: str  # "connection_lost", "latency_spike", "consumer_lag", "warehouse_suspended"
     detected_at: datetime
-    details: Dict[str, Any] = {}
+    details: Dict[str, Any] = Field(default_factory=dict)
     auto_healed: bool = False
     healed_at: Optional[datetime] = None
 

@@ -101,31 +101,31 @@ class GatewayAdapter(FabricAdapter):
             mock_apis = [
                 {
                     "api_id": "api-direct-001",
-                    "name": "Salesforce Direct API",
-                    "base_url": "/services/data/v58.0",
-                    "endpoints": ["/sobjects/Account", "/sobjects/Contact"],
-                    "vendor": "salesforce"
+                    "name": "CRM Direct API (Scrappy Mode)",
+                    "base_url": "/api/crm/v1",
+                    "endpoints": ["/accounts", "/contacts"],
+                    "access_type": "direct_point_to_point"
                 },
                 {
                     "api_id": "api-direct-002",
-                    "name": "HubSpot Direct API",
-                    "base_url": "/crm/v3",
-                    "endpoints": ["/objects/contacts", "/objects/companies"],
-                    "vendor": "hubspot"
+                    "name": "Marketing Direct API (Scrappy Mode)",
+                    "base_url": "/api/marketing/v1",
+                    "endpoints": ["/contacts", "/companies"],
+                    "access_type": "direct_point_to_point"
                 }
             ]
         else:
             mock_apis = [
                 {
                     "api_id": f"api-{self._vendor}-001",
-                    "name": f"{self._vendor.title()} - CRM Gateway",
+                    "name": f"{self._vendor.title()} - CRM Gateway Route",
                     "route": "/api/crm/*",
                     "upstream": "internal-crm-service",
                     "plugins": ["rate-limiting", "jwt-auth"]
                 },
                 {
                     "api_id": f"api-{self._vendor}-002",
-                    "name": f"{self._vendor.title()} - ERP Gateway",
+                    "name": f"{self._vendor.title()} - ERP Gateway Route",
                     "route": "/api/erp/*",
                     "upstream": "internal-erp-service",
                     "plugins": ["rate-limiting", "oauth2"]

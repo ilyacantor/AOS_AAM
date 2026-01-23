@@ -116,14 +116,14 @@ class WarehouseAdapter(FabricAdapter):
         
         mock_tables = [
             {
-                "table": "raw.salesforce.accounts",
+                "table": "raw.crm.accounts",
                 "type": "table",
                 "entities": ["Account"],
                 "row_count": 150000,
                 "last_modified": "2026-01-23T10:00:00Z"
             },
             {
-                "table": "raw.hubspot.contacts",
+                "table": "raw.marketing.contacts",
                 "type": "table",
                 "entities": ["Contact"],
                 "row_count": 500000,
@@ -133,7 +133,7 @@ class WarehouseAdapter(FabricAdapter):
                 "table": "curated.customers_360",
                 "type": "view",
                 "entities": ["Customer", "Account", "Contact"],
-                "source_tables": ["raw.salesforce.accounts", "raw.hubspot.contacts"],
+                "source_tables": ["raw.crm.accounts", "raw.marketing.contacts"],
                 "is_materialized": True
             },
             {

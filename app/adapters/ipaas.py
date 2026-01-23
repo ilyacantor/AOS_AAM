@@ -93,17 +93,17 @@ class IPaaSAdapter(FabricAdapter):
         mock_flows = [
             {
                 "flow_id": f"flow-{self._vendor}-001",
-                "name": f"{self._vendor.title()} - CRM Sync",
-                "source": "Salesforce",
-                "destination": "Data Warehouse",
+                "name": f"{self._vendor.title()} - CRM Sync Flow",
+                "source_type": "crm_connector",
+                "destination_type": "warehouse_connector",
                 "entities": ["Account", "Contact", "Opportunity"],
                 "schedule": "*/15 * * * *"
             },
             {
                 "flow_id": f"flow-{self._vendor}-002",
-                "name": f"{self._vendor.title()} - ERP Integration",
-                "source": "NetSuite",
-                "destination": "API Gateway",
+                "name": f"{self._vendor.title()} - ERP Integration Flow",
+                "source_type": "erp_connector",
+                "destination_type": "api_connector",
                 "entities": ["Invoice", "Order", "Customer"],
                 "trigger": "webhook"
             }

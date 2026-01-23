@@ -59,6 +59,19 @@ Preferred communication style: Simple, everyday language.
 - **Pydantic** - Data validation and models
 - **httpx** - Async HTTP client (for future real collectors)
 
+### Fabric Plane Architecture
+
+> **AAM connects to Fabric Planes, NOT individual SaaS apps**
+
+| Fabric Plane | Adapter | Modality | Example Vendors |
+|--------------|---------|----------|-----------------|
+| **IPAAS** | IPaaSAdapter | Webhooks/Signals | Workato, MuleSoft, Boomi |
+| **API_GATEWAY** | GatewayAdapter | Proxy/REST | Kong, Apigee, AWS API GW |
+| **EVENT_BUS** | EventBusAdapter | Streaming Consumer | Kafka, EventBridge, Pulsar |
+| **DATA_WAREHOUSE** | WarehouseAdapter | JDBC/Bulk Read | Snowflake, BigQuery, Redshift |
+
+**CRITICAL:** AAM does NOT connect directly to apps (Salesforce, HubSpot) except in Preset 6 (Scrappy) mode.
+
 ### Application Structure
 
 ```
@@ -68,7 +81,16 @@ app/
 ├── models.py             # Pydantic models (ConnectionCandidate, DeclaredPipe, etc.)
 ├── db.py                 # SQLite database operations
 ├── inference.py          # Converts observations to DeclaredPipes
-├── salesforce.py         # (Legacy) Salesforce OAuth - future collector reference
+├── preset_config.py      # Enterprise preset configuration loader
+├── fabric_drift.py       # Fabric plane connectivity drift detector
+├── adapters/             # Fabric Plane Adapters (NOT app connectors)
+│   ├── __init__.py
+│   ├── base.py           # FabricAdapter abstract base class
+│   ├── ipaas.py          # IPaaSAdapter (Workato, MuleSoft)
+│   ├── gateway.py        # GatewayAdapter (Kong, Apigee)
+│   ├── eventbus.py       # EventBusAdapter (Kafka, EventBridge)
+│   ├── warehouse.py      # WarehouseAdapter (Snowflake, BigQuery)
+│   └── factory.py        # Adapter factory
 └── collectors/
     ├── __init__.py
     └── mock.py           # Mock collector for testing
