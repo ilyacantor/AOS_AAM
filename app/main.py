@@ -344,6 +344,8 @@ UI_STYLE = """
     .btn-sm { padding: 4px 10px; font-size: 0.75rem; }
     .btn-success { color: var(--green-400); border-color: rgba(74, 222, 128, 0.3); background: rgba(74, 222, 128, 0.1); }
     .btn-success:hover { background: rgba(74, 222, 128, 0.2); border-color: rgba(74, 222, 128, 0.5); }
+    .btn-warning { color: #fbbf24; border-color: rgba(251, 191, 36, 0.3); background: rgba(251, 191, 36, 0.1); }
+    .btn-warning:hover { background: rgba(251, 191, 36, 0.2); border-color: rgba(251, 191, 36, 0.5); }
     .btn-danger { color: var(--red-400); border-color: rgba(248, 113, 113, 0.3); background: rgba(248, 113, 113, 0.1); }
     .btn-danger:hover { background: rgba(248, 113, 113, 0.2); border-color: rgba(248, 113, 113, 0.5); }
     .btn-warning { color: var(--orange-400); border-color: rgba(251, 146, 60, 0.3); background: rgba(251, 146, 60, 0.1); }
@@ -1829,6 +1831,7 @@ async def ui_topology():
             <button class="btn" onclick="resetView()">Reset View</button>
             <button class="btn" onclick="fitToScreen()">Fit to Screen</button>
             <button class="btn btn-success" onclick="refreshData()">Refresh Data</button>
+            <button class="btn" id="physics-toggle" onclick="togglePhysics()">🔓 Unlock Positions</button>
         </div>
 
         <div id="topology-container"></div>
@@ -1844,6 +1847,7 @@ async def ui_topology():
         let network = null;
         let allNodes = [];
         let allEdges = [];
+        let physicsEnabled = true;
 
         const nodeColors = {{
             fabric_plane: {{
@@ -2070,6 +2074,26 @@ async def ui_topology():
         function refreshData() {{
             const filter = document.getElementById('view-filter').value;
             loadTopology(filter);
+        }}
+
+        function togglePhysics() {{
+            physicsEnabled = !physicsEnabled;
+            const btn = document.getElementById('physics-toggle');
+
+            if (physicsEnabled) {{
+                btn.textContent = '🔓 Unlock Positions';
+                btn.classList.remove('btn-warning');
+                if (network) {{
+                    network.setOptions({{ physics: getLayoutOptions().physics }});
+                }}
+            }} else {{
+                btn.textContent = '🔒 Lock Positions';
+                btn.classList.add('btn-warning');
+                if (network) {{
+                    // Disable physics - nodes stay where you put them
+                    network.setOptions({{ physics: false }});
+                }}
+            }}
         }}
 
         // Initialize
