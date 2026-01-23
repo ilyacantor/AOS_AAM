@@ -2544,31 +2544,88 @@ async def match_candidate(candidate_id: str, request: MatchRequest):
     candidate = get_candidate(candidate_id)
     if not candidate:
         raise HTTPException(status_code=404, detail="Candidate not found")
-    
+
     pipe_id = request.pipe_id
     score = 1.0
     reason = "Manual match"
-    
+
     if not pipe_id:
+        # Try multiple auto-match strategies
+        vendor = candidate.get("vendor_name", "").lower()
+        category = candidate.get("category", "").lower()
+
+        # Strategy 1: Exact vendor name match
         pipes = list_pipes(source_system=candidate.get("vendor_name"))
         if pipes:
             pipe_id = pipes[0]["pipe_id"]
-            score = 0.8
+            score = 0.9
             reason = "Auto-matched by vendor name"
         else:
+            # Strategy 2: Partial vendor name match
+            all_pipes = list_pipes(limit=200)
+            for p in all_pipes:
+                source = (p.get("source_system") or "").lower()
+                if vendor and (vendor in source or source in vendor):
+                    pipe_id = p["pipe_id"]
+                    score = 0.7
+                    reason = f"Auto-matched by partial vendor match ({p.get('source_system')})"
+                    break
+
+            # Strategy 3: Category-based match (if category contains hints)
+            if not pipe_id:
+                category_hints = {
+                    "crm": ["salesforce", "hubspot", "dynamics"],
+                    "collaboration": ["slack", "teams", "notion"],
+                    "payment": ["stripe", "paypal", "square"],
+                    "communication": ["twilio", "sendgrid"],
+                    "analytics": ["segment", "mixpanel", "amplitude"],
+                }
+                for cat, sources in category_hints.items():
+                    if cat in category:
+                        for p in all_pipes:
+                            source = (p.get("source_system") or "").lower()
+                            if any(s in source for s in sources):
+                                pipe_id = p["pipe_id"]
+                                score = 0.5
+                                reason = f"Auto-matched by category ({cat} -> {p.get('source_system')})"
+                                break
+                        if pipe_id:
+                            break
+
+            # Strategy 4: If still no match but pipes exist, create a new pipe from candidate
+            if not pipe_id and all_pipes:
+                # Create a new pipe from this candidate
+                new_pipe_data = {
+                    "display_name": candidate.get("display_name") or candidate.get("vendor_name"),
+                    "source_system": candidate.get("vendor_name"),
+                    "fabric_plane": "API_GATEWAY",
+                    "modality": candidate.get("preferred_modality") or "DECLARED_INTERFACE",
+                    "transport_kind": "API",
+                    "provenance": {
+                        "discovered_by": "auto-match",
+                        "discovered_at": datetime.utcnow().isoformat(),
+                        "lineage_hints": [f"candidate:{candidate_id}"]
+                    }
+                }
+                result = create_pipe(new_pipe_data)
+                pipe_id = result["pipe_id"]
+                score = 0.6
+                reason = f"Created new pipe from candidate ({candidate.get('vendor_name')})"
+
+        if not pipe_id:
             raise HTTPException(
-                status_code=400, 
-                detail="No pipe_id provided and no auto-match found. Provide a pipe_id or defer the candidate."
+                status_code=400,
+                detail="Auto-match failed and no pipes exist. Load a preset first or manually select a pipe."
             )
     else:
         pipe = get_pipe(pipe_id)
         if not pipe:
             raise HTTPException(status_code=404, detail="Pipe not found")
-    
+
     updated = update_candidate_match(candidate_id, pipe_id, score, reason)
     if not updated:
         raise HTTPException(status_code=500, detail="Failed to update candidate")
-    
+
     return {
         "candidate_id": candidate_id,
         "matched_pipe_id": pipe_id,
