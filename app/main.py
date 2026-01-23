@@ -37,7 +37,8 @@ from .db import (
     create_tee_request,
     get_drift_event,
     clear_all_data,
-    get_pipe_stats
+    get_pipe_stats,
+    create_observation
 )
 from .collectors.mock import run_mock_collector
 from .inference import infer_pipes_from_observations
@@ -1835,8 +1836,8 @@ async def get_all_drift_events(limit: int = Query(100, description="Maximum numb
 
 @app.post("/api/collect/{collector}/run", tags=["Collectors"])
 async def run_collector(collector: str, request: Optional[MockCollectorRequest] = None):
-    """Run a collector and track the run"""
-    collector_id = f"{collector}-collector-001" if collector == "mock" else collector
+    """Run a collector and track the run. Supports 'mock' and 'adapter' collectors."""
+    collector_id = f"{collector}-collector-001" if collector in ["mock", "adapter"] else collector
     
     run_id = create_collector_run(collector_id)
     
@@ -1852,9 +1853,58 @@ async def run_collector(collector: str, request: Optional[MockCollectorRequest] 
                 "observations_created": len(observations),
                 "observations": observations
             }
+        elif collector == "adapter":
+            if not adapter_registry:
+                complete_collector_run(run_id, "failed", 0, "No adapters connected")
+                raise HTTPException(status_code=400, detail="No adapters connected. Connect adapters first via /api/adapters/{plane_type}/connect")
+            
+            all_observations = []
+            adapters_collected = []
+            
+            for plane_type, adapter in adapter_registry.items():
+                health = await adapter.check_health()
+                if health.status != AdapterStatus.CONNECTED:
+                    continue
+                
+                policies = preset_loader.get_governance_policies()
+                adapter.apply_governance_policy(policies)
+                
+                observations = await adapter.discover_pipes()
+                
+                for obs in observations:
+                    obs_data = {
+                        "observation_id": obs.get("observation_id"),
+                        "collector_id": collector_id,
+                        "candidate_id": None,
+                        "source_system": obs.get("source_system", adapter.plane_vendor),
+                        "endpoint_info": obs.get("endpoint_info", {}),
+                        "entity_hints": obs.get("entity_hints", []),
+                        "schema_sample": obs.get("schema_sample"),
+                        "metadata": {
+                            "plane_type": plane_type,
+                            "vendor": adapter.plane_vendor,
+                            "governance_applied": list(policies.keys()),
+                            "preset": preset_loader.current_config.preset_id
+                        }
+                    }
+                    create_observation(obs_data)
+                    all_observations.append(obs_data)
+                
+                adapters_collected.append(plane_type)
+            
+            complete_collector_run(run_id, "completed", len(all_observations))
+            return {
+                "run_id": run_id,
+                "collector": collector,
+                "status": "completed",
+                "observations_created": len(all_observations),
+                "adapters_collected": adapters_collected,
+                "current_preset": preset_loader.current_config.name,
+                "observations": all_observations
+            }
         else:
             complete_collector_run(run_id, "failed", 0, f"Unknown collector: {collector}")
-            raise HTTPException(status_code=400, detail=f"Unknown collector: {collector}")
+            raise HTTPException(status_code=400, detail=f"Unknown collector: {collector}. Valid: mock, adapter")
     except HTTPException:
         raise
     except Exception as e:
