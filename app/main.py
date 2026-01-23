@@ -1053,7 +1053,128 @@ async def ui_candidates_list(status: Optional[str] = Query(None)):
         </table>
     </div>
     <div id="toast" class="toast"></div>
+
+    <!-- Match Modal -->
+    <div id="match-modal" class="modal" style="display:none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Match to Pipe</h3>
+                <button class="close-btn" onclick="closeMatchModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="field">
+                    <label class="field-label">Select a Pipe</label>
+                    <select id="pipe-select" class="modal-select">
+                        <option value="">Loading pipes...</option>
+                    </select>
+                </div>
+                <p style="color: var(--slate-400); font-size: 0.85rem; margin-top: 12px;">
+                    Select a pipe to link this candidate to, or choose "Auto-match" to let the system find the best match.
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeMatchModal()">Cancel</button>
+                <button class="btn btn-success" onclick="confirmMatch()">Match</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Defer Modal -->
+    <div id="defer-modal" class="modal" style="display:none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Defer Candidate</h3>
+                <button class="close-btn" onclick="closeDeferModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="field">
+                    <label class="field-label">Reason for Deferring</label>
+                    <textarea id="defer-reason" class="modal-textarea" rows="3" placeholder="e.g., Waiting for vendor approval, Low priority, etc."></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeDeferModal()">Cancel</button>
+                <button class="btn btn-warning" onclick="confirmDefer()">Defer</button>
+            </div>
+        </div>
+    </div>
+
+    <style>
+        .modal {{
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }}
+        .modal-content {{
+            background: var(--slate-800);
+            border: 1px solid var(--slate-700);
+            border-radius: 12px;
+            width: 90%;
+            max-width: 500px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        }}
+        .modal-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--slate-700);
+        }}
+        .modal-header h3 {{
+            margin: 0;
+            color: var(--cyan-400);
+        }}
+        .modal-header .close-btn {{
+            background: none;
+            border: none;
+            color: var(--slate-400);
+            font-size: 1.5rem;
+            cursor: pointer;
+            padding: 0;
+            line-height: 1;
+        }}
+        .modal-header .close-btn:hover {{
+            color: #fff;
+        }}
+        .modal-body {{
+            padding: 20px;
+        }}
+        .modal-footer {{
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+            padding: 16px 20px;
+            border-top: 1px solid var(--slate-700);
+        }}
+        .modal-select, .modal-textarea {{
+            width: 100%;
+            padding: 10px 12px;
+            background: var(--slate-900);
+            border: 1px solid var(--slate-600);
+            border-radius: 6px;
+            color: #fff;
+            font-size: 0.95rem;
+        }}
+        .modal-select:focus, .modal-textarea:focus {{
+            outline: none;
+            border-color: var(--cyan-400);
+        }}
+        .modal-textarea {{
+            resize: vertical;
+            font-family: inherit;
+        }}
+    </style>
+
     <script>
+        let currentCandidateId = null;
+
         function showToast(message, type) {{
             const toast = document.getElementById('toast');
             toast.textContent = message;
@@ -1061,25 +1182,58 @@ async def ui_candidates_list(status: Optional[str] = Query(None)):
             toast.style.display = 'block';
             setTimeout(() => toast.style.display = 'none', 3000);
         }}
-        
+
         function applyFilter() {{
             const status = document.getElementById('filter-status').value;
             const params = new URLSearchParams();
             if (status) params.set('status', status);
             window.location.href = '/ui/candidates' + (params.toString() ? '?' + params.toString() : '');
         }}
-        
+
         async function matchCandidate(candidateId) {{
-            const pipeId = prompt('Enter Pipe ID to match (leave empty for auto-match):');
+            currentCandidateId = candidateId;
+            const select = document.getElementById('pipe-select');
+            select.innerHTML = '<option value="">Loading...</option>';
+            document.getElementById('match-modal').style.display = 'flex';
+
+            // Fetch pipes
+            try {{
+                const res = await fetch('/api/pipes?limit=100');
+                const data = await res.json();
+                const pipes = data.pipes || [];
+
+                let options = '<option value="">(Auto-match - let system choose)</option>';
+                pipes.forEach(p => {{
+                    const name = p.display_name || p.pipe_id;
+                    const source = p.source_system || 'Unknown';
+                    options += `<option value="${{p.pipe_id}}">${{name}} (${{source}})</option>`;
+                }});
+                select.innerHTML = options;
+            }} catch (e) {{
+                select.innerHTML = '<option value="">(Auto-match - let system choose)</option>';
+                showToast('Could not load pipes', 'error');
+            }}
+        }}
+
+        function closeMatchModal() {{
+            document.getElementById('match-modal').style.display = 'none';
+            currentCandidateId = null;
+        }}
+
+        async function confirmMatch() {{
+            if (!currentCandidateId) return;
+            const pipeId = document.getElementById('pipe-select').value;
+
             try {{
                 const body = pipeId ? {{ pipe_id: pipeId }} : {{}};
-                const res = await fetch('/api/candidates/' + candidateId + '/match', {{
+                const res = await fetch('/api/candidates/' + currentCandidateId + '/match', {{
                     method: 'POST',
                     headers: {{ 'Content-Type': 'application/json' }},
                     body: JSON.stringify(body)
                 }});
                 const data = await res.json();
                 if (res.ok) {{
+                    closeMatchModal();
                     showToast('Matched to pipe: ' + data.matched_pipe_id, 'success');
                     setTimeout(() => location.reload(), 1500);
                 }} else {{
@@ -1089,18 +1243,35 @@ async def ui_candidates_list(status: Optional[str] = Query(None)):
                 showToast('Error: ' + e.message, 'error');
             }}
         }}
-        
-        async function deferCandidate(candidateId) {{
-            const reason = prompt('Reason for deferring:');
-            if (!reason) return;
+
+        function deferCandidate(candidateId) {{
+            currentCandidateId = candidateId;
+            document.getElementById('defer-reason').value = '';
+            document.getElementById('defer-modal').style.display = 'flex';
+        }}
+
+        function closeDeferModal() {{
+            document.getElementById('defer-modal').style.display = 'none';
+            currentCandidateId = null;
+        }}
+
+        async function confirmDefer() {{
+            if (!currentCandidateId) return;
+            const reason = document.getElementById('defer-reason').value.trim();
+            if (!reason) {{
+                showToast('Please enter a reason', 'error');
+                return;
+            }}
+
             try {{
-                const res = await fetch('/api/candidates/' + candidateId + '/defer', {{
+                const res = await fetch('/api/candidates/' + currentCandidateId + '/defer', {{
                     method: 'POST',
                     headers: {{ 'Content-Type': 'application/json' }},
                     body: JSON.stringify({{ reason: reason }})
                 }});
                 const data = await res.json();
                 if (res.ok) {{
+                    closeDeferModal();
                     showToast('Candidate deferred', 'success');
                     setTimeout(() => location.reload(), 1500);
                 }} else {{
@@ -1110,7 +1281,7 @@ async def ui_candidates_list(status: Optional[str] = Query(None)):
                 showToast('Error: ' + e.message, 'error');
             }}
         }}
-        
+
         async function createTee(candidateId) {{
             try {{
                 const res = await fetch('/api/tee/requests', {{
@@ -1128,6 +1299,22 @@ async def ui_candidates_list(status: Optional[str] = Query(None)):
                 showToast('Error: ' + e.message, 'error');
             }}
         }}
+
+        // Close modals on escape key
+        document.addEventListener('keydown', function(e) {{
+            if (e.key === 'Escape') {{
+                closeMatchModal();
+                closeDeferModal();
+            }}
+        }});
+
+        // Close modals on backdrop click
+        document.getElementById('match-modal').addEventListener('click', function(e) {{
+            if (e.target === this) closeMatchModal();
+        }});
+        document.getElementById('defer-modal').addEventListener('click', function(e) {{
+            if (e.target === this) closeDeferModal();
+        }});
     </script>
 </body>
 </html>
