@@ -129,7 +129,6 @@ NAV_STYLE = """
 
 NAV_HTML = """
 <nav class="nav">
-    <a href="/ui/topology" class="nav-brand">AAM</a>
     <div class="nav-links">
         <a href="/ui/pipes" class="nav-link{pipes_active}">Pipes</a>
         <a href="/ui/candidates" class="nav-link{candidates_active}">Candidates</a>
@@ -339,7 +338,6 @@ def ui_nav(active: str = "") -> str:
         return " active" if page == active else ""
     return f"""
 <nav class="nav">
-    <a href="/ui/topology" class="nav-brand">AAM</a>
     <div class="nav-links">
         <a href="/ui/topology" class="nav-link{active_class('topology')}" data-testid="nav-topology">Topology</a>
         <a href="/ui/pipes" class="nav-link{active_class('pipes')}" data-testid="nav-pipes">Pipes</a>
@@ -1216,6 +1214,7 @@ async def ui_guide():
             <div class="panel-title">Quick Navigation</div>
             <a href="#what-is-aam">What is AAM?</a>
             <a href="#three-jobs">The Three Operator Jobs</a>
+            <a href="#topology-screen">Topology Screen</a>
             <a href="#pipes-screen">Pipes Inventory Screen</a>
             <a href="#pipe-detail">Pipe Detail Screen</a>
             <a href="#candidates-screen">Candidates Screen</a>
@@ -1255,7 +1254,39 @@ async def ui_guide():
             </ol>
             <p>Nothing more, nothing less. AAM deliberately avoids "magic" actions like "fix automatically" or "connect now."</p>
         </div>
-        
+
+        <div class="guide-section" id="topology-screen">
+            <h2>Topology Screen</h2>
+            <p>The <strong>Topology</strong> screen is the landing page and provides an interactive graph visualization of your entire integration mesh. It shows how fabric planes, pipes, source systems, and candidates relate to each other.</p>
+
+            <h3>Node Types</h3>
+            <table class="guide-table">
+                <tr><th>Shape</th><th>Color</th><th>Meaning</th></tr>
+                <tr><td>Diamond</td><td>Purple/Cyan/Orange/Green</td><td>Fabric Plane (API Gateway, iPaaS, Event Bus, Data Warehouse)</td></tr>
+                <tr><td>Circle</td><td>Blue</td><td>Pipe - a declared data connection</td></tr>
+                <tr><td>Square</td><td>Gray</td><td>Source System - where data originates</td></tr>
+                <tr><td>Triangle</td><td>Purple</td><td>Candidate - a potential connection from AOD</td></tr>
+            </table>
+
+            <h3>Controls</h3>
+            <table class="guide-table">
+                <tr><th>Control</th><th>What It Does</th></tr>
+                <tr><td>View Filter</td><td>Filter to show only nodes in a specific fabric plane</td></tr>
+                <tr><td>Layout</td><td>Switch between Hierarchical (default), Force-Directed, or Circular layouts</td></tr>
+                <tr><td>Lock Positions</td><td>Toggle physics on/off - when locked, nodes stay where you drag them</td></tr>
+                <tr><td>Reset View</td><td>Return to default view with all nodes</td></tr>
+                <tr><td>Fit to Screen</td><td>Zoom to fit all visible nodes</td></tr>
+            </table>
+
+            <h3>Interactions</h3>
+            <ul>
+                <li><strong>Click</strong> a node to see its details in the side panel</li>
+                <li><strong>Double-click</strong> a pipe node to navigate to its detail page</li>
+                <li><strong>Drag</strong> nodes to rearrange them (use Lock Positions to keep them in place)</li>
+                <li><strong>Scroll</strong> to zoom in/out</li>
+            </ul>
+        </div>
+
         <div class="guide-section" id="pipes-screen">
             <h2>Pipes Inventory Screen</h2>
             <p>This is your main dashboard showing all discovered data pipes. Access it via the <span class="guide-code">Pipes</span> navigation link.</p>
@@ -1273,10 +1304,12 @@ async def ui_guide():
             <h3>Actions You Can Take</h3>
             <table class="guide-table">
                 <tr><th>Button</th><th>What It Does</th></tr>
-                <tr><td>Run Collector</td><td>Triggers a collector to observe systems and update pipe information</td></tr>
-                <tr><td>Run Inference</td><td>Processes raw observations into declared pipes</td></tr>
-                <tr><td>Export to DCL</td><td>Generates a snapshot of all pipes in DCL format</td></tr>
+                <tr><td>Run Mock Collector</td><td>Triggers a mock collector to simulate pipe discovery and create sample data</td></tr>
+                <tr><td>Export to DCL</td><td>Generates a snapshot of all pipes in DCL format for downstream consumption</td></tr>
             </table>
+
+            <h3>Enterprise Presets</h3>
+            <p>At the top of the Pipes screen, you can load predefined enterprise presets that populate sample data for different integration patterns. This is useful for demos and testing.</p>
         </div>
         
         <div class="guide-section" id="pipe-detail">
@@ -1358,12 +1391,22 @@ async def ui_guide():
             </div>
             
             <div class="guide-card">
-                <div class="guide-card-title">Discovering New Pipes</div>
+                <div class="guide-card-title">Exploring the Integration Mesh</div>
+                <ol>
+                    <li>Start at the <strong>Topology</strong> screen (the landing page)</li>
+                    <li>Use the View filter to focus on a specific fabric plane</li>
+                    <li>Click nodes to see their metadata in the side panel</li>
+                    <li>Double-click a pipe to drill into its detail page</li>
+                </ol>
+            </div>
+
+            <div class="guide-card">
+                <div class="guide-card-title">Populating Sample Data</div>
                 <ol>
                     <li>Go to <strong>Pipes</strong> screen</li>
-                    <li>Click <strong>Run Collector</strong> to observe systems</li>
-                    <li>Click <strong>Run Inference</strong> to process observations</li>
-                    <li>Review newly created pipes</li>
+                    <li>Load an Enterprise Preset to populate sample data, or</li>
+                    <li>Click <strong>Run Mock Collector</strong> to simulate pipe discovery</li>
+                    <li>Review newly created pipes in the table</li>
                 </ol>
             </div>
             
@@ -1387,11 +1430,13 @@ async def ui_guide():
                 <tr><td>Declared Pipe</td><td>A cataloged data connection with full metadata</td></tr>
                 <tr><td>DCL</td><td>Data Catalog Layer - consumes pipes from AAM to unify meaning</td></tr>
                 <tr><td>Drift</td><td>When reality diverges from what was previously observed</td></tr>
+                <tr><td>Fabric Plane</td><td>A category of integration infrastructure (API Gateway, iPaaS, Event Bus, Data Warehouse)</td></tr>
                 <tr><td>Modality</td><td>The approach for connecting (control plane, declared interface, etc.)</td></tr>
                 <tr><td>Observation</td><td>Raw data from a collector before being processed into a pipe</td></tr>
                 <tr><td>Pipe</td><td>A reusable data connection between systems</td></tr>
                 <tr><td>Provenance</td><td>Origin and lineage information about a pipe</td></tr>
                 <tr><td>Schema Hash</td><td>A fingerprint of the data structure for detecting changes</td></tr>
+                <tr><td>Topology</td><td>The graph visualization showing how pipes, systems, and candidates interconnect</td></tr>
                 <tr><td>Transport</td><td>How data physically moves (API, events, files, etc.)</td></tr>
             </table>
         </div>
