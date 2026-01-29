@@ -785,10 +785,13 @@ async def ui_pipes_list(
         
         loadPresets();
         
-        let currentDataSource = 'mock';
+        let currentDataSource = localStorage.getItem('aam_data_source') || 'mock';
         
-        function setDataSource(source) {{
+        function setDataSource(source, persist = true) {{
             currentDataSource = source;
+            if (persist) {{
+                localStorage.setItem('aam_data_source', source);
+            }}
             const mockBtn = document.getElementById('toggle-mock');
             const aodBtn = document.getElementById('toggle-aod');
             const indicator = document.getElementById('source-indicator');
@@ -811,6 +814,9 @@ async def ui_pipes_list(
                 aodLoadBtn.style.display = 'inline-block';
             }}
         }}
+        
+        // Initialize toggle state from localStorage on page load
+        setDataSource(currentDataSource, false);
         
         document.getElementById('btn-load-aod').addEventListener('click', async function() {{
             this.disabled = true;

@@ -282,6 +282,10 @@ def create_candidate(candidate_data: dict) -> dict:
     if isinstance(execution_allowed, bool):
         execution_allowed = 1 if execution_allowed else 0
 
+    # Deduplication: Delete existing candidate with same asset_key to prevent duplicates
+    asset_key = candidate_data["asset_key"]
+    cursor.execute("DELETE FROM connection_candidates WHERE asset_key = ?", (asset_key,))
+
     cursor.execute("""
         INSERT INTO connection_candidates (
             candidate_id, asset_key, vendor_name, display_name, category,
@@ -343,18 +347,18 @@ def get_candidate(candidate_id: str) -> Optional[dict]:
 
 
 def list_candidates(status: Optional[str] = None, limit: int = 100) -> list[dict]:
-    """List candidates with optional status filter"""
+    """List candidates with optional status filter, sorted by category"""
     conn = get_connection()
     cursor = conn.cursor()
     
     if status:
         cursor.execute(
-            "SELECT * FROM connection_candidates WHERE status = ? ORDER BY created_at DESC LIMIT ?",
+            "SELECT * FROM connection_candidates WHERE status = ? ORDER BY category ASC, created_at DESC LIMIT ?",
             (status, limit)
         )
     else:
         cursor.execute(
-            "SELECT * FROM connection_candidates ORDER BY created_at DESC LIMIT ?",
+            "SELECT * FROM connection_candidates ORDER BY category ASC, created_at DESC LIMIT ?",
             (limit,)
         )
     
