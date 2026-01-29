@@ -646,12 +646,16 @@ async def ui_pipes_list(
         </div>
         
         <div class="data-source-toggle" data-testid="data-source-toggle">
-            <span class="toggle-label">Data Source:</span>
+            <span class="toggle-label">Generate Test Data:</span>
             <div class="toggle-group">
-                <button class="toggle-btn active" id="toggle-mock" data-testid="toggle-mock" onclick="setDataSource('mock')">Mock Data</button>
-                <button class="toggle-btn" id="toggle-aod" data-testid="toggle-aod" onclick="setDataSource('aod')">AOD Test Data</button>
+                <button class="toggle-btn active" id="toggle-mock" data-testid="toggle-mock" onclick="setDataSource('mock')">Mock Pipes</button>
+                <button class="toggle-btn" id="toggle-aod" data-testid="toggle-aod" onclick="setDataSource('aod')">AOD Candidates</button>
             </div>
-            <span class="source-indicator mock" id="source-indicator" data-testid="source-indicator">Internal mock generator</span>
+            <span class="source-indicator mock" id="source-indicator" data-testid="source-indicator">Creates sample pipes directly</span>
+        </div>
+        <div id="aod-note" style="display:none; padding: 12px; background: rgba(34, 211, 238, 0.1); border: 1px solid rgba(34, 211, 238, 0.3); border-radius: 8px; margin-bottom: 16px; font-size: 0.85rem; color: #94a3b8;">
+            <strong style="color: #22d3ee;">Note:</strong> AOD handoffs create <strong>Candidates</strong>, not Pipes. 
+            Candidates appear in the <a href="/ui/candidates" style="color: #22d3ee;">Candidates tab</a> and can be matched to create Pipes.
         </div>
         
         <div class="stats-bar" id="stats-bar" data-testid="stats-bar">
@@ -798,20 +802,24 @@ async def ui_pipes_list(
             const mockCollectorBtn = document.getElementById('btn-run-collector');
             const aodLoadBtn = document.getElementById('btn-load-aod');
             
+            const aodNote = document.getElementById('aod-note');
+            
             if (source === 'mock') {{
                 mockBtn.classList.add('active');
                 aodBtn.classList.remove('active');
                 indicator.className = 'source-indicator mock';
-                indicator.textContent = 'Internal mock generator';
+                indicator.textContent = 'Creates sample pipes directly';
                 mockCollectorBtn.style.display = 'inline-block';
                 aodLoadBtn.style.display = 'none';
+                aodNote.style.display = 'none';
             }} else {{
                 aodBtn.classList.add('active');
                 mockBtn.classList.remove('active');
                 indicator.className = 'source-indicator aod';
-                indicator.textContent = 'Simulated AOD discovery run';
+                indicator.textContent = 'Creates candidates for triage';
                 mockCollectorBtn.style.display = 'none';
                 aodLoadBtn.style.display = 'inline-block';
+                aodNote.style.display = 'block';
             }}
         }}
         
