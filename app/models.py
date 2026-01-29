@@ -65,6 +65,12 @@ class TeeRequestStatus(str, Enum):
     VERIFIED = "verified"
 
 
+class AODActionType(str, Enum):
+    """Action type from AOD governance decision"""
+    INVENTORY_ONLY = "inventory_only"  # Human review required - blocking findings exist
+    PROVISION = "provision"  # Safe for auto-connection
+
+
 # ============================================================================
 # INPUT CONTRACT (FROM AOD)
 # ============================================================================
@@ -75,25 +81,65 @@ class Finding(BaseModel):
     description: str
     severity: Optional[str] = None
     evidence: Optional[str] = None
+    is_blocking: bool = Field(default=False, description="Whether this finding blocks auto-provisioning")
 
 
 class ConnectionCandidate(BaseModel):
     """
     Input from AOD - represents intent + context for a potential connection.
     AAM decides how (or whether) connectivity exists.
+
+    AOD Handoff Fields:
+    - execution_allowed: AOD governance decision on whether execution is permitted
+    - action_type: "inventory_only" (human review) or "provision" (auto-connect)
+    - blocking_findings: List of finding IDs that prevent auto-provisioning
+    - connected_via_plane: Fabric plane detected by AOD (routing optimization)
+    - aod_run_id: Link back to the discovery run for traceability
+    - aod_asset_id: Original AOD asset identifier
     """
+    # Core identification
     asset_key: str = Field(..., description="Unique identifier for the asset")
     vendor_name: str = Field(..., description="Vendor/provider name")
     display_name: str = Field(..., description="Human-readable name")
     category: str = Field(..., description="Asset category (CRM, ERP, etc.)")
-    governance_status: Optional[str] = Field(None, description="Governance classification")
+
+    # Governance and findings
+    governance_status: Optional[str] = Field(None, description="Governance classification (governed, shadow_it, zombie)")
     findings: list[Finding] = Field(default_factory=list, description="Discovery findings")
     sor_tagging: Optional[str] = Field(None, description="System of Record tagging")
     evidence_refs: list[str] = Field(default_factory=list, description="References to evidence")
     signals_summary: Optional[str] = Field(None, description="Summary of discovery signals")
+
+    # Connection hints
     known_endpoints: list[str] = Field(default_factory=list, description="Known API endpoints")
     preferred_modality: Optional[Modality] = Field(None, description="Preferred connection modality")
     priority_score: Optional[float] = Field(None, ge=0, le=100, description="Priority score 0-100")
+
+    # === AOD HANDOFF FIELDS ===
+    execution_allowed: bool = Field(
+        default=True,
+        description="AOD governance decision - False if blocking findings exist"
+    )
+    action_type: AODActionType = Field(
+        default=AODActionType.PROVISION,
+        description="AOD action type: inventory_only (human review) or provision (auto-connect)"
+    )
+    blocking_findings: list[str] = Field(
+        default_factory=list,
+        description="List of finding IDs/types that block auto-provisioning"
+    )
+    connected_via_plane: Optional[FabricPlane] = Field(
+        None,
+        description="Fabric plane detected by AOD (routing hint for AAM)"
+    )
+    aod_run_id: Optional[str] = Field(
+        None,
+        description="AOD discovery run ID for traceability"
+    )
+    aod_asset_id: Optional[str] = Field(
+        None,
+        description="Original AOD asset identifier"
+    )
 
 
 class ConnectionCandidateCreate(ConnectionCandidate):
@@ -105,8 +151,68 @@ class ConnectionCandidateResponse(ConnectionCandidate):
     """Response model with database fields"""
     candidate_id: str
     status: CandidateStatus
+    matched_pipe_id: Optional[str] = None
+    match_score: Optional[float] = None
+    match_reason: Optional[str] = None
+    deferred_reason: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+
+
+# ============================================================================
+# AOD HANDOFF MODELS
+# ============================================================================
+
+class AODHandoffCandidate(ConnectionCandidate):
+    """
+    Candidate format specifically from AOD handoff.
+    Includes all AOD-specific fields with stricter validation.
+    """
+    # AOD fields are required in handoff context
+    aod_run_id: str = Field(..., description="AOD discovery run ID (required for handoff)")
+    aod_asset_id: str = Field(..., description="Original AOD asset ID (required for handoff)")
+
+
+class AODHandoffRequest(BaseModel):
+    """Batch handoff request from AOD"""
+    run_id: str = Field(..., description="AOD discovery run ID")
+    candidates: list[AODHandoffCandidate] = Field(..., description="Candidates to hand off")
+    policy_version: Optional[str] = Field(None, description="Version of governance policy applied")
+    handoff_timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
+class AODHandoffResponse(BaseModel):
+    """Response to AOD handoff request"""
+    run_id: str
+    candidates_received: int
+    candidates_accepted: int
+    candidates_rejected: int
+    rejected_reasons: list[dict] = Field(default_factory=list)
+    handoff_id: str
+    processed_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class AODPolicyManifest(BaseModel):
+    """Governance policy manifest from AOD"""
+    policy_version: str = Field(..., description="Version identifier for the policy")
+    governance_rules: list[dict] = Field(default_factory=list, description="Governance rules to apply")
+    blocking_finding_types: list[str] = Field(
+        default_factory=list,
+        description="Finding types that should block auto-provisioning"
+    )
+    fabric_plane_routing: dict = Field(
+        default_factory=dict,
+        description="Category -> FabricPlane routing rules"
+    )
+    auto_provision_categories: list[str] = Field(
+        default_factory=list,
+        description="Categories allowed for auto-provisioning"
+    )
+    require_human_review: list[str] = Field(
+        default_factory=list,
+        description="Categories requiring human review"
+    )
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 # ============================================================================

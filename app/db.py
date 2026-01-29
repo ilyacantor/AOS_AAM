@@ -58,8 +58,51 @@ def init_db():
             preferred_modality TEXT,
             priority_score REAL,
             status TEXT DEFAULT 'new',
+            matched_pipe_id TEXT,
+            match_score REAL,
+            match_reason TEXT,
+            deferred_reason TEXT,
+            -- AOD Handoff Fields --
+            execution_allowed INTEGER DEFAULT 1,
+            action_type TEXT DEFAULT 'provision',
+            blocking_findings TEXT,
+            connected_via_plane TEXT,
+            aod_run_id TEXT,
+            aod_asset_id TEXT,
+            -- Timestamps --
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
+        )
+    """)
+
+    # AOD Policy Manifest (governance rules from AOD)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS aod_policy_manifest (
+            policy_id TEXT PRIMARY KEY,
+            policy_version TEXT NOT NULL,
+            governance_rules TEXT,
+            blocking_finding_types TEXT,
+            fabric_plane_routing TEXT,
+            auto_provision_categories TEXT,
+            require_human_review TEXT,
+            is_active INTEGER DEFAULT 1,
+            received_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+
+    # AOD Handoff Log (track batch handoffs)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS aod_handoff_log (
+            handoff_id TEXT PRIMARY KEY,
+            aod_run_id TEXT NOT NULL,
+            candidates_received INTEGER NOT NULL,
+            candidates_accepted INTEGER NOT NULL,
+            candidates_rejected INTEGER NOT NULL,
+            rejected_reasons TEXT,
+            policy_version TEXT,
+            handoff_timestamp TEXT NOT NULL,
+            processed_at TEXT NOT NULL
         )
     """)
     
@@ -230,17 +273,24 @@ def create_candidate(candidate_data: dict) -> dict:
     """Create a new connection candidate"""
     conn = get_connection()
     cursor = conn.cursor()
-    
+
     candidate_id = str(uuid.uuid4())
     now = datetime.utcnow().isoformat()
-    
+
+    # Handle AOD execution_allowed (convert bool to int for SQLite)
+    execution_allowed = candidate_data.get("execution_allowed", True)
+    if isinstance(execution_allowed, bool):
+        execution_allowed = 1 if execution_allowed else 0
+
     cursor.execute("""
         INSERT INTO connection_candidates (
             candidate_id, asset_key, vendor_name, display_name, category,
             governance_status, findings, sor_tagging, evidence_refs,
             signals_summary, known_endpoints, preferred_modality, priority_score,
-            status, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            status, execution_allowed, action_type, blocking_findings,
+            connected_via_plane, aod_run_id, aod_asset_id,
+            created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         candidate_id,
         candidate_data["asset_key"],
@@ -256,14 +306,27 @@ def create_candidate(candidate_data: dict) -> dict:
         candidate_data.get("preferred_modality"),
         candidate_data.get("priority_score"),
         "new",
+        execution_allowed,
+        candidate_data.get("action_type", "provision"),
+        json.dumps(candidate_data.get("blocking_findings", [])),
+        candidate_data.get("connected_via_plane"),
+        candidate_data.get("aod_run_id"),
+        candidate_data.get("aod_asset_id"),
         now,
         now
     ))
-    
+
     conn.commit()
     conn.close()
-    
-    return {"candidate_id": candidate_id, "status": "new", "created_at": now, "updated_at": now}
+
+    return {
+        "candidate_id": candidate_id,
+        "status": "new",
+        "execution_allowed": bool(execution_allowed),
+        "action_type": candidate_data.get("action_type", "provision"),
+        "created_at": now,
+        "updated_at": now
+    }
 
 
 def get_candidate(candidate_id: str) -> Optional[dict]:
@@ -317,6 +380,8 @@ def update_candidate_status(candidate_id: str, status: str) -> bool:
 
 def _row_to_candidate(row) -> dict:
     """Convert database row to candidate dict"""
+    keys = row.keys()
+
     result = {
         "candidate_id": row["candidate_id"],
         "asset_key": row["asset_key"],
@@ -335,7 +400,8 @@ def _row_to_candidate(row) -> dict:
         "created_at": row["created_at"],
         "updated_at": row["updated_at"]
     }
-    keys = row.keys()
+
+    # Match/defer fields
     if "matched_pipe_id" in keys:
         result["matched_pipe_id"] = row["matched_pipe_id"]
     if "match_score" in keys:
@@ -344,6 +410,21 @@ def _row_to_candidate(row) -> dict:
         result["match_reason"] = row["match_reason"]
     if "deferred_reason" in keys:
         result["deferred_reason"] = row["deferred_reason"]
+
+    # AOD Handoff fields
+    if "execution_allowed" in keys:
+        result["execution_allowed"] = bool(row["execution_allowed"])
+    if "action_type" in keys:
+        result["action_type"] = row["action_type"]
+    if "blocking_findings" in keys:
+        result["blocking_findings"] = json.loads(row["blocking_findings"]) if row["blocking_findings"] else []
+    if "connected_via_plane" in keys:
+        result["connected_via_plane"] = row["connected_via_plane"]
+    if "aod_run_id" in keys:
+        result["aod_run_id"] = row["aod_run_id"]
+    if "aod_asset_id" in keys:
+        result["aod_asset_id"] = row["aod_asset_id"]
+
     return result
 
 
@@ -1625,3 +1706,200 @@ def get_topology_for_fabric_plane(fabric_plane: str) -> dict:
         "edges": edges,
         "stats": stats
     }
+
+
+# ============================================================================
+# AOD HANDOFF OPERATIONS
+# ============================================================================
+
+def create_handoff_log(handoff_data: dict) -> dict:
+    """Create a log entry for an AOD handoff"""
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    handoff_id = str(uuid.uuid4())
+    now = datetime.utcnow().isoformat()
+
+    cursor.execute("""
+        INSERT INTO aod_handoff_log (
+            handoff_id, aod_run_id, candidates_received, candidates_accepted,
+            candidates_rejected, rejected_reasons, policy_version,
+            handoff_timestamp, processed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        handoff_id,
+        handoff_data["aod_run_id"],
+        handoff_data["candidates_received"],
+        handoff_data["candidates_accepted"],
+        handoff_data["candidates_rejected"],
+        json.dumps(handoff_data.get("rejected_reasons", [])),
+        handoff_data.get("policy_version"),
+        handoff_data.get("handoff_timestamp", now),
+        now
+    ))
+
+    conn.commit()
+    conn.close()
+
+    return {
+        "handoff_id": handoff_id,
+        "aod_run_id": handoff_data["aod_run_id"],
+        "processed_at": now
+    }
+
+
+def get_handoff_log(handoff_id: str) -> Optional[dict]:
+    """Get a handoff log entry by ID"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM aod_handoff_log WHERE handoff_id = ?", (handoff_id,))
+    row = cursor.fetchone()
+    conn.close()
+
+    if row:
+        return {
+            "handoff_id": row["handoff_id"],
+            "aod_run_id": row["aod_run_id"],
+            "candidates_received": row["candidates_received"],
+            "candidates_accepted": row["candidates_accepted"],
+            "candidates_rejected": row["candidates_rejected"],
+            "rejected_reasons": json.loads(row["rejected_reasons"]) if row["rejected_reasons"] else [],
+            "policy_version": row["policy_version"],
+            "handoff_timestamp": row["handoff_timestamp"],
+            "processed_at": row["processed_at"]
+        }
+    return None
+
+
+def list_handoff_logs(aod_run_id: Optional[str] = None, limit: int = 50) -> list[dict]:
+    """List handoff logs with optional run_id filter"""
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    if aod_run_id:
+        cursor.execute(
+            "SELECT * FROM aod_handoff_log WHERE aod_run_id = ? ORDER BY processed_at DESC LIMIT ?",
+            (aod_run_id, limit)
+        )
+    else:
+        cursor.execute(
+            "SELECT * FROM aod_handoff_log ORDER BY processed_at DESC LIMIT ?",
+            (limit,)
+        )
+
+    rows = cursor.fetchall()
+    conn.close()
+
+    return [{
+        "handoff_id": row["handoff_id"],
+        "aod_run_id": row["aod_run_id"],
+        "candidates_received": row["candidates_received"],
+        "candidates_accepted": row["candidates_accepted"],
+        "candidates_rejected": row["candidates_rejected"],
+        "policy_version": row["policy_version"],
+        "handoff_timestamp": row["handoff_timestamp"],
+        "processed_at": row["processed_at"]
+    } for row in rows]
+
+
+# ============================================================================
+# AOD POLICY MANIFEST OPERATIONS
+# ============================================================================
+
+def save_policy_manifest(policy_data: dict) -> dict:
+    """Save or update the AOD policy manifest"""
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    policy_id = str(uuid.uuid4())
+    now = datetime.utcnow().isoformat()
+
+    # Deactivate any existing active policies
+    cursor.execute("UPDATE aod_policy_manifest SET is_active = 0 WHERE is_active = 1")
+
+    cursor.execute("""
+        INSERT INTO aod_policy_manifest (
+            policy_id, policy_version, governance_rules, blocking_finding_types,
+            fabric_plane_routing, auto_provision_categories, require_human_review,
+            is_active, received_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        policy_id,
+        policy_data["policy_version"],
+        json.dumps(policy_data.get("governance_rules", [])),
+        json.dumps(policy_data.get("blocking_finding_types", [])),
+        json.dumps(policy_data.get("fabric_plane_routing", {})),
+        json.dumps(policy_data.get("auto_provision_categories", [])),
+        json.dumps(policy_data.get("require_human_review", [])),
+        1,  # is_active = True
+        now,
+        now
+    ))
+
+    conn.commit()
+    conn.close()
+
+    return {
+        "policy_id": policy_id,
+        "policy_version": policy_data["policy_version"],
+        "is_active": True,
+        "received_at": now
+    }
+
+
+def get_active_policy_manifest() -> Optional[dict]:
+    """Get the currently active AOD policy manifest"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM aod_policy_manifest WHERE is_active = 1")
+    row = cursor.fetchone()
+    conn.close()
+
+    if row:
+        return {
+            "policy_id": row["policy_id"],
+            "policy_version": row["policy_version"],
+            "governance_rules": json.loads(row["governance_rules"]) if row["governance_rules"] else [],
+            "blocking_finding_types": json.loads(row["blocking_finding_types"]) if row["blocking_finding_types"] else [],
+            "fabric_plane_routing": json.loads(row["fabric_plane_routing"]) if row["fabric_plane_routing"] else {},
+            "auto_provision_categories": json.loads(row["auto_provision_categories"]) if row["auto_provision_categories"] else [],
+            "require_human_review": json.loads(row["require_human_review"]) if row["require_human_review"] else [],
+            "is_active": True,
+            "received_at": row["received_at"],
+            "updated_at": row["updated_at"]
+        }
+    return None
+
+
+def list_policy_manifests(limit: int = 20) -> list[dict]:
+    """List all policy manifests (history)"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT * FROM aod_policy_manifest ORDER BY received_at DESC LIMIT ?",
+        (limit,)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+
+    return [{
+        "policy_id": row["policy_id"],
+        "policy_version": row["policy_version"],
+        "is_active": bool(row["is_active"]),
+        "received_at": row["received_at"],
+        "updated_at": row["updated_at"]
+    } for row in rows]
+
+
+def get_candidates_by_aod_run(aod_run_id: str) -> list[dict]:
+    """Get all candidates from a specific AOD run"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT * FROM connection_candidates WHERE aod_run_id = ? ORDER BY created_at DESC",
+        (aod_run_id,)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+
+    return [_row_to_candidate(row) for row in rows]

@@ -44,7 +44,15 @@ from .db import (
     get_topology_data,
     get_topology_for_pipe,
     get_topology_for_fabric_plane,
-    get_connection
+    get_connection,
+    # AOD Handoff functions
+    create_handoff_log,
+    get_handoff_log,
+    list_handoff_logs,
+    save_policy_manifest,
+    get_active_policy_manifest,
+    list_policy_manifests,
+    get_candidates_by_aod_run
 )
 from .collectors.mock import run_mock_collector
 from .inference import infer_pipes_from_observations
@@ -53,7 +61,11 @@ from .models import (
     CandidateIntakeResponse,
     CandidateStatus,
     ExportResponse,
-    FabricPlane
+    FabricPlane,
+    AODActionType,
+    AODHandoffRequest,
+    AODHandoffResponse,
+    AODPolicyManifest
 )
 from .preset_config import PresetConfigLoader, EnterpriseMaturity
 from .fabric_drift import FabricDriftDetector, FabricDriftType
@@ -2345,6 +2357,145 @@ async def update_status(candidate_id: str, update: StatusUpdate):
     return {"candidate_id": candidate_id, "status": update.status.value, "message": "Status updated"}
 
 
+# ============================================================================
+# AOD HANDOFF ENDPOINTS
+# ============================================================================
+
+@app.post("/api/handoff/aod/receive", tags=["AOD Handoff"])
+async def receive_aod_handoff(request: AODHandoffRequest):
+    """
+    Receive batch handoff of candidates from AOD.
+
+    This is the primary integration point between AOD and AAM.
+    AOD sends ConnectionCandidates after discovery with:
+    - execution_allowed: Whether AOD governance permits execution
+    - action_type: "inventory_only" (human review) or "provision" (auto-connect)
+    - blocking_findings: Findings that prevent auto-provisioning
+    - connected_via_plane: Fabric plane routing hint from AOD
+    """
+    accepted = []
+    rejected = []
+
+    for candidate in request.candidates:
+        try:
+            # Convert to dict for database
+            candidate_dict = candidate.model_dump()
+
+            # Handle enums
+            if candidate.preferred_modality:
+                candidate_dict["preferred_modality"] = candidate.preferred_modality.value
+            if candidate.action_type:
+                candidate_dict["action_type"] = candidate.action_type.value
+            if candidate.connected_via_plane:
+                candidate_dict["connected_via_plane"] = candidate.connected_via_plane.value
+            if candidate.findings:
+                candidate_dict["findings"] = [f.model_dump() for f in candidate.findings]
+
+            # Create the candidate
+            result = create_candidate(candidate_dict)
+            accepted.append({
+                "aod_asset_id": candidate.aod_asset_id,
+                "candidate_id": result["candidate_id"],
+                "execution_allowed": candidate.execution_allowed,
+                "action_type": candidate.action_type.value
+            })
+
+        except Exception as e:
+            rejected.append({
+                "aod_asset_id": candidate.aod_asset_id,
+                "asset_key": candidate.asset_key,
+                "reason": str(e)
+            })
+
+    # Log the handoff
+    handoff_log = create_handoff_log({
+        "aod_run_id": request.run_id,
+        "candidates_received": len(request.candidates),
+        "candidates_accepted": len(accepted),
+        "candidates_rejected": len(rejected),
+        "rejected_reasons": rejected,
+        "policy_version": request.policy_version,
+        "handoff_timestamp": request.handoff_timestamp.isoformat() if request.handoff_timestamp else None
+    })
+
+    return AODHandoffResponse(
+        run_id=request.run_id,
+        candidates_received=len(request.candidates),
+        candidates_accepted=len(accepted),
+        candidates_rejected=len(rejected),
+        rejected_reasons=rejected,
+        handoff_id=handoff_log["handoff_id"],
+        processed_at=datetime.utcnow()
+    )
+
+
+@app.post("/api/handoff/aod/policy", tags=["AOD Handoff"])
+async def receive_aod_policy(policy: AODPolicyManifest):
+    """
+    Receive governance policy manifest from AOD.
+
+    AOD publishes its governance rules so AAM can:
+    - Respect blocking finding types
+    - Apply fabric plane routing rules
+    - Enforce auto-provision vs human-review categories
+    """
+    policy_dict = policy.model_dump()
+    result = save_policy_manifest(policy_dict)
+
+    return {
+        "message": "Policy manifest received and activated",
+        "policy_id": result["policy_id"],
+        "policy_version": result["policy_version"],
+        "is_active": True
+    }
+
+
+@app.get("/api/handoff/aod/policy", tags=["AOD Handoff"])
+async def get_current_aod_policy():
+    """Get the currently active AOD policy manifest"""
+    policy = get_active_policy_manifest()
+    if not policy:
+        return {"message": "No active policy manifest", "policy": None}
+    return {"policy": policy}
+
+
+@app.get("/api/handoff/aod/policy/history", tags=["AOD Handoff"])
+async def get_aod_policy_history(limit: int = Query(20, description="Maximum policies to return")):
+    """Get history of AOD policy manifests"""
+    policies = list_policy_manifests(limit=limit)
+    return {"policies": policies, "count": len(policies)}
+
+
+@app.get("/api/handoff/aod/logs", tags=["AOD Handoff"])
+async def get_handoff_logs(
+    aod_run_id: Optional[str] = Query(None, description="Filter by AOD run ID"),
+    limit: int = Query(50, description="Maximum logs to return")
+):
+    """Get AOD handoff logs"""
+    logs = list_handoff_logs(aod_run_id=aod_run_id, limit=limit)
+    return {"logs": logs, "count": len(logs)}
+
+
+@app.get("/api/handoff/aod/logs/{handoff_id}", tags=["AOD Handoff"])
+async def get_handoff_log_detail(handoff_id: str):
+    """Get details of a specific handoff"""
+    log = get_handoff_log(handoff_id)
+    if not log:
+        raise HTTPException(status_code=404, detail="Handoff log not found")
+    return log
+
+
+@app.get("/api/handoff/aod/run/{aod_run_id}/candidates", tags=["AOD Handoff"])
+async def get_candidates_from_aod_run(aod_run_id: str):
+    """Get all candidates from a specific AOD discovery run"""
+    candidates = get_candidates_by_aod_run(aod_run_id)
+    return {
+        "aod_run_id": aod_run_id,
+        "candidates": candidates,
+        "count": len(candidates)
+    }
+
+
 @app.get("/api/aam/collectors", tags=["Collectors"])
 async def get_collectors():
     """List all collectors"""
@@ -2598,10 +2749,50 @@ class DeferRequest(BaseModel):
 
 @app.post("/api/candidates/{candidate_id}/match", tags=["Candidates"])
 async def match_candidate(candidate_id: str, request: MatchRequest):
-    """Attempt to match candidate to a pipe"""
+    """
+    Attempt to match candidate to a pipe.
+
+    Enforces AOD governance:
+    - If execution_allowed=False, blocks auto-matching (requires human override)
+    - If action_type="inventory_only", blocks auto-matching
+    - Respects blocking_findings from AOD
+    """
     candidate = get_candidate(candidate_id)
     if not candidate:
         raise HTTPException(status_code=404, detail="Candidate not found")
+
+    # === AOD GOVERNANCE ENFORCEMENT ===
+    execution_allowed = candidate.get("execution_allowed", True)
+    action_type = candidate.get("action_type", "provision")
+    blocking_findings = candidate.get("blocking_findings", [])
+
+    # Check if this is an auto-match attempt (no pipe_id specified)
+    is_auto_match = request.pipe_id is None
+
+    if is_auto_match:
+        # Enforce execution_allowed for auto-matching
+        if not execution_allowed:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Auto-matching blocked by AOD governance. "
+                f"Candidate has execution_allowed=False. "
+                f"Blocking findings: {blocking_findings}. "
+                f"Manual review and explicit pipe_id required."
+            )
+
+        # Enforce action_type for auto-matching
+        if action_type == "inventory_only":
+            raise HTTPException(
+                status_code=403,
+                detail=f"Auto-matching blocked by AOD governance. "
+                f"Candidate action_type is 'inventory_only' (requires human review). "
+                f"Provide explicit pipe_id to override."
+            )
+
+    # For manual matches with pipe_id, warn but allow (human override)
+    elif not execution_allowed or action_type == "inventory_only":
+        # Log warning but allow manual override
+        pass  # Future: could add audit log here
 
     # Check block direct access policy
     vendor = candidate.get("vendor_name", "")
@@ -2672,9 +2863,23 @@ async def match_candidate(candidate_id: str, request: MatchRequest):
 
             # Strategy 4: If still no match but pipes exist, create a new pipe from candidate
             if not pipe_id and all_pipes:
-                # Determine fabric plane based on preset routing policy
+                # Determine fabric plane - prefer AOD's connected_via_plane hint if provided
+                aod_plane_hint = candidate.get("connected_via_plane")
                 candidate_category = candidate.get("category", "")
-                routed_plane = preset_loader.get_routing_decision(candidate_category)
+
+                if aod_plane_hint:
+                    # AOD detected a fabric plane connection - use it
+                    try:
+                        routed_plane = FabricPlane(aod_plane_hint)
+                        routing_source = "aod_hint"
+                    except ValueError:
+                        # Invalid plane from AOD, fall back to preset routing
+                        routed_plane = preset_loader.get_routing_decision(candidate_category)
+                        routing_source = "preset_fallback"
+                else:
+                    # No AOD hint, use preset routing policy
+                    routed_plane = preset_loader.get_routing_decision(candidate_category)
+                    routing_source = "preset"
 
                 # Validate the routing is allowed
                 is_valid, route_reason = preset_loader.validate_candidate_routing(
@@ -2688,6 +2893,14 @@ async def match_candidate(candidate_id: str, request: MatchRequest):
                         f"to the appropriate fabric plane first."
                     )
 
+                # Build provenance with AOD traceability
+                lineage_hints = [f"candidate:{candidate_id}", f"routed_via:{routed_plane.value}"]
+                if candidate.get("aod_run_id"):
+                    lineage_hints.append(f"aod_run:{candidate.get('aod_run_id')}")
+                if candidate.get("aod_asset_id"):
+                    lineage_hints.append(f"aod_asset:{candidate.get('aod_asset_id')}")
+                lineage_hints.append(f"routing_source:{routing_source}")
+
                 # Create a new pipe from this candidate using the routed plane
                 new_pipe_data = {
                     "display_name": candidate.get("display_name") or candidate.get("vendor_name"),
@@ -2698,13 +2911,13 @@ async def match_candidate(candidate_id: str, request: MatchRequest):
                     "provenance": {
                         "discovered_by": "auto-match",
                         "discovered_at": datetime.utcnow().isoformat(),
-                        "lineage_hints": [f"candidate:{candidate_id}", f"routed_via:{routed_plane.value}"]
+                        "lineage_hints": lineage_hints
                     }
                 }
                 result = create_pipe(new_pipe_data)
                 pipe_id = result["pipe_id"]
                 score = 0.6
-                reason = f"Created new pipe from candidate ({candidate.get('vendor_name')}) via {routed_plane.value}"
+                reason = f"Created new pipe from candidate ({candidate.get('vendor_name')}) via {routed_plane.value} ({routing_source})"
 
         if not pipe_id:
             raise HTTPException(
