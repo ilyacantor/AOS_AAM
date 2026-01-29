@@ -1192,11 +1192,25 @@ async def ui_pipe_detail(pipe_id: str):
 
 
 @app.get("/ui/candidates", response_class=HTMLResponse, include_in_schema=False)
-async def ui_candidates_list(status: Optional[str] = Query(None)):
+async def ui_candidates_list(
+    status: Optional[str] = Query(None),
+    view: Optional[str] = Query("fabrics", description="View mode: 'fabrics' for SORs+Fabrics, 'all' for everything")
+):
     """Candidates Screen"""
-    candidates = list_candidates(status=status)
+    all_candidates = list_candidates(status=status, limit=10000)
     
-    all_candidates = list_candidates()
+    # Define core fabric/SOR categories
+    fabric_categories = {"CRM", "crm", "iPaaS", "ipaas", "API Gateway", "api_gateway", 
+                        "Event Bus", "event_bus", "Data Warehouse", "data_warehouse", 
+                        "ERP", "erp", "HCM", "hcm", "IDP", "idp", "ITSM", "itsm", "data"}
+    
+    # Filter based on view mode
+    if view == "fabrics":
+        candidates = [c for c in all_candidates if c.get("category", "").lower() in 
+                     {cat.lower() for cat in fabric_categories}]
+    else:
+        candidates = all_candidates
+    
     statuses = sorted(set(c.get("status", "") for c in all_candidates if c.get("status")))
     
     status_options = '<option value="">All Statuses</option>' + ''.join(
@@ -1243,7 +1257,21 @@ async def ui_candidates_list(status: Optional[str] = Query(None)):
     {ui_nav('candidates')}
     <div class="container">
         <h1>Connection Candidates</h1>
+        <div class="stats" style="margin-bottom: 16px;">
+            <div class="stat-card">
+                <div class="stat-value">{len(candidates)}</div>
+                <div class="stat-label">Showing</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{len(all_candidates)}</div>
+                <div class="stat-label">Total</div>
+            </div>
+        </div>
         <div class="controls">
+            <select id="filter-view" data-testid="filter-view" onchange="applyFilter()">
+                <option value="fabrics"{"" if view == "all" else " selected"}>SORs & Fabrics</option>
+                <option value="all"{" selected" if view == "all" else ""}>All Candidates</option>
+            </select>
             <select id="filter-status" data-testid="filter-status" onchange="applyFilter()">{status_options}</select>
         </div>
         <table data-testid="candidates-table">
@@ -1394,8 +1422,10 @@ async def ui_candidates_list(status: Optional[str] = Query(None)):
         }}
 
         function applyFilter() {{
+            const view = document.getElementById('filter-view').value;
             const status = document.getElementById('filter-status').value;
             const params = new URLSearchParams();
+            if (view) params.set('view', view);
             if (status) params.set('status', status);
             window.location.href = '/ui/candidates' + (params.toString() ? '?' + params.toString() : '');
         }}
@@ -2200,7 +2230,8 @@ async def ui_topology():
             <div class="filter-group">
                 <label>View:</label>
                 <select id="view-filter" onchange="changeView()">
-                    <option value="all">All Nodes</option>
+                    <option value="summary" selected>Fabrics & SORs</option>
+                    <option value="all">All Assets (slow)</option>
                     <option value="API_GATEWAY">API Gateway Plane</option>
                     <option value="IPAAS">iPaaS Plane</option>
                     <option value="EVENT_BUS">Event Bus Plane</option>
@@ -2255,9 +2286,11 @@ async def ui_topology():
             candidate: 'triangle'
         }};
 
-        async function loadTopology(filter = 'all') {{
-            let url = '/api/topology';
-            if (filter !== 'all') {{
+        async function loadTopology(filter = 'summary') {{
+            let url = '/api/topology/summary';
+            if (filter === 'all') {{
+                url = '/api/topology';
+            }} else if (filter !== 'summary') {{
                 url = `/api/topology/plane/${{filter}}`;
             }}
 
@@ -3820,6 +3853,122 @@ async def get_pipe_topology(pipe_id: str):
     from datetime import datetime
     return {
         **result,
+        "generated_at": datetime.utcnow().isoformat()
+    }
+
+
+@app.get("/api/topology/summary", tags=["Topology"])
+async def get_topology_summary():
+    """
+    Get a lightweight topology showing only Fabric Planes and Systems of Record (SORs).
+    
+    This view is optimized for large datasets - it shows aggregate counts instead of
+    individual assets, making it suitable for 600+ asset inventories.
+    """
+    from datetime import datetime
+    
+    pipes = list_pipes()
+    candidates = list_candidates(limit=10000)
+    
+    # Build fabric plane nodes with counts
+    fabric_counts = {"IPAAS": 0, "API_GATEWAY": 0, "EVENT_BUS": 0, "DATA_WAREHOUSE": 0}
+    for p in pipes:
+        plane = p.get("fabric_plane", "API_GATEWAY")
+        if plane in fabric_counts:
+            fabric_counts[plane] += 1
+    
+    # Count candidates by category mapped to planes
+    category_to_plane = {
+        "iPaaS": "IPAAS", "ipaas": "IPAAS",
+        "API Gateway": "API_GATEWAY", "api_gateway": "API_GATEWAY",
+        "Event Bus": "EVENT_BUS", "event_bus": "EVENT_BUS",
+        "Data Warehouse": "DATA_WAREHOUSE", "data_warehouse": "DATA_WAREHOUSE", "data": "DATA_WAREHOUSE"
+    }
+    candidate_counts = {"IPAAS": 0, "API_GATEWAY": 0, "EVENT_BUS": 0, "DATA_WAREHOUSE": 0, "OTHER": 0}
+    for c in candidates:
+        cat = c.get("category", "other")
+        plane = category_to_plane.get(cat, "OTHER")
+        if plane in candidate_counts:
+            candidate_counts[plane] += 1
+        else:
+            candidate_counts["OTHER"] += 1
+    
+    # Build SOR nodes from source systems
+    sor_systems = {}
+    for p in pipes:
+        source = p.get("source_system")
+        if source:
+            if source not in sor_systems:
+                sor_systems[source] = {"pipe_count": 0, "planes": set()}
+            sor_systems[source]["pipe_count"] += 1
+            sor_systems[source]["planes"].add(p.get("fabric_plane", "API_GATEWAY"))
+    
+    for c in candidates:
+        vendor = c.get("vendor_name")
+        if vendor:
+            if vendor not in sor_systems:
+                sor_systems[vendor] = {"pipe_count": 0, "planes": set(), "is_candidate": True}
+            if "is_candidate" not in sor_systems[vendor]:
+                sor_systems[vendor]["is_candidate"] = True
+    
+    # Create nodes
+    nodes = []
+    edges = []
+    
+    # Fabric plane nodes
+    plane_labels = {
+        "IPAAS": "iPaaS",
+        "API_GATEWAY": "API Gateway", 
+        "EVENT_BUS": "Event Bus",
+        "DATA_WAREHOUSE": "Data Warehouse"
+    }
+    for plane, label in plane_labels.items():
+        pipe_count = fabric_counts.get(plane, 0)
+        cand_count = candidate_counts.get(plane, 0)
+        nodes.append({
+            "id": f"plane:{plane}",
+            "label": f"{label}\n({pipe_count} pipes, {cand_count} candidates)",
+            "type": "fabric_plane",
+            "metadata": {
+                "plane_type": plane,
+                "pipe_count": pipe_count,
+                "candidate_count": cand_count
+            }
+        })
+    
+    # SOR nodes (top 20 by pipe count)
+    sorted_sors = sorted(sor_systems.items(), key=lambda x: x[1]["pipe_count"], reverse=True)[:20]
+    for sor_name, sor_data in sorted_sors:
+        nodes.append({
+            "id": f"sor:{sor_name}",
+            "label": f"{sor_name}\n({sor_data['pipe_count']} pipes)",
+            "type": "source_system",
+            "metadata": {
+                "name": sor_name,
+                "pipe_count": sor_data["pipe_count"],
+                "is_candidate_source": sor_data.get("is_candidate", False)
+            }
+        })
+        # Connect SOR to its planes
+        for plane in sor_data.get("planes", []):
+            edges.append({
+                "id": f"sor_to_plane:{sor_name}:{plane}",
+                "source": f"sor:{sor_name}",
+                "target": f"plane:{plane}",
+                "type": "sor_in_plane"
+            })
+    
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "stats": {
+            "total_nodes": len(nodes),
+            "total_edges": len(edges),
+            "fabric_planes": 4,
+            "source_systems": len(sorted_sors),
+            "total_pipes": len(pipes),
+            "total_candidates": len(candidates)
+        },
         "generated_at": datetime.utcnow().isoformat()
     }
 
