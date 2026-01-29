@@ -1009,6 +1009,30 @@ def get_drift_event(drift_id: str) -> Optional[dict]:
     return None
 
 
+def get_tee_request(tee_id: str) -> Optional[dict]:
+    """Get a single TEE request by ID"""
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT * FROM tee_requests WHERE tee_id = ?", (tee_id,))
+    row = cursor.fetchone()
+    conn.close()
+
+    if row:
+        return {
+            "tee_id": row["tee_id"],
+            "pipe_id": row["pipe_id"],
+            "target_system": row["target_system"],
+            "tee_type": row["tee_type"],
+            "configuration": json.loads(row["configuration"]) if row["configuration"] else {},
+            "status": row["status"],
+            "requested_at": row["requested_at"],
+            "approved_at": row["approved_at"],
+            "verified_at": row["verified_at"]
+        }
+    return None
+
+
 def create_tee_request(tee_data: dict) -> dict:
     """Create a new tee request"""
     conn = get_connection()

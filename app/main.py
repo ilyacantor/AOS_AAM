@@ -35,6 +35,7 @@ from .db import (
     list_tee_requests,
     update_tee_request_status,
     create_tee_request,
+    get_tee_request,
     get_drift_event,
     create_drift_event,
     clear_all_data,
@@ -58,6 +59,7 @@ from .preset_config import PresetConfigLoader, EnterpriseMaturity
 from .fabric_drift import FabricDriftDetector, FabricDriftType
 from .adapters.factory import get_adapter_for_plane
 from .adapters.base import AdapterStatus, PlaneHealth
+from .pii_redaction import redact_pii_from_observation
 
 app = FastAPI(
     title="AAM - Adaptive API Mesh",
@@ -2366,15 +2368,34 @@ async def run_mock(request: Optional[MockCollectorRequest] = None):
     }
 
 
+# Alias endpoint to match documentation
+@app.post("/api/collect/mock/run", tags=["Collectors"])
+async def run_mock_alias(request: Optional[MockCollectorRequest] = None):
+    """Run the mock collector (alias for /api/aam/collectors/mock/run)"""
+    return await run_mock(request)
+
+
 @app.post("/api/aam/infer", tags=["Collectors"])
 async def infer_pipes():
     """Process pending observations and create pipes"""
     observations = get_unprocessed_observations()
     if not observations:
         return {"message": "No pending observations", "pipes_created": 0, "pipes": []}
-    
-    inferred_pipes = infer_pipes_from_observations(observations)
-    
+
+    # Apply PII redaction based on current preset's governance policy
+    policies = preset_loader.get_governance_policies()
+    pii_policy = policies.get("pii_redaction", "optional")
+
+    redacted_observations = []
+    redaction_applied = 0
+    for obs in observations:
+        redacted_obs = redact_pii_from_observation(obs, policy=pii_policy)
+        redacted_observations.append(redacted_obs)
+        if redacted_obs.get("metadata", {}).get("pii_redacted"):
+            redaction_applied += 1
+
+    inferred_pipes = infer_pipes_from_observations(redacted_observations)
+
     created_pipes = []
     for pipe in inferred_pipes:
         action = pipe.pop("_action", "create")
@@ -2383,15 +2404,17 @@ async def infer_pipes():
             pipe["pipe_id"] = result["pipe_id"]
             pipe["version"] = result["version"]
             created_pipes.append(pipe)
-    
+
     for obs in observations:
         mark_observation_processed(obs["observation_id"])
-    
+
     return {
         "message": "Inference complete",
         "observations_processed": len(observations),
         "pipes_created": len(created_pipes),
-        "pipes": created_pipes
+        "pipes": created_pipes,
+        "pii_redaction_policy": pii_policy,
+        "observations_redacted": redaction_applied
     }
 
 
@@ -2498,6 +2521,9 @@ async def run_collector(collector: str, request: Optional[MockCollectorRequest] 
                 
                 observations = await adapter.discover_pipes()
                 
+                # Get PII redaction policy
+                pii_policy = policies.get("pii_redaction", "optional")
+
                 for obs in observations:
                     obs_data = {
                         "observation_id": obs.get("observation_id"),
@@ -2514,6 +2540,8 @@ async def run_collector(collector: str, request: Optional[MockCollectorRequest] 
                             "preset": preset_loader.current_config.preset_id
                         }
                     }
+                    # Apply PII redaction before storing
+                    obs_data = redact_pii_from_observation(obs_data, policy=pii_policy)
                     create_observation(obs_data)
                     all_observations.append(obs_data)
                 
@@ -2575,6 +2603,26 @@ async def match_candidate(candidate_id: str, request: MatchRequest):
     if not candidate:
         raise HTTPException(status_code=404, detail="Candidate not found")
 
+    # Check block direct access policy
+    vendor = candidate.get("vendor_name", "")
+    if preset_loader.should_block_direct_api(vendor):
+        # In non-scrappy modes, we need to route through the appropriate fabric plane
+        # Check if a direct API_GATEWAY connection is being attempted
+        if request.pipe_id:
+            pipe = get_pipe(request.pipe_id)
+            if pipe and pipe.get("fabric_plane") == "API_GATEWAY":
+                # Validate routing - this will fail for direct access in non-scrappy modes
+                is_valid, block_reason = preset_loader.validate_candidate_routing(
+                    vendor, FabricPlane.API_GATEWAY
+                )
+                if not is_valid:
+                    raise HTTPException(
+                        status_code=403,
+                        detail=f"Direct API access blocked: {block_reason}. "
+                        f"Current preset ({preset_loader.current_config.name}) requires routing through "
+                        f"{preset_loader.current_config.primary_plane.value}."
+                    )
+
     pipe_id = request.pipe_id
     score = 1.0
     reason = "Manual match"
@@ -2624,23 +2672,39 @@ async def match_candidate(candidate_id: str, request: MatchRequest):
 
             # Strategy 4: If still no match but pipes exist, create a new pipe from candidate
             if not pipe_id and all_pipes:
-                # Create a new pipe from this candidate
+                # Determine fabric plane based on preset routing policy
+                candidate_category = candidate.get("category", "")
+                routed_plane = preset_loader.get_routing_decision(candidate_category)
+
+                # Validate the routing is allowed
+                is_valid, route_reason = preset_loader.validate_candidate_routing(
+                    vendor, routed_plane
+                )
+                if not is_valid:
+                    raise HTTPException(
+                        status_code=403,
+                        detail=f"Cannot create pipe: {route_reason}. "
+                        f"Consider using preset 6 (Scrappy) for direct access, or connect "
+                        f"to the appropriate fabric plane first."
+                    )
+
+                # Create a new pipe from this candidate using the routed plane
                 new_pipe_data = {
                     "display_name": candidate.get("display_name") or candidate.get("vendor_name"),
                     "source_system": candidate.get("vendor_name"),
-                    "fabric_plane": "API_GATEWAY",
+                    "fabric_plane": routed_plane.value,
                     "modality": candidate.get("preferred_modality") or "DECLARED_INTERFACE",
                     "transport_kind": "API",
                     "provenance": {
                         "discovered_by": "auto-match",
                         "discovered_at": datetime.utcnow().isoformat(),
-                        "lineage_hints": [f"candidate:{candidate_id}"]
+                        "lineage_hints": [f"candidate:{candidate_id}", f"routed_via:{routed_plane.value}"]
                     }
                 }
                 result = create_pipe(new_pipe_data)
                 pipe_id = result["pipe_id"]
                 score = 0.6
-                reason = f"Created new pipe from candidate ({candidate.get('vendor_name')})"
+                reason = f"Created new pipe from candidate ({candidate.get('vendor_name')}) via {routed_plane.value}"
 
         if not pipe_id:
             raise HTTPException(
@@ -2730,6 +2794,7 @@ class TeeRequestCreate(BaseModel):
 
 
 class TeeStatusUpdate(BaseModel):
+    """Deprecated: Use TeeVerificationRequest instead"""
     status: str
 
 
@@ -2775,17 +2840,81 @@ async def get_tee_requests(status: Optional[str] = Query(None, description="Filt
     return {"tee_requests": requests, "count": len(requests)}
 
 
+class TeeVerificationRequest(BaseModel):
+    """Request model for TEE verification with validation details"""
+    status: str
+    verification_method: Optional[str] = None  # e.g., "manual_test", "automated_check", "log_review"
+    verification_evidence: Optional[str] = None  # Evidence or notes about verification
+    verified_by: Optional[str] = None  # Who performed the verification
+
+
 @app.post("/api/tee/requests/{tee_id}/status", tags=["Tee Requests"])
-async def update_tee_status(tee_id: str, request: TeeStatusUpdate):
-    """Update tee request status"""
+async def update_tee_status(tee_id: str, request: TeeVerificationRequest):
+    """
+    Update TEE request status with workflow enforcement.
+
+    Workflow: requested → approved → verified
+
+    - To move to 'approved': Request must be in 'requested' status
+    - To move to 'verified': Request must be in 'approved' status, and verification details should be provided
+    """
     if request.status not in ["approved", "verified"]:
         raise HTTPException(status_code=400, detail="Status must be 'approved' or 'verified'")
-    
+
+    # Get current TEE request to validate workflow
+    tee_req = get_tee_request(tee_id)
+    if not tee_req:
+        raise HTTPException(status_code=404, detail="TEE request not found")
+
+    current_status = tee_req.get("status")
+
+    # Enforce workflow transitions
+    if request.status == "approved":
+        if current_status != "requested":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot approve: TEE request is in '{current_status}' status. "
+                "Only 'requested' status can be approved."
+            )
+
+    elif request.status == "verified":
+        if current_status != "approved":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot verify: TEE request is in '{current_status}' status. "
+                "Only 'approved' status can be verified. Approve the request first."
+            )
+
+        # Verification requires additional validation
+        if not request.verification_method:
+            raise HTTPException(
+                status_code=400,
+                detail="Verification requires a verification_method (e.g., 'manual_test', 'automated_check', 'log_review')"
+            )
+
+        # Validate that the TEE is actually working (simulation for now)
+        pipe = get_pipe(tee_req["pipe_id"])
+        if not pipe:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot verify: Associated pipe no longer exists"
+            )
+
     updated = update_tee_request_status(tee_id, request.status)
     if not updated:
-        raise HTTPException(status_code=404, detail="Tee request not found")
-    
-    return updated
+        raise HTTPException(status_code=404, detail="TEE request not found")
+
+    # Add verification metadata to response
+    response = dict(updated)
+    if request.status == "verified":
+        response["verification"] = {
+            "method": request.verification_method,
+            "evidence": request.verification_evidence,
+            "verified_by": request.verified_by,
+            "pipe_status": "active" if pipe else "unknown"
+        }
+
+    return response
 
 
 # ============================================================================
