@@ -499,6 +499,62 @@ async def ui_pipes_list(
             background: rgba(30, 41, 59, 0.5);
             border-radius: 8px;
         }}
+        .data-source-toggle {{
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+            padding: 12px 16px;
+            background: rgba(30, 41, 59, 0.6);
+            border: 1px solid #334155;
+            border-radius: 8px;
+        }}
+        .toggle-label {{
+            font-size: 0.85rem;
+            color: #94a3b8;
+            font-weight: 500;
+        }}
+        .toggle-group {{
+            display: flex;
+            background: rgba(15, 23, 42, 0.8);
+            border-radius: 6px;
+            overflow: hidden;
+            border: 1px solid #334155;
+        }}
+        .toggle-btn {{
+            padding: 8px 16px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            border: none;
+            background: transparent;
+            color: #94a3b8;
+            cursor: pointer;
+            transition: all 0.2s;
+        }}
+        .toggle-btn.active {{
+            background: #22d3ee;
+            color: #0f172a;
+        }}
+        .toggle-btn:hover:not(.active) {{
+            background: rgba(34, 211, 238, 0.1);
+            color: #e2e8f0;
+        }}
+        .source-indicator {{
+            font-size: 0.75rem;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-weight: 500;
+        }}
+        .source-indicator.mock {{
+            background: rgba(167, 139, 250, 0.2);
+            color: #a78bfa;
+            border: 1px solid rgba(167, 139, 250, 0.3);
+        }}
+        .source-indicator.aod {{
+            background: rgba(34, 211, 238, 0.2);
+            color: #22d3ee;
+            border: 1px solid rgba(34, 211, 238, 0.3);
+        }}
         .stat-item {{
             text-align: center;
         }}
@@ -589,12 +645,22 @@ async def ui_pipes_list(
             <div class="preset-grid" id="preset-grid">Loading presets...</div>
         </div>
         
+        <div class="data-source-toggle" data-testid="data-source-toggle">
+            <span class="toggle-label">Data Source:</span>
+            <div class="toggle-group">
+                <button class="toggle-btn active" id="toggle-mock" data-testid="toggle-mock" onclick="setDataSource('mock')">Mock Data</button>
+                <button class="toggle-btn" id="toggle-aod" data-testid="toggle-aod" onclick="setDataSource('aod')">AOD Test Data</button>
+            </div>
+            <span class="source-indicator mock" id="source-indicator" data-testid="source-indicator">Internal mock generator</span>
+        </div>
+        
         <div class="stats-bar" id="stats-bar" data-testid="stats-bar">
             <div class="stat-item"><div class="stat-value" id="stat-total">{len(pipes)}</div><div class="stat-label">Total Pipes</div></div>
         </div>
         
         <div class="controls">
             <button class="btn" id="btn-run-collector" data-testid="btn-run-collector">Run Mock Collector</button>
+            <button class="btn" id="btn-load-aod" data-testid="btn-load-aod" style="display:none;">Load AOD Test Data</button>
             <button class="btn" id="btn-export-dcl" data-testid="btn-export-dcl">Export to DCL</button>
             <select id="filter-fabric" data-testid="filter-fabric" onchange="applyFilters()">{fabric_options}</select>
             <select id="filter-source" data-testid="filter-source" onchange="applyFilters()">{source_options}</select>
@@ -718,6 +784,130 @@ async def ui_pipes_list(
         }}
         
         loadPresets();
+        
+        let currentDataSource = 'mock';
+        
+        function setDataSource(source) {{
+            currentDataSource = source;
+            const mockBtn = document.getElementById('toggle-mock');
+            const aodBtn = document.getElementById('toggle-aod');
+            const indicator = document.getElementById('source-indicator');
+            const mockCollectorBtn = document.getElementById('btn-run-collector');
+            const aodLoadBtn = document.getElementById('btn-load-aod');
+            
+            if (source === 'mock') {{
+                mockBtn.classList.add('active');
+                aodBtn.classList.remove('active');
+                indicator.className = 'source-indicator mock';
+                indicator.textContent = 'Internal mock generator';
+                mockCollectorBtn.style.display = 'inline-block';
+                aodLoadBtn.style.display = 'none';
+            }} else {{
+                aodBtn.classList.add('active');
+                mockBtn.classList.remove('active');
+                indicator.className = 'source-indicator aod';
+                indicator.textContent = 'Simulated AOD discovery run';
+                mockCollectorBtn.style.display = 'none';
+                aodLoadBtn.style.display = 'inline-block';
+            }}
+        }}
+        
+        document.getElementById('btn-load-aod').addEventListener('click', async function() {{
+            this.disabled = true;
+            this.textContent = 'Loading AOD Data...';
+            try {{
+                const aodRunId = 'aod-test-' + Date.now();
+                const testCandidates = [
+                    {{
+                        asset_key: 'salesforce:accounts',
+                        vendor_name: 'Salesforce',
+                        display_name: 'Salesforce Accounts API',
+                        category: 'CRM',
+                        governance_status: 'governed',
+                        known_endpoints: ['https://api.salesforce.com/v1/accounts'],
+                        execution_allowed: true,
+                        action_type: 'provision',
+                        aod_run_id: aodRunId,
+                        aod_asset_id: 'sf-accounts-001',
+                        priority_score: 85
+                    }},
+                    {{
+                        asset_key: 'workato:recipes',
+                        vendor_name: 'Workato',
+                        display_name: 'Workato Recipe Catalog',
+                        category: 'iPaaS',
+                        governance_status: 'governed',
+                        known_endpoints: ['https://api.workato.com/v1/recipes'],
+                        execution_allowed: true,
+                        action_type: 'inventory_only',
+                        aod_run_id: aodRunId,
+                        aod_asset_id: 'wk-recipes-001',
+                        priority_score: 90
+                    }},
+                    {{
+                        asset_key: 'snowflake:orders_table',
+                        vendor_name: 'Snowflake',
+                        display_name: 'Snowflake Orders Table',
+                        category: 'Data Warehouse',
+                        governance_status: 'governed',
+                        known_endpoints: ['snowflake://analytics.orders'],
+                        execution_allowed: true,
+                        action_type: 'provision',
+                        aod_run_id: aodRunId,
+                        aod_asset_id: 'sf-orders-001',
+                        priority_score: 75
+                    }},
+                    {{
+                        asset_key: 'kafka:customer_events',
+                        vendor_name: 'Confluent Kafka',
+                        display_name: 'Customer Events Topic',
+                        category: 'Event Bus',
+                        governance_status: 'shadow_it',
+                        known_endpoints: ['kafka://prod-cluster/customer.events'],
+                        execution_allowed: false,
+                        action_type: 'inventory_only',
+                        blocking_findings: ['no_owner_identified'],
+                        aod_run_id: aodRunId,
+                        aod_asset_id: 'kafka-customers-001',
+                        priority_score: 60
+                    }},
+                    {{
+                        asset_key: 'kong:api_catalog',
+                        vendor_name: 'Kong',
+                        display_name: 'Kong API Gateway Catalog',
+                        category: 'API Gateway',
+                        governance_status: 'governed',
+                        known_endpoints: ['https://kong.internal/apis'],
+                        execution_allowed: true,
+                        action_type: 'provision',
+                        aod_run_id: aodRunId,
+                        aod_asset_id: 'kong-apis-001',
+                        priority_score: 95
+                    }}
+                ];
+                
+                const res = await fetch('/api/handoff/aod/receive', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{
+                        run_id: aodRunId,
+                        candidates: testCandidates
+                    }})
+                }});
+                const data = await res.json();
+                
+                if (res.ok) {{
+                    showToast('AOD handoff received: ' + data.candidates_accepted + ' candidates accepted', 'success');
+                    setTimeout(() => window.location.href = '/ui/candidates', 1500);
+                }} else {{
+                    showToast('Error: ' + (data.detail || JSON.stringify(data)), 'error');
+                }}
+            }} catch (e) {{
+                showToast('Error: ' + e.message, 'error');
+            }}
+            this.disabled = false;
+            this.textContent = 'Load AOD Test Data';
+        }});
         
         document.getElementById('btn-run-collector').addEventListener('click', async function() {{
             this.disabled = true;
