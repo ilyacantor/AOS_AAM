@@ -1414,22 +1414,52 @@ async def ui_guide():
         
         <div class="guide-section" id="what-is-aam">
             <h2>What is AAM?</h2>
-            <p><strong>AAM (Adaptive API Mesh)</strong> is the integration layer that inventories your enterprise's reusable data pipes and makes their behavior and meaning explicit. Think of it as a catalog of all the ways data can flow between your systems.</p>
+            <p><strong>AAM (Adaptive API Mesh)</strong> is the self-healing integration mesh that observes, documents, and maintains your enterprise's data pipes. It makes pipe behavior and meaning explicit <strong>without changing how data moves</strong>.</p>
             
             <h3>The Big Picture</h3>
             <p>AAM sits between two other systems:</p>
             <div class="guide-diagram">
-                AOD (discovers what exists) → <span class="highlight">AAM (catalogs the pipes)</span> → DCL (unifies meaning)
+                AOD (discovers what exists) → <span class="highlight">AAM (catalogs pipes, self-heals)</span> → DCL (unifies meaning)
             </div>
             <ul>
-                <li><strong>AOD</strong> discovers what systems and connections exist in your enterprise and sends "connection candidates" to AAM</li>
-                <li><strong>AAM</strong> (this system) catalogs those connections as "declared pipes" with metadata about how they behave</li>
-                <li><strong>DCL</strong> consumes those declared pipes to build a unified understanding of your data</li>
+                <li><strong>AOD</strong> discovers what systems exist and sends "connection candidates" to AAM</li>
+                <li><strong>AAM</strong> (this system) catalogs connections as "declared pipes" and self-heals when things drift</li>
+                <li><strong>DCL</strong> consumes declared pipes to build unified business understanding</li>
             </ul>
+            
+            <h3>Connectivity Modalities</h3>
+            <p>AAM supports four connection patterns:</p>
+            <table class="guide-table">
+                <tr><th>Mode</th><th>Description</th><th>Use Case</th></tr>
+                <tr><td>Control-Plane Attachment</td><td>Read-only visibility into APIs, integrations, ownership</td><td>Primary enterprise pattern</td></tr>
+                <tr><td>Declared Interface</td><td>MuleSoft System APIs or enterprise-approved APIs</td><td>Standardized access</td></tr>
+                <tr><td>Passive Subscription</td><td>Kafka topics, Event Hub, Snowflake streams</td><td>Event-driven data</td></tr>
+                <tr><td>Minimal Tee</td><td>One additional sink added to existing flow</td><td>Explicit enablement only</td></tr>
+            </table>
+
+            <h3>Fabric Plane Integrations</h3>
+            <p>AAM connects to <strong>Fabric Planes</strong>, not individual SaaS apps:</p>
+            <table class="guide-table">
+                <tr><th>Plane</th><th>Systems</th><th>Capabilities</th></tr>
+                <tr><td>iPaaS</td><td>Workato, MuleSoft, Tray.io</td><td>Webhook signals, recipe changes</td></tr>
+                <tr><td>API Gateway</td><td>Kong, Apigee, AWS API GW</td><td>API catalogs, traffic patterns</td></tr>
+                <tr><td>Event Bus</td><td>Kafka, EventBridge, Pulsar</td><td>Schema registries, topic metadata</td></tr>
+                <tr><td>Data Warehouse</td><td>Snowflake, BigQuery, Redshift</td><td>Table schemas, freshness metadata</td></tr>
+            </table>
+
+            <h3>Self-Healing Capabilities</h3>
+            <p>AAM actively monitors and repairs connectivity issues:</p>
+            <table class="guide-table">
+                <tr><th>Drift Type</th><th>Detection</th><th>Self-Heal Action</th></tr>
+                <tr><td>Connection Drift</td><td>Lost connectivity to Fabric Plane</td><td>Reconnect adapter</td></tr>
+                <tr><td>Consumer Lag</td><td>Event Bus consumers falling behind</td><td>Restart consumers</td></tr>
+                <tr><td>Warehouse Suspend</td><td>Warehouse compute suspended</td><td>Wake warehouse</td></tr>
+                <tr><td>Schema Drift</td><td>Field changes in pipe schemas</td><td>Log version, alert operators</td></tr>
+            </table>
             
             <div class="guide-card">
                 <div class="guide-card-title">What AAM Does NOT Do</div>
-                <p>AAM does not move data, transform data, or act as an integration platform. It only <strong>observes</strong> and <strong>documents</strong> what already exists.</p>
+                <p>AAM does not move data, transform data, act as an iPaaS, build per-app SaaS connectors, provision new connectors, or rotate secrets. It only <strong>observes</strong>, <strong>documents</strong>, and <strong>self-heals connectivity</strong>.</p>
             </div>
         </div>
         
