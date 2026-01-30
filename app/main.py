@@ -252,6 +252,7 @@ UI_STYLE = """
     h1 { font-size: 1.75rem; font-weight: 700; margin-bottom: 24px; color: #e2e8f0; }
     h2 { font-size: 1.25rem; font-weight: 600; margin-bottom: 16px; color: #e2e8f0; }
     h3 { font-size: 1rem; font-weight: 600; margin-bottom: 12px; color: #cbd5e1; }
+    .page-subtitle { font-size: 0.9rem; color: #94a3b8; margin-top: -16px; margin-bottom: 24px; line-height: 1.5; }
     .controls { display: flex; gap: 12px; margin-bottom: 24px; flex-wrap: wrap; align-items: center; }
     .btn {
         background: rgba(34, 211, 238, 0.1);
@@ -638,7 +639,8 @@ async def ui_pipes_list(
 <body>
     {ui_nav('pipes')}
     <div class="container">
-        <h1>Pipes Inventory</h1>
+        <h1>Pipes</h1>
+        <p class="page-subtitle">All declared data pipes with metadata, health status, and ownership. These are your canonical integration endpoints.</p>
         
         <div class="preset-section" data-testid="preset-section">
             <h3>Load Enterprise Preset</h3>
@@ -1264,7 +1266,8 @@ async def ui_candidates_list(
 <body>
     {ui_nav('candidates')}
     <div class="container">
-        <h1>Connection Candidates</h1>
+        <h1>Candidates</h1>
+        <p class="page-subtitle">Connection requests from AOD discovery. Triage, match to pipes, or defer candidates that don't fit your integration mesh.</p>
         <div class="stats" style="margin-bottom: 16px;">
             <div class="stat-card">
                 <div class="stat-value">{len(candidates)}</div>
@@ -1985,6 +1988,7 @@ async def ui_drift_list(status: Optional[str] = Query(None)):
     {ui_nav('drift')}
     <div class="container">
         <h1>Drift & Health</h1>
+        <p class="page-subtitle">Monitor schema changes and connectivity issues. Acknowledge, suppress, or take action on drift events.</p>
         <div class="controls">
             <button class="btn" id="btn-rerun-collector" data-testid="btn-rerun-collector">Re-run Collector</button>
             <select id="filter-status" data-testid="filter-drift-status" onchange="applyFilter()">{status_options}</select>
@@ -2178,7 +2182,8 @@ async def ui_topology():
 <body>
     {ui_nav("topology")}
     <div class="container">
-        <h1>Topology Visualization</h1>
+        <h1>Topology</h1>
+        <p class="page-subtitle">Interactive graph visualization of your integration mesh. Shows how fabric planes, pipes, source systems, and candidates connect.</p>
 
         <div class="stats" id="stats-container">
             <div class="stat-card">
