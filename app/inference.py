@@ -235,70 +235,139 @@ def infer_entity_scope(entity_hints: list[str], endpoint_info: dict) -> list[str
 
 
 def infer_identity_keys(schema: Optional[dict], entity_scope: list[str]) -> list[str]:
-    """Infer identity keys from schema fields"""
+    """Infer identity keys from schema fields with deep analysis"""
     if not schema:
         return ["id"]
-    
+
     keys = []
-    
-    # Common identity field patterns
-    id_patterns = ["id", "uuid", "key", "_id", "identifier"]
-    
+    key_scores = {}  # Track confidence scores for each potential key
+
+    # Common identity field patterns with priority scores
+    primary_id_patterns = ["id", "uuid", "guid", "key", "_id", "identifier", "pk"]
+    secondary_id_patterns = ["code", "number", "ref", "reference", "external_id"]
+
     for field_name in schema.keys():
         lower_name = field_name.lower()
-        
-        # Direct ID fields
-        if lower_name in id_patterns or lower_name.endswith("_id") or lower_name.endswith("id"):
-            if lower_name not in keys:
-                keys.append(field_name)
-        
+        score = 0
+
+        # Primary ID fields (highest priority)
+        if lower_name in primary_id_patterns:
+            score = 100
+        elif lower_name.endswith("_id") or lower_name.endswith("id"):
+            score = 90
+        elif lower_name.endswith("_uuid") or lower_name.endswith("_guid"):
+            score = 95
+        elif lower_name.startswith("pk_") or lower_name == "primary_key":
+            score = 95
+
+        # Secondary ID patterns
+        elif any(p in lower_name for p in secondary_id_patterns):
+            score = 70
+
         # Entity-specific IDs (e.g., account_id for Account entity)
         for entity in entity_scope:
-            if entity.lower() in lower_name and "id" in lower_name:
-                if field_name not in keys:
-                    keys.append(field_name)
-    
+            entity_lower = entity.lower().replace(" ", "_")
+            if entity_lower in lower_name and ("id" in lower_name or "key" in lower_name):
+                score = max(score, 85)
+
+        # Composite key detection (multiple fields that together form identity)
+        if lower_name in ["tenant_id", "org_id", "organization_id", "company_id"]:
+            score = max(score, 80)  # These are often part of composite keys
+
+        # Check field value type hints if available
+        field_value = schema.get(field_name)
+        if isinstance(field_value, str):
+            # UUID pattern detection
+            if len(field_value) == 36 and field_value.count("-") == 4:
+                score = max(score, 92)
+            # Numeric ID detection
+            elif field_value.isdigit():
+                score = max(score, 75)
+
+        if score > 0:
+            key_scores[field_name] = score
+
+    # Sort by score and take top keys
+    sorted_keys = sorted(key_scores.items(), key=lambda x: x[1], reverse=True)
+    keys = [k for k, _ in sorted_keys[:3]]
+
     # Ensure we have at least one key
-    if not keys and "Id" in schema:
-        keys.append("Id")
-    elif not keys and "id" in schema:
-        keys.append("id")
-    elif not keys:
-        keys.append("id")  # Default assumption
-    
-    return keys[:3]  # Limit to 3 identity keys
+    if not keys:
+        # Check common capitalization variants
+        for variant in ["Id", "id", "ID", "_id", "uuid", "UUID"]:
+            if variant in schema:
+                keys.append(variant)
+                break
+        if not keys:
+            keys.append("id")  # Default assumption
+
+    return keys
 
 
 def infer_change_semantics(endpoint_info: dict, schema: Optional[dict]) -> str:
     """Infer how data changes over time"""
     url = endpoint_info.get("url", "").lower()
     method = endpoint_info.get("method", "GET").upper()
-    
-    # CDC indicators
-    if any(x in url for x in ["cdc", "changes", "delta", "incremental"]):
+
+    # CDC indicators in URL
+    if any(x in url for x in ["cdc", "changes", "delta", "incremental", "replication"]):
         return "CDC_UPSERT"
-    
-    # Append-only indicators (events, logs)
-    if any(x in url for x in ["events", "log", "audit", "history"]):
+
+    # Append-only indicators (events, logs, activities)
+    if any(x in url for x in ["events", "log", "audit", "history", "activities", "feed", "stream"]):
         return "APPEND_ONLY"
-    
+
     # Snapshot indicators
-    if any(x in url for x in ["snapshot", "full", "dump", "export"]):
+    if any(x in url for x in ["snapshot", "full", "dump", "export", "bulk", "all"]):
         return "SNAPSHOT"
-    
+
     # Check schema for timestamp fields that suggest CDC
     if schema:
+        schema_keys_lower = [k.lower() for k in schema.keys()]
+
+        # Strong CDC indicators: both created and modified timestamps
         has_modified = any(
-            "modified" in k.lower() or "updated" in k.lower()
-            for k in schema.keys()
+            "modified" in k or "updated" in k or "changed" in k or "last_" in k
+            for k in schema_keys_lower
         )
-        has_created = any("created" in k.lower() for k in schema.keys())
-        
+        has_created = any(
+            "created" in k or "inserted" in k or "added" in k
+            for k in schema_keys_lower
+        )
+
+        # Check for version/revision fields (strong CDC indicator)
+        has_version = any(
+            "version" in k or "revision" in k or "etag" in k or "seq" in k
+            for k in schema_keys_lower
+        )
+
+        # Check for soft delete indicators
+        has_deleted = any(
+            "deleted" in k or "is_active" in k or "status" in k
+            for k in schema_keys_lower
+        )
+
         if has_modified and has_created:
             return "CDC_UPSERT"
-        elif has_created:
+        if has_version:
+            return "CDC_UPSERT"
+        if has_deleted and has_modified:
+            return "CDC_UPSERT"
+        if has_created and not has_modified:
             return "APPEND_ONLY"
-    
+
+        # Check for immutable record patterns (IDs only, no timestamps)
+        id_only = all(
+            "id" in k or "_id" in k or "key" in k or "uuid" in k
+            for k in schema_keys_lower if k not in ["created", "modified", "updated"]
+        )
+        if id_only and len(schema_keys_lower) <= 3:
+            return "SNAPSHOT"
+
+    # POST methods often indicate append-only patterns
+    if method == "POST" and any(x in url for x in ["create", "insert", "add"]):
+        return "APPEND_ONLY"
+
     return "UNKNOWN"
 
 
@@ -346,26 +415,95 @@ def build_trust_labels(observation: dict, modality: str, change_semantics: str) 
     """
     Build trust labels from weak or uncertain signals.
     Unknown or weak signals become labels, not blockers.
+
+    Trust label categories:
+    - verified_*: Confirmed through external validation
+    - inferred_*: Derived through heuristics
+    - warning_*: Potential issues detected
+    - quality_*: Data quality indicators
+    - source_*: Origin information
     """
     labels = []
-    
-    # If we couldn't determine change semantics
-    if change_semantics == "UNKNOWN":
-        labels.append("inferred:change_semantics_unknown")
-    
-    # If schema was inferred
-    if observation.get("schema_sample"):
+    metadata = observation.get("metadata", {})
+    schema_sample = observation.get("schema_sample")
+    endpoint_info = observation.get("endpoint_info", {})
+
+    # === SCHEMA STABILITY ===
+    if schema_sample:
         labels.append("inferred:schema_from_sample")
+        # Check schema completeness
+        if len(schema_sample.keys()) >= 5:
+            labels.append("quality:schema_complete")
+        elif len(schema_sample.keys()) >= 2:
+            labels.append("quality:schema_partial")
+
+        # Check for well-structured schema (has types, descriptions)
+        has_types = any(
+            isinstance(v, dict) and "type" in v
+            for v in schema_sample.values()
+        )
+        if has_types:
+            labels.append("quality:schema_typed")
+            labels.append("schema_stable")  # Typed schemas are more stable
     else:
         labels.append("warning:no_schema_available")
-    
-    # If modality was inferred from heuristics
+
+    # === CHANGE SEMANTICS CONFIDENCE ===
+    if change_semantics == "UNKNOWN":
+        labels.append("inferred:change_semantics_unknown")
+        labels.append("warning:semantics_needs_review")
+    elif change_semantics == "CDC_UPSERT":
+        labels.append("quality:supports_incremental")
+    elif change_semantics == "APPEND_ONLY":
+        labels.append("quality:event_sourced")
+
+    # === MODALITY CONFIDENCE ===
     labels.append(f"inferred:modality_{modality.lower()}")
-    
-    # Mark as mock-generated if from mock collector
-    if observation.get("collector_id") == "mock-collector-001":
+
+    # === OWNERSHIP VERIFICATION ===
+    owner_info = metadata.get("owner") or metadata.get("team") or metadata.get("department")
+    if owner_info:
+        labels.append("verified_owner")
+    else:
+        labels.append("warning:owner_unknown")
+
+    # === TRAFFIC/USAGE INDICATORS ===
+    # Check for high-traffic indicators in metadata
+    usage_hints = metadata.get("usage", {})
+    if isinstance(usage_hints, dict):
+        requests_per_day = usage_hints.get("requests_per_day", 0)
+        if requests_per_day > 10000:
+            labels.append("high_traffic")
+        elif requests_per_day > 1000:
+            labels.append("medium_traffic")
+
+    # Check endpoint hints for traffic patterns
+    url = endpoint_info.get("url", "").lower()
+    if any(x in url for x in ["bulk", "batch", "stream", "firehose"]):
+        labels.append("high_traffic")
+
+    # === SOURCE/COLLECTOR INFO ===
+    collector_id = observation.get("collector_id", "")
+    if collector_id == "mock-collector-001":
         labels.append("source:mock_collector")
-    
+    elif "adapter" in collector_id:
+        labels.append("source:fabric_adapter")
+        labels.append("verified_connection")  # Adapter-discovered means verified connection
+    else:
+        labels.append(f"source:{collector_id.split('-')[0] if collector_id else 'unknown'}")
+
+    # === GOVERNANCE INDICATORS ===
+    if metadata.get("pii_redacted"):
+        labels.append("governance:pii_redacted")
+    if metadata.get("governance_applied"):
+        labels.append("governance:policies_applied")
+
+    # === FRESHNESS INDICATORS ===
+    if endpoint_info.get("cache_control") or endpoint_info.get("etag"):
+        labels.append("quality:cacheable")
+    if any(x in url for x in ["realtime", "live", "stream"]):
+        labels.append("quality:realtime")
+
     return labels
 
 

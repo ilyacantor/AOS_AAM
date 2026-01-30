@@ -35,6 +35,7 @@ from .db import (
     list_tee_requests,
     update_tee_request_status,
     create_tee_request,
+    get_tee_request,
     get_drift_event,
     create_drift_event,
     clear_all_data,
@@ -43,7 +44,15 @@ from .db import (
     get_topology_data,
     get_topology_for_pipe,
     get_topology_for_fabric_plane,
-    get_connection
+    get_connection,
+    # AOD Handoff functions
+    create_handoff_log,
+    get_handoff_log,
+    list_handoff_logs,
+    save_policy_manifest,
+    get_active_policy_manifest,
+    list_policy_manifests,
+    get_candidates_by_aod_run
 )
 from .collectors.mock import run_mock_collector
 from .inference import infer_pipes_from_observations
@@ -52,12 +61,17 @@ from .models import (
     CandidateIntakeResponse,
     CandidateStatus,
     ExportResponse,
-    FabricPlane
+    FabricPlane,
+    AODActionType,
+    AODHandoffRequest,
+    AODHandoffResponse,
+    AODPolicyManifest
 )
 from .preset_config import PresetConfigLoader, EnterpriseMaturity
 from .fabric_drift import FabricDriftDetector, FabricDriftType
 from .adapters.factory import get_adapter_for_plane
 from .adapters.base import AdapterStatus, PlaneHealth
+from .pii_redaction import redact_pii_from_observation
 
 app = FastAPI(
     title="AAM - Adaptive API Mesh",
@@ -485,6 +499,62 @@ async def ui_pipes_list(
             background: rgba(30, 41, 59, 0.5);
             border-radius: 8px;
         }}
+        .data-source-toggle {{
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+            padding: 12px 16px;
+            background: rgba(30, 41, 59, 0.6);
+            border: 1px solid #334155;
+            border-radius: 8px;
+        }}
+        .toggle-label {{
+            font-size: 0.85rem;
+            color: #94a3b8;
+            font-weight: 500;
+        }}
+        .toggle-group {{
+            display: flex;
+            background: rgba(15, 23, 42, 0.8);
+            border-radius: 6px;
+            overflow: hidden;
+            border: 1px solid #334155;
+        }}
+        .toggle-btn {{
+            padding: 8px 16px;
+            font-size: 0.8rem;
+            font-weight: 500;
+            border: none;
+            background: transparent;
+            color: #94a3b8;
+            cursor: pointer;
+            transition: all 0.2s;
+        }}
+        .toggle-btn.active {{
+            background: #22d3ee;
+            color: #0f172a;
+        }}
+        .toggle-btn:hover:not(.active) {{
+            background: rgba(34, 211, 238, 0.1);
+            color: #e2e8f0;
+        }}
+        .source-indicator {{
+            font-size: 0.75rem;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-weight: 500;
+        }}
+        .source-indicator.mock {{
+            background: rgba(167, 139, 250, 0.2);
+            color: #a78bfa;
+            border: 1px solid rgba(167, 139, 250, 0.3);
+        }}
+        .source-indicator.aod {{
+            background: rgba(34, 211, 238, 0.2);
+            color: #22d3ee;
+            border: 1px solid rgba(34, 211, 238, 0.3);
+        }}
         .stat-item {{
             text-align: center;
         }}
@@ -575,12 +645,26 @@ async def ui_pipes_list(
             <div class="preset-grid" id="preset-grid">Loading presets...</div>
         </div>
         
+        <div class="data-source-toggle" data-testid="data-source-toggle">
+            <span class="toggle-label">Generate Test Data:</span>
+            <div class="toggle-group">
+                <button class="toggle-btn active" id="toggle-mock" data-testid="toggle-mock" onclick="setDataSource('mock')">Mock Pipes</button>
+                <button class="toggle-btn" id="toggle-aod" data-testid="toggle-aod" onclick="setDataSource('aod')">AOD Candidates</button>
+            </div>
+            <span class="source-indicator mock" id="source-indicator" data-testid="source-indicator">Creates sample pipes directly</span>
+        </div>
+        <div id="aod-note" style="display:none; padding: 12px; background: rgba(34, 211, 238, 0.1); border: 1px solid rgba(34, 211, 238, 0.3); border-radius: 8px; margin-bottom: 16px; font-size: 0.85rem; color: #94a3b8;">
+            <strong style="color: #22d3ee;">Note:</strong> AOD handoffs create <strong>Candidates</strong>, not Pipes. 
+            Candidates appear in the <a href="/ui/candidates" style="color: #22d3ee;">Candidates tab</a> and can be matched to create Pipes.
+        </div>
+        
         <div class="stats-bar" id="stats-bar" data-testid="stats-bar">
             <div class="stat-item"><div class="stat-value" id="stat-total">{len(pipes)}</div><div class="stat-label">Total Pipes</div></div>
         </div>
         
         <div class="controls">
             <button class="btn" id="btn-run-collector" data-testid="btn-run-collector">Run Mock Collector</button>
+            <button class="btn" id="btn-load-aod" data-testid="btn-load-aod" style="display:none;">Load AOD Test Data</button>
             <button class="btn" id="btn-export-dcl" data-testid="btn-export-dcl">Export to DCL</button>
             <select id="filter-fabric" data-testid="filter-fabric" onchange="applyFilters()">{fabric_options}</select>
             <select id="filter-source" data-testid="filter-source" onchange="applyFilters()">{source_options}</select>
@@ -704,6 +788,140 @@ async def ui_pipes_list(
         }}
         
         loadPresets();
+        
+        let currentDataSource = localStorage.getItem('aam_data_source') || 'mock';
+        
+        function setDataSource(source, persist = true) {{
+            currentDataSource = source;
+            if (persist) {{
+                localStorage.setItem('aam_data_source', source);
+            }}
+            const mockBtn = document.getElementById('toggle-mock');
+            const aodBtn = document.getElementById('toggle-aod');
+            const indicator = document.getElementById('source-indicator');
+            const mockCollectorBtn = document.getElementById('btn-run-collector');
+            const aodLoadBtn = document.getElementById('btn-load-aod');
+            
+            const aodNote = document.getElementById('aod-note');
+            
+            if (source === 'mock') {{
+                mockBtn.classList.add('active');
+                aodBtn.classList.remove('active');
+                indicator.className = 'source-indicator mock';
+                indicator.textContent = 'Creates sample pipes directly';
+                mockCollectorBtn.style.display = 'inline-block';
+                aodLoadBtn.style.display = 'none';
+                aodNote.style.display = 'none';
+            }} else {{
+                aodBtn.classList.add('active');
+                mockBtn.classList.remove('active');
+                indicator.className = 'source-indicator aod';
+                indicator.textContent = 'Creates candidates for triage';
+                mockCollectorBtn.style.display = 'none';
+                aodLoadBtn.style.display = 'inline-block';
+                aodNote.style.display = 'block';
+            }}
+        }}
+        
+        // Initialize toggle state from localStorage on page load
+        setDataSource(currentDataSource, false);
+        
+        document.getElementById('btn-load-aod').addEventListener('click', async function() {{
+            this.disabled = true;
+            this.textContent = 'Loading AOD Data...';
+            try {{
+                const aodRunId = 'aod-test-' + Date.now();
+                const testCandidates = [
+                    {{
+                        asset_key: 'salesforce:accounts',
+                        vendor_name: 'Salesforce',
+                        display_name: 'Salesforce Accounts API',
+                        category: 'CRM',
+                        governance_status: 'governed',
+                        known_endpoints: ['https://api.salesforce.com/v1/accounts'],
+                        execution_allowed: true,
+                        action_type: 'provision',
+                        aod_run_id: aodRunId,
+                        aod_asset_id: 'sf-accounts-001',
+                        priority_score: 85
+                    }},
+                    {{
+                        asset_key: 'workato:recipes',
+                        vendor_name: 'Workato',
+                        display_name: 'Workato Recipe Catalog',
+                        category: 'iPaaS',
+                        governance_status: 'governed',
+                        known_endpoints: ['https://api.workato.com/v1/recipes'],
+                        execution_allowed: true,
+                        action_type: 'inventory_only',
+                        aod_run_id: aodRunId,
+                        aod_asset_id: 'wk-recipes-001',
+                        priority_score: 90
+                    }},
+                    {{
+                        asset_key: 'snowflake:orders_table',
+                        vendor_name: 'Snowflake',
+                        display_name: 'Snowflake Orders Table',
+                        category: 'Data Warehouse',
+                        governance_status: 'governed',
+                        known_endpoints: ['snowflake://analytics.orders'],
+                        execution_allowed: true,
+                        action_type: 'provision',
+                        aod_run_id: aodRunId,
+                        aod_asset_id: 'sf-orders-001',
+                        priority_score: 75
+                    }},
+                    {{
+                        asset_key: 'kafka:customer_events',
+                        vendor_name: 'Confluent Kafka',
+                        display_name: 'Customer Events Topic',
+                        category: 'Event Bus',
+                        governance_status: 'shadow_it',
+                        known_endpoints: ['kafka://prod-cluster/customer.events'],
+                        execution_allowed: false,
+                        action_type: 'inventory_only',
+                        blocking_findings: ['no_owner_identified'],
+                        aod_run_id: aodRunId,
+                        aod_asset_id: 'kafka-customers-001',
+                        priority_score: 60
+                    }},
+                    {{
+                        asset_key: 'kong:api_catalog',
+                        vendor_name: 'Kong',
+                        display_name: 'Kong API Gateway Catalog',
+                        category: 'API Gateway',
+                        governance_status: 'governed',
+                        known_endpoints: ['https://kong.internal/apis'],
+                        execution_allowed: true,
+                        action_type: 'provision',
+                        aod_run_id: aodRunId,
+                        aod_asset_id: 'kong-apis-001',
+                        priority_score: 95
+                    }}
+                ];
+                
+                const res = await fetch('/api/handoff/aod/receive', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{
+                        run_id: aodRunId,
+                        candidates: testCandidates
+                    }})
+                }});
+                const data = await res.json();
+                
+                if (res.ok) {{
+                    showToast('AOD handoff received: ' + data.candidates_accepted + ' candidates accepted', 'success');
+                    setTimeout(() => window.location.href = '/ui/candidates', 1500);
+                }} else {{
+                    showToast('Error: ' + (data.detail || JSON.stringify(data)), 'error');
+                }}
+            }} catch (e) {{
+                showToast('Error: ' + e.message, 'error');
+            }}
+            this.disabled = false;
+            this.textContent = 'Load AOD Test Data';
+        }});
         
         document.getElementById('btn-run-collector').addEventListener('click', async function() {{
             this.disabled = true;
@@ -982,11 +1200,25 @@ async def ui_pipe_detail(pipe_id: str):
 
 
 @app.get("/ui/candidates", response_class=HTMLResponse, include_in_schema=False)
-async def ui_candidates_list(status: Optional[str] = Query(None)):
+async def ui_candidates_list(
+    status: Optional[str] = Query(None),
+    view: Optional[str] = Query("fabrics", description="View mode: 'fabrics' for SORs+Fabrics, 'all' for everything")
+):
     """Candidates Screen"""
-    candidates = list_candidates(status=status)
+    all_candidates = list_candidates(status=status, limit=10000)
     
-    all_candidates = list_candidates()
+    # Define core fabric/SOR categories
+    fabric_categories = {"CRM", "crm", "iPaaS", "ipaas", "API Gateway", "api_gateway", 
+                        "Event Bus", "event_bus", "Data Warehouse", "data_warehouse", 
+                        "ERP", "erp", "HCM", "hcm", "IDP", "idp", "ITSM", "itsm", "data"}
+    
+    # Filter based on view mode
+    if view == "fabrics":
+        candidates = [c for c in all_candidates if c.get("category", "").lower() in 
+                     {cat.lower() for cat in fabric_categories}]
+    else:
+        candidates = all_candidates
+    
     statuses = sorted(set(c.get("status", "") for c in all_candidates if c.get("status")))
     
     status_options = '<option value="">All Statuses</option>' + ''.join(
@@ -1033,7 +1265,21 @@ async def ui_candidates_list(status: Optional[str] = Query(None)):
     {ui_nav('candidates')}
     <div class="container">
         <h1>Connection Candidates</h1>
+        <div class="stats" style="margin-bottom: 16px;">
+            <div class="stat-card">
+                <div class="stat-value">{len(candidates)}</div>
+                <div class="stat-label">Showing</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{len(all_candidates)}</div>
+                <div class="stat-label">Total</div>
+            </div>
+        </div>
         <div class="controls">
+            <select id="filter-view" data-testid="filter-view" onchange="applyFilter()">
+                <option value="fabrics"{"" if view == "all" else " selected"}>SORs & Fabrics</option>
+                <option value="all"{" selected" if view == "all" else ""}>All Candidates</option>
+            </select>
             <select id="filter-status" data-testid="filter-status" onchange="applyFilter()">{status_options}</select>
         </div>
         <table data-testid="candidates-table">
@@ -1184,8 +1430,10 @@ async def ui_candidates_list(status: Optional[str] = Query(None)):
         }}
 
         function applyFilter() {{
+            const view = document.getElementById('filter-view').value;
             const status = document.getElementById('filter-status').value;
             const params = new URLSearchParams();
+            if (view) params.set('view', view);
             if (status) params.set('status', status);
             window.location.href = '/ui/candidates' + (params.toString() ? '?' + params.toString() : '');
         }}
@@ -1990,7 +2238,8 @@ async def ui_topology():
             <div class="filter-group">
                 <label>View:</label>
                 <select id="view-filter" onchange="changeView()">
-                    <option value="all">All Nodes</option>
+                    <option value="summary" selected>Fabrics & SORs</option>
+                    <option value="all">All Assets (slow)</option>
                     <option value="API_GATEWAY">API Gateway Plane</option>
                     <option value="IPAAS">iPaaS Plane</option>
                     <option value="EVENT_BUS">Event Bus Plane</option>
@@ -2045,9 +2294,11 @@ async def ui_topology():
             candidate: 'triangle'
         }};
 
-        async function loadTopology(filter = 'all') {{
-            let url = '/api/topology';
-            if (filter !== 'all') {{
+        async function loadTopology(filter = 'summary') {{
+            let url = '/api/topology/summary';
+            if (filter === 'all') {{
+                url = '/api/topology';
+            }} else if (filter !== 'summary') {{
                 url = `/api/topology/plane/${{filter}}`;
             }}
 
@@ -2343,6 +2594,145 @@ async def update_status(candidate_id: str, update: StatusUpdate):
     return {"candidate_id": candidate_id, "status": update.status.value, "message": "Status updated"}
 
 
+# ============================================================================
+# AOD HANDOFF ENDPOINTS
+# ============================================================================
+
+@app.post("/api/handoff/aod/receive", tags=["AOD Handoff"])
+async def receive_aod_handoff(request: AODHandoffRequest):
+    """
+    Receive batch handoff of candidates from AOD.
+
+    This is the primary integration point between AOD and AAM.
+    AOD sends ConnectionCandidates after discovery with:
+    - execution_allowed: Whether AOD governance permits execution
+    - action_type: "inventory_only" (human review) or "provision" (auto-connect)
+    - blocking_findings: Findings that prevent auto-provisioning
+    - connected_via_plane: Fabric plane routing hint from AOD
+    """
+    accepted = []
+    rejected = []
+
+    for candidate in request.candidates:
+        try:
+            # Convert to dict for database
+            candidate_dict = candidate.model_dump()
+
+            # Handle enums
+            if candidate.preferred_modality:
+                candidate_dict["preferred_modality"] = candidate.preferred_modality.value
+            if candidate.action_type:
+                candidate_dict["action_type"] = candidate.action_type.value
+            if candidate.connected_via_plane:
+                candidate_dict["connected_via_plane"] = candidate.connected_via_plane.value
+            if candidate.findings:
+                candidate_dict["findings"] = [f.model_dump() for f in candidate.findings]
+
+            # Create the candidate
+            result = create_candidate(candidate_dict)
+            accepted.append({
+                "aod_asset_id": candidate.aod_asset_id,
+                "candidate_id": result["candidate_id"],
+                "execution_allowed": candidate.execution_allowed,
+                "action_type": candidate.action_type.value
+            })
+
+        except Exception as e:
+            rejected.append({
+                "aod_asset_id": candidate.aod_asset_id,
+                "asset_key": candidate.asset_key,
+                "reason": str(e)
+            })
+
+    # Log the handoff
+    handoff_log = create_handoff_log({
+        "aod_run_id": request.run_id,
+        "candidates_received": len(request.candidates),
+        "candidates_accepted": len(accepted),
+        "candidates_rejected": len(rejected),
+        "rejected_reasons": rejected,
+        "policy_version": request.policy_version,
+        "handoff_timestamp": request.handoff_timestamp.isoformat() if request.handoff_timestamp else None
+    })
+
+    return AODHandoffResponse(
+        run_id=request.run_id,
+        candidates_received=len(request.candidates),
+        candidates_accepted=len(accepted),
+        candidates_rejected=len(rejected),
+        rejected_reasons=rejected,
+        handoff_id=handoff_log["handoff_id"],
+        processed_at=datetime.utcnow()
+    )
+
+
+@app.post("/api/handoff/aod/policy", tags=["AOD Handoff"])
+async def receive_aod_policy(policy: AODPolicyManifest):
+    """
+    Receive governance policy manifest from AOD.
+
+    AOD publishes its governance rules so AAM can:
+    - Respect blocking finding types
+    - Apply fabric plane routing rules
+    - Enforce auto-provision vs human-review categories
+    """
+    policy_dict = policy.model_dump()
+    result = save_policy_manifest(policy_dict)
+
+    return {
+        "message": "Policy manifest received and activated",
+        "policy_id": result["policy_id"],
+        "policy_version": result["policy_version"],
+        "is_active": True
+    }
+
+
+@app.get("/api/handoff/aod/policy", tags=["AOD Handoff"])
+async def get_current_aod_policy():
+    """Get the currently active AOD policy manifest"""
+    policy = get_active_policy_manifest()
+    if not policy:
+        return {"message": "No active policy manifest", "policy": None}
+    return {"policy": policy}
+
+
+@app.get("/api/handoff/aod/policy/history", tags=["AOD Handoff"])
+async def get_aod_policy_history(limit: int = Query(20, description="Maximum policies to return")):
+    """Get history of AOD policy manifests"""
+    policies = list_policy_manifests(limit=limit)
+    return {"policies": policies, "count": len(policies)}
+
+
+@app.get("/api/handoff/aod/logs", tags=["AOD Handoff"])
+async def get_handoff_logs(
+    aod_run_id: Optional[str] = Query(None, description="Filter by AOD run ID"),
+    limit: int = Query(50, description="Maximum logs to return")
+):
+    """Get AOD handoff logs"""
+    logs = list_handoff_logs(aod_run_id=aod_run_id, limit=limit)
+    return {"logs": logs, "count": len(logs)}
+
+
+@app.get("/api/handoff/aod/logs/{handoff_id}", tags=["AOD Handoff"])
+async def get_handoff_log_detail(handoff_id: str):
+    """Get details of a specific handoff"""
+    log = get_handoff_log(handoff_id)
+    if not log:
+        raise HTTPException(status_code=404, detail="Handoff log not found")
+    return log
+
+
+@app.get("/api/handoff/aod/run/{aod_run_id}/candidates", tags=["AOD Handoff"])
+async def get_candidates_from_aod_run(aod_run_id: str):
+    """Get all candidates from a specific AOD discovery run"""
+    candidates = get_candidates_by_aod_run(aod_run_id)
+    return {
+        "aod_run_id": aod_run_id,
+        "candidates": candidates,
+        "count": len(candidates)
+    }
+
+
 @app.get("/api/aam/collectors", tags=["Collectors"])
 async def get_collectors():
     """List all collectors"""
@@ -2366,15 +2756,34 @@ async def run_mock(request: Optional[MockCollectorRequest] = None):
     }
 
 
+# Alias endpoint to match documentation
+@app.post("/api/collect/mock/run", tags=["Collectors"])
+async def run_mock_alias(request: Optional[MockCollectorRequest] = None):
+    """Run the mock collector (alias for /api/aam/collectors/mock/run)"""
+    return await run_mock(request)
+
+
 @app.post("/api/aam/infer", tags=["Collectors"])
 async def infer_pipes():
     """Process pending observations and create pipes"""
     observations = get_unprocessed_observations()
     if not observations:
         return {"message": "No pending observations", "pipes_created": 0, "pipes": []}
-    
-    inferred_pipes = infer_pipes_from_observations(observations)
-    
+
+    # Apply PII redaction based on current preset's governance policy
+    policies = preset_loader.get_governance_policies()
+    pii_policy = policies.get("pii_redaction", "optional")
+
+    redacted_observations = []
+    redaction_applied = 0
+    for obs in observations:
+        redacted_obs = redact_pii_from_observation(obs, policy=pii_policy)
+        redacted_observations.append(redacted_obs)
+        if redacted_obs.get("metadata", {}).get("pii_redacted"):
+            redaction_applied += 1
+
+    inferred_pipes = infer_pipes_from_observations(redacted_observations)
+
     created_pipes = []
     for pipe in inferred_pipes:
         action = pipe.pop("_action", "create")
@@ -2383,15 +2792,17 @@ async def infer_pipes():
             pipe["pipe_id"] = result["pipe_id"]
             pipe["version"] = result["version"]
             created_pipes.append(pipe)
-    
+
     for obs in observations:
         mark_observation_processed(obs["observation_id"])
-    
+
     return {
         "message": "Inference complete",
         "observations_processed": len(observations),
         "pipes_created": len(created_pipes),
-        "pipes": created_pipes
+        "pipes": created_pipes,
+        "pii_redaction_policy": pii_policy,
+        "observations_redacted": redaction_applied
     }
 
 
@@ -2498,6 +2909,9 @@ async def run_collector(collector: str, request: Optional[MockCollectorRequest] 
                 
                 observations = await adapter.discover_pipes()
                 
+                # Get PII redaction policy
+                pii_policy = policies.get("pii_redaction", "optional")
+
                 for obs in observations:
                     obs_data = {
                         "observation_id": obs.get("observation_id"),
@@ -2514,6 +2928,8 @@ async def run_collector(collector: str, request: Optional[MockCollectorRequest] 
                             "preset": preset_loader.current_config.preset_id
                         }
                     }
+                    # Apply PII redaction before storing
+                    obs_data = redact_pii_from_observation(obs_data, policy=pii_policy)
                     create_observation(obs_data)
                     all_observations.append(obs_data)
                 
@@ -2570,10 +2986,70 @@ class DeferRequest(BaseModel):
 
 @app.post("/api/candidates/{candidate_id}/match", tags=["Candidates"])
 async def match_candidate(candidate_id: str, request: MatchRequest):
-    """Attempt to match candidate to a pipe"""
+    """
+    Attempt to match candidate to a pipe.
+
+    Enforces AOD governance:
+    - If execution_allowed=False, blocks auto-matching (requires human override)
+    - If action_type="inventory_only", blocks auto-matching
+    - Respects blocking_findings from AOD
+    """
     candidate = get_candidate(candidate_id)
     if not candidate:
         raise HTTPException(status_code=404, detail="Candidate not found")
+
+    # === AOD GOVERNANCE ENFORCEMENT ===
+    execution_allowed = candidate.get("execution_allowed", True)
+    action_type = candidate.get("action_type", "provision")
+    blocking_findings = candidate.get("blocking_findings", [])
+
+    # Check if this is an auto-match attempt (no pipe_id specified)
+    is_auto_match = request.pipe_id is None
+
+    if is_auto_match:
+        # Enforce execution_allowed for auto-matching
+        if not execution_allowed:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Auto-matching blocked by AOD governance. "
+                f"Candidate has execution_allowed=False. "
+                f"Blocking findings: {blocking_findings}. "
+                f"Manual review and explicit pipe_id required."
+            )
+
+        # Enforce action_type for auto-matching
+        if action_type == "inventory_only":
+            raise HTTPException(
+                status_code=403,
+                detail=f"Auto-matching blocked by AOD governance. "
+                f"Candidate action_type is 'inventory_only' (requires human review). "
+                f"Provide explicit pipe_id to override."
+            )
+
+    # For manual matches with pipe_id, warn but allow (human override)
+    elif not execution_allowed or action_type == "inventory_only":
+        # Log warning but allow manual override
+        pass  # Future: could add audit log here
+
+    # Check block direct access policy
+    vendor = candidate.get("vendor_name", "")
+    if preset_loader.should_block_direct_api(vendor):
+        # In non-scrappy modes, we need to route through the appropriate fabric plane
+        # Check if a direct API_GATEWAY connection is being attempted
+        if request.pipe_id:
+            pipe = get_pipe(request.pipe_id)
+            if pipe and pipe.get("fabric_plane") == "API_GATEWAY":
+                # Validate routing - this will fail for direct access in non-scrappy modes
+                is_valid, block_reason = preset_loader.validate_candidate_routing(
+                    vendor, FabricPlane.API_GATEWAY
+                )
+                if not is_valid:
+                    raise HTTPException(
+                        status_code=403,
+                        detail=f"Direct API access blocked: {block_reason}. "
+                        f"Current preset ({preset_loader.current_config.name}) requires routing through "
+                        f"{preset_loader.current_config.primary_plane.value}."
+                    )
 
     pipe_id = request.pipe_id
     score = 1.0
@@ -2624,23 +3100,61 @@ async def match_candidate(candidate_id: str, request: MatchRequest):
 
             # Strategy 4: If still no match but pipes exist, create a new pipe from candidate
             if not pipe_id and all_pipes:
-                # Create a new pipe from this candidate
+                # Determine fabric plane - prefer AOD's connected_via_plane hint if provided
+                aod_plane_hint = candidate.get("connected_via_plane")
+                candidate_category = candidate.get("category", "")
+
+                if aod_plane_hint:
+                    # AOD detected a fabric plane connection - use it
+                    try:
+                        routed_plane = FabricPlane(aod_plane_hint)
+                        routing_source = "aod_hint"
+                    except ValueError:
+                        # Invalid plane from AOD, fall back to preset routing
+                        routed_plane = preset_loader.get_routing_decision(candidate_category)
+                        routing_source = "preset_fallback"
+                else:
+                    # No AOD hint, use preset routing policy
+                    routed_plane = preset_loader.get_routing_decision(candidate_category)
+                    routing_source = "preset"
+
+                # Validate the routing is allowed
+                is_valid, route_reason = preset_loader.validate_candidate_routing(
+                    vendor, routed_plane
+                )
+                if not is_valid:
+                    raise HTTPException(
+                        status_code=403,
+                        detail=f"Cannot create pipe: {route_reason}. "
+                        f"Consider using preset 6 (Scrappy) for direct access, or connect "
+                        f"to the appropriate fabric plane first."
+                    )
+
+                # Build provenance with AOD traceability
+                lineage_hints = [f"candidate:{candidate_id}", f"routed_via:{routed_plane.value}"]
+                if candidate.get("aod_run_id"):
+                    lineage_hints.append(f"aod_run:{candidate.get('aod_run_id')}")
+                if candidate.get("aod_asset_id"):
+                    lineage_hints.append(f"aod_asset:{candidate.get('aod_asset_id')}")
+                lineage_hints.append(f"routing_source:{routing_source}")
+
+                # Create a new pipe from this candidate using the routed plane
                 new_pipe_data = {
                     "display_name": candidate.get("display_name") or candidate.get("vendor_name"),
                     "source_system": candidate.get("vendor_name"),
-                    "fabric_plane": "API_GATEWAY",
+                    "fabric_plane": routed_plane.value,
                     "modality": candidate.get("preferred_modality") or "DECLARED_INTERFACE",
                     "transport_kind": "API",
                     "provenance": {
                         "discovered_by": "auto-match",
                         "discovered_at": datetime.utcnow().isoformat(),
-                        "lineage_hints": [f"candidate:{candidate_id}"]
+                        "lineage_hints": lineage_hints
                     }
                 }
                 result = create_pipe(new_pipe_data)
                 pipe_id = result["pipe_id"]
                 score = 0.6
-                reason = f"Created new pipe from candidate ({candidate.get('vendor_name')})"
+                reason = f"Created new pipe from candidate ({candidate.get('vendor_name')}) via {routed_plane.value} ({routing_source})"
 
         if not pipe_id:
             raise HTTPException(
@@ -2730,6 +3244,7 @@ class TeeRequestCreate(BaseModel):
 
 
 class TeeStatusUpdate(BaseModel):
+    """Deprecated: Use TeeVerificationRequest instead"""
     status: str
 
 
@@ -2775,17 +3290,81 @@ async def get_tee_requests(status: Optional[str] = Query(None, description="Filt
     return {"tee_requests": requests, "count": len(requests)}
 
 
+class TeeVerificationRequest(BaseModel):
+    """Request model for TEE verification with validation details"""
+    status: str
+    verification_method: Optional[str] = None  # e.g., "manual_test", "automated_check", "log_review"
+    verification_evidence: Optional[str] = None  # Evidence or notes about verification
+    verified_by: Optional[str] = None  # Who performed the verification
+
+
 @app.post("/api/tee/requests/{tee_id}/status", tags=["Tee Requests"])
-async def update_tee_status(tee_id: str, request: TeeStatusUpdate):
-    """Update tee request status"""
+async def update_tee_status(tee_id: str, request: TeeVerificationRequest):
+    """
+    Update TEE request status with workflow enforcement.
+
+    Workflow: requested → approved → verified
+
+    - To move to 'approved': Request must be in 'requested' status
+    - To move to 'verified': Request must be in 'approved' status, and verification details should be provided
+    """
     if request.status not in ["approved", "verified"]:
         raise HTTPException(status_code=400, detail="Status must be 'approved' or 'verified'")
-    
+
+    # Get current TEE request to validate workflow
+    tee_req = get_tee_request(tee_id)
+    if not tee_req:
+        raise HTTPException(status_code=404, detail="TEE request not found")
+
+    current_status = tee_req.get("status")
+
+    # Enforce workflow transitions
+    if request.status == "approved":
+        if current_status != "requested":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot approve: TEE request is in '{current_status}' status. "
+                "Only 'requested' status can be approved."
+            )
+
+    elif request.status == "verified":
+        if current_status != "approved":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot verify: TEE request is in '{current_status}' status. "
+                "Only 'approved' status can be verified. Approve the request first."
+            )
+
+        # Verification requires additional validation
+        if not request.verification_method:
+            raise HTTPException(
+                status_code=400,
+                detail="Verification requires a verification_method (e.g., 'manual_test', 'automated_check', 'log_review')"
+            )
+
+        # Validate that the TEE is actually working (simulation for now)
+        pipe = get_pipe(tee_req["pipe_id"])
+        if not pipe:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot verify: Associated pipe no longer exists"
+            )
+
     updated = update_tee_request_status(tee_id, request.status)
     if not updated:
-        raise HTTPException(status_code=404, detail="Tee request not found")
-    
-    return updated
+        raise HTTPException(status_code=404, detail="TEE request not found")
+
+    # Add verification metadata to response
+    response = dict(updated)
+    if request.status == "verified":
+        response["verification"] = {
+            "method": request.verification_method,
+            "evidence": request.verification_evidence,
+            "verified_by": request.verified_by,
+            "pipe_status": "active" if pipe else "unknown"
+        }
+
+    return response
 
 
 # ============================================================================
@@ -3282,6 +3861,122 @@ async def get_pipe_topology(pipe_id: str):
     from datetime import datetime
     return {
         **result,
+        "generated_at": datetime.utcnow().isoformat()
+    }
+
+
+@app.get("/api/topology/summary", tags=["Topology"])
+async def get_topology_summary():
+    """
+    Get a lightweight topology showing only Fabric Planes and Systems of Record (SORs).
+    
+    This view is optimized for large datasets - it shows aggregate counts instead of
+    individual assets, making it suitable for 600+ asset inventories.
+    """
+    from datetime import datetime
+    
+    pipes = list_pipes()
+    candidates = list_candidates(limit=10000)
+    
+    # Build fabric plane nodes with counts
+    fabric_counts = {"IPAAS": 0, "API_GATEWAY": 0, "EVENT_BUS": 0, "DATA_WAREHOUSE": 0}
+    for p in pipes:
+        plane = p.get("fabric_plane", "API_GATEWAY")
+        if plane in fabric_counts:
+            fabric_counts[plane] += 1
+    
+    # Count candidates by category mapped to planes
+    category_to_plane = {
+        "iPaaS": "IPAAS", "ipaas": "IPAAS",
+        "API Gateway": "API_GATEWAY", "api_gateway": "API_GATEWAY",
+        "Event Bus": "EVENT_BUS", "event_bus": "EVENT_BUS",
+        "Data Warehouse": "DATA_WAREHOUSE", "data_warehouse": "DATA_WAREHOUSE", "data": "DATA_WAREHOUSE"
+    }
+    candidate_counts = {"IPAAS": 0, "API_GATEWAY": 0, "EVENT_BUS": 0, "DATA_WAREHOUSE": 0, "OTHER": 0}
+    for c in candidates:
+        cat = c.get("category", "other")
+        plane = category_to_plane.get(cat, "OTHER")
+        if plane in candidate_counts:
+            candidate_counts[plane] += 1
+        else:
+            candidate_counts["OTHER"] += 1
+    
+    # Build SOR nodes from source systems
+    sor_systems = {}
+    for p in pipes:
+        source = p.get("source_system")
+        if source:
+            if source not in sor_systems:
+                sor_systems[source] = {"pipe_count": 0, "planes": set()}
+            sor_systems[source]["pipe_count"] += 1
+            sor_systems[source]["planes"].add(p.get("fabric_plane", "API_GATEWAY"))
+    
+    for c in candidates:
+        vendor = c.get("vendor_name")
+        if vendor:
+            if vendor not in sor_systems:
+                sor_systems[vendor] = {"pipe_count": 0, "planes": set(), "is_candidate": True}
+            if "is_candidate" not in sor_systems[vendor]:
+                sor_systems[vendor]["is_candidate"] = True
+    
+    # Create nodes
+    nodes = []
+    edges = []
+    
+    # Fabric plane nodes
+    plane_labels = {
+        "IPAAS": "iPaaS",
+        "API_GATEWAY": "API Gateway", 
+        "EVENT_BUS": "Event Bus",
+        "DATA_WAREHOUSE": "Data Warehouse"
+    }
+    for plane, label in plane_labels.items():
+        pipe_count = fabric_counts.get(plane, 0)
+        cand_count = candidate_counts.get(plane, 0)
+        nodes.append({
+            "id": f"plane:{plane}",
+            "label": f"{label}\n({pipe_count} pipes, {cand_count} candidates)",
+            "type": "fabric_plane",
+            "metadata": {
+                "plane_type": plane,
+                "pipe_count": pipe_count,
+                "candidate_count": cand_count
+            }
+        })
+    
+    # SOR nodes (top 20 by pipe count)
+    sorted_sors = sorted(sor_systems.items(), key=lambda x: x[1]["pipe_count"], reverse=True)[:20]
+    for sor_name, sor_data in sorted_sors:
+        nodes.append({
+            "id": f"sor:{sor_name}",
+            "label": f"{sor_name}\n({sor_data['pipe_count']} pipes)",
+            "type": "source_system",
+            "metadata": {
+                "name": sor_name,
+                "pipe_count": sor_data["pipe_count"],
+                "is_candidate_source": sor_data.get("is_candidate", False)
+            }
+        })
+        # Connect SOR to its planes
+        for plane in sor_data.get("planes", []):
+            edges.append({
+                "id": f"sor_to_plane:{sor_name}:{plane}",
+                "source": f"sor:{sor_name}",
+                "target": f"plane:{plane}",
+                "type": "sor_in_plane"
+            })
+    
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "stats": {
+            "total_nodes": len(nodes),
+            "total_edges": len(edges),
+            "fabric_planes": 4,
+            "source_systems": len(sorted_sors),
+            "total_pipes": len(pipes),
+            "total_candidates": len(candidates)
+        },
         "generated_at": datetime.utcnow().isoformat()
     }
 
