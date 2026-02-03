@@ -1203,29 +1203,35 @@ async def ui_pipe_detail(pipe_id: str):
 
 @app.get("/ui/candidates", response_class=HTMLResponse, include_in_schema=False)
 async def ui_candidates_list(
-    status: Optional[str] = Query(None),
-    view: Optional[str] = Query("fabrics", description="View mode: 'fabrics' for SORs+Fabrics, 'all' for everything")
+    view: Optional[str] = Query("sors_fabrics", description="View filter: all, sors, fabrics, sors_fabrics, ipaas, warehouse, gateway, eventbus")
 ):
     """Candidates Screen"""
-    all_candidates = list_candidates(status=status, limit=10000)
+    all_candidates = list_candidates(limit=10000)
     
-    # Define core fabric/SOR categories
-    fabric_categories = {"CRM", "crm", "iPaaS", "ipaas", "API Gateway", "api_gateway", 
-                        "Event Bus", "event_bus", "Data Warehouse", "data_warehouse", 
-                        "ERP", "erp", "HCM", "hcm", "IDP", "idp", "ITSM", "itsm", "data"}
+    # Define category groups
+    sor_categories = {"crm", "erp", "hcm", "idp", "itsm"}
+    fabric_type_map = {
+        "ipaas": {"ipaas"},
+        "warehouse": {"data warehouse", "warehouse", "data"},
+        "gateway": {"api gateway", "gateway"},
+        "eventbus": {"event bus", "eventbus", "stream"}
+    }
+    all_fabric_categories = set().union(*fabric_type_map.values())
     
     # Filter based on view mode
-    if view == "fabrics":
-        candidates = [c for c in all_candidates if c.get("category", "").lower() in 
-                     {cat.lower() for cat in fabric_categories}]
+    if view == "all":
+        candidates = all_candidates
+    elif view == "sors":
+        candidates = [c for c in all_candidates if c.get("category", "").lower() in sor_categories]
+    elif view == "fabrics":
+        candidates = [c for c in all_candidates if c.get("category", "").lower() in all_fabric_categories]
+    elif view == "sors_fabrics":
+        combined = sor_categories | all_fabric_categories
+        candidates = [c for c in all_candidates if c.get("category", "").lower() in combined]
+    elif view in fabric_type_map:
+        candidates = [c for c in all_candidates if c.get("category", "").lower() in fabric_type_map[view]]
     else:
         candidates = all_candidates
-    
-    statuses = sorted(set(c.get("status", "") for c in all_candidates if c.get("status")))
-    
-    status_options = '<option value="">All Statuses</option>' + ''.join(
-        f'<option value="{s}"{" selected" if s == status else ""}>{s.title()}</option>' for s in statuses
-    )
     
     rows_html = ""
     for c in candidates:
@@ -1280,10 +1286,15 @@ async def ui_candidates_list(
         </div>
         <div class="controls">
             <select id="filter-view" data-testid="filter-view" onchange="applyFilter()">
-                <option value="fabrics"{"" if view == "all" else " selected"}>SORs & Fabrics</option>
                 <option value="all"{" selected" if view == "all" else ""}>All Candidates</option>
+                <option value="sors"{" selected" if view == "sors" else ""}>SORs Only</option>
+                <option value="fabrics"{" selected" if view == "fabrics" else ""}>Fabrics Only</option>
+                <option value="sors_fabrics"{" selected" if view == "sors_fabrics" else ""}>SORs + Fabrics</option>
+                <option value="ipaas"{" selected" if view == "ipaas" else ""}>iPaaS</option>
+                <option value="warehouse"{" selected" if view == "warehouse" else ""}>Warehouse</option>
+                <option value="gateway"{" selected" if view == "gateway" else ""}>API Gateway</option>
+                <option value="eventbus"{" selected" if view == "eventbus" else ""}>Event Bus</option>
             </select>
-            <select id="filter-status" data-testid="filter-status" onchange="applyFilter()">{status_options}</select>
         </div>
         <table data-testid="candidates-table">
             <thead>
@@ -1434,10 +1445,8 @@ async def ui_candidates_list(
 
         function applyFilter() {{
             const view = document.getElementById('filter-view').value;
-            const status = document.getElementById('filter-status').value;
             const params = new URLSearchParams();
             if (view) params.set('view', view);
-            if (status) params.set('status', status);
             window.location.href = '/ui/candidates' + (params.toString() ? '?' + params.toString() : '');
         }}
 
@@ -2674,13 +2683,16 @@ async def receive_aod_handoff(request: AODHandoffRequest):
     - connected_via_plane: Fabric plane routing hint from AOD
     - fabric_planes: Detected fabric control planes
     """
-    # Store fabric planes from AOD
+    # Store fabric planes from AOD and build lookup map
     fabric_planes_stored = 0
+    fabric_plane_map = {}  # vendor -> plane_id mapping
     if request.fabric_planes:
         for plane in request.fabric_planes:
             try:
                 plane_dict = plane.model_dump()
-                store_fabric_plane(plane_dict, request.run_id)
+                result = store_fabric_plane(plane_dict, request.run_id)
+                plane_id = result["plane_id"]
+                fabric_plane_map[plane.vendor.lower()] = plane_id
                 fabric_planes_stored += 1
             except Exception as e:
                 print(f"[AAM] Failed to store fabric plane {plane.vendor}: {e}")
@@ -2702,6 +2714,38 @@ async def receive_aod_handoff(request: AODHandoffRequest):
                 candidate_dict["connected_via_plane"] = candidate.connected_via_plane.value
             if candidate.findings:
                 candidate_dict["findings"] = [f.model_dump() for f in candidate.findings]
+            
+            # Link candidate to fabric plane
+            fabric_plane_id = None
+            vendor_lower = candidate.vendor_name.lower()
+            
+            # Try direct vendor match first
+            for plane_vendor, plane_id in fabric_plane_map.items():
+                if plane_vendor in vendor_lower or vendor_lower in plane_vendor:
+                    fabric_plane_id = plane_id
+                    break
+            
+            # Fallback: infer from category
+            if not fabric_plane_id and fabric_plane_map:
+                category_lower = candidate.category.lower()
+                if "data" in category_lower or "warehouse" in category_lower:
+                    target_type = "warehouse"
+                elif "event" in category_lower or "stream" in category_lower:
+                    target_type = "event_bus"
+                elif "gateway" in category_lower or "api" in category_lower:
+                    target_type = "api_gateway"
+                else:
+                    target_type = "ipaas"
+                
+                # Find first plane of that type
+                for plane in request.fabric_planes:
+                    if plane.plane_type == target_type:
+                        fabric_plane_id = fabric_plane_map.get(plane.vendor.lower())
+                        if fabric_plane_id:
+                            break
+            
+            if fabric_plane_id:
+                candidate_dict["fabric_plane_id"] = fabric_plane_id
 
             # Create the candidate
             result = create_candidate(candidate_dict)

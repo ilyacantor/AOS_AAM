@@ -311,9 +311,9 @@ def create_candidate(candidate_data: dict) -> dict:
             governance_status, findings, sor_tagging, evidence_refs,
             signals_summary, known_endpoints, preferred_modality, priority_score,
             status, execution_allowed, action_type, blocking_findings,
-            connected_via_plane, aod_run_id, aod_asset_id,
+            connected_via_plane, aod_run_id, aod_asset_id, fabric_plane_id,
             created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         candidate_id,
         candidate_data["asset_key"],
@@ -335,6 +335,7 @@ def create_candidate(candidate_data: dict) -> dict:
         candidate_data.get("connected_via_plane"),
         candidate_data.get("aod_run_id"),
         candidate_data.get("aod_asset_id"),
+        candidate_data.get("fabric_plane_id"),
         now,
         now
     ))
@@ -447,6 +448,8 @@ def _row_to_candidate(row) -> dict:
         result["aod_run_id"] = row["aod_run_id"]
     if "aod_asset_id" in keys:
         result["aod_asset_id"] = row["aod_asset_id"]
+    if "fabric_plane_id" in keys:
+        result["fabric_plane_id"] = row["fabric_plane_id"]
 
     return result
 

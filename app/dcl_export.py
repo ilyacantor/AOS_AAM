@@ -95,7 +95,7 @@ def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
         all_candidates = list_candidates(limit=10000)
         candidates = [c for c in all_candidates if c.get("status") in ["connected", "triaged", "new"]]
     
-    # Group candidates by fabric plane (using vendor matching)
+    # Group candidates by fabric plane (using fabric_plane_id linkage)
     planes_dict: Dict[str, Dict] = {}
     for plane_db in fabric_planes_db:
         plane_id = plane_db["plane_id"]
@@ -104,23 +104,23 @@ def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
             "candidates": []
         }
     
-    # Assign candidates to their fabric plane
+    # Assign candidates to their fabric plane using fabric_plane_id
+    unlinked_candidates = []
     for candidate in candidates:
-        # Try to match by connected_via_plane string
-        connected_via = candidate.get("connected_via_plane", "")
+        fabric_plane_id = candidate.get("fabric_plane_id")
         
-        # Extract vendor from "Connect via MuleSoft" format
-        matched_plane = None
-        if connected_via:
-            for plane_id, data in planes_dict.items():
-                plane = data["plane"]
-                if plane["vendor"].lower() in connected_via.lower():
-                    matched_plane = plane_id
-                    break
-        
-        # Fallback: infer from category
-        if not matched_plane and planes_dict:
+        if fabric_plane_id and fabric_plane_id in planes_dict:
+            # Direct linkage exists
+            planes_dict[fabric_plane_id]["candidates"].append(candidate)
+        else:
+            # Track unlinked for fallback
+            unlinked_candidates.append(candidate)
+    
+    # Fallback for unlinked candidates: infer from category
+    if unlinked_candidates and planes_dict:
+        for candidate in unlinked_candidates:
             category = candidate.get("category", "").lower()
+            
             # Map category to plane type
             if "data" in category or "warehouse" in category:
                 target_type = "warehouse"
@@ -132,6 +132,7 @@ def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
                 target_type = "ipaas"
             
             # Find first plane of that type
+            matched_plane = None
             for plane_id, data in planes_dict.items():
                 if data["plane"]["plane_type"] == target_type:
                     matched_plane = plane_id
@@ -140,9 +141,9 @@ def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
             # Ultimate fallback: first available plane
             if not matched_plane:
                 matched_plane = next(iter(planes_dict.keys()), None)
-        
-        if matched_plane:
-            planes_dict[matched_plane]["candidates"].append(candidate)
+            
+            if matched_plane:
+                planes_dict[matched_plane]["candidates"].append(candidate)
     
     # Build fabric plane objects for DCL
     fabric_planes_output = []
