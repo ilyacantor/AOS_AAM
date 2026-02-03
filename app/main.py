@@ -1280,14 +1280,8 @@ async def ui_candidates_list(
         </div>
         <div class="controls">
             <select id="filter-view" data-testid="filter-view" onchange="applyFilter()">
-                <option value="fabrics">Fabrics</option>
-                <option value="sources">SORs</option>
-                <option value="fabrics+sources"{"" if view == "all" else " selected"}>Fabrics + SORs</option>
+                <option value="fabrics"{"" if view == "all" else " selected"}>SORs & Fabrics</option>
                 <option value="all"{" selected" if view == "all" else ""}>All Candidates</option>
-                <option value="API_GATEWAY">API Gateway</option>
-                <option value="IPAAS">iPaaS</option>
-                <option value="EVENT_BUS">Event Bus</option>
-                <option value="DATA_WAREHOUSE">Warehouse</option>
             </select>
             <select id="filter-status" data-testid="filter-status" onchange="applyFilter()">{status_options}</select>
         </div>
@@ -2239,14 +2233,12 @@ async def ui_topology():
             <div class="filter-group">
                 <label>View:</label>
                 <select id="view-filter" onchange="changeView()">
-                    <option value="fabrics">Fabrics</option>
-                    <option value="sources">SORs</option>
-                    <option value="summary" selected>Fabrics + SORs</option>
-                    <option value="all">All Assets</option>
-                    <option value="API_GATEWAY">API Gateway</option>
-                    <option value="IPAAS">iPaaS</option>
-                    <option value="EVENT_BUS">Event Bus</option>
-                    <option value="DATA_WAREHOUSE">Warehouse</option>
+                    <option value="summary" selected>Fabrics & SORs</option>
+                    <option value="all">All Assets (slow)</option>
+                    <option value="API_GATEWAY">API Gateway Plane</option>
+                    <option value="IPAAS">iPaaS Plane</option>
+                    <option value="EVENT_BUS">Event Bus Plane</option>
+                    <option value="DATA_WAREHOUSE">Data Warehouse Plane</option>
                 </select>
             </div>
             <div class="filter-group">
@@ -2288,7 +2280,7 @@ async def ui_topology():
             </div>
             <div class="legend-item">
                 <div class="legend-shape"><svg viewBox="0 0 12 12"><rect x="1" y="1" width="10" height="10" fill="#94a3b8"/></svg></div>
-                <span>SOR</span>
+                <span>Source</span>
             </div>
             <div class="legend-item">
                 <div class="legend-shape"><svg viewBox="0 0 12 12"><polygon points="6,1 11,11 1,11" fill="#c084fc"/></svg></div>
@@ -2332,10 +2324,6 @@ async def ui_topology():
             let url = '/api/topology/summary';
             if (filter === 'all') {{
                 url = '/api/topology';
-            }} else if (filter === 'fabrics') {{
-                url = '/api/topology/summary?view=fabrics';
-            }} else if (filter === 'sources') {{
-                url = '/api/topology/summary?view=sources';
             }} else if (filter !== 'summary') {{
                 url = `/api/topology/plane/${{filter}}`;
             }}
@@ -3923,14 +3911,12 @@ async def get_pipe_topology(pipe_id: str):
 
 
 @app.get("/api/topology/summary", tags=["Topology"])
-async def get_topology_summary(view: Optional[str] = Query(None, description="Filter: 'fabrics', 'sources', or None for both")):
+async def get_topology_summary():
     """
-    Get a lightweight topology showing Fabric Planes and/or Systems of Record (SORs).
+    Get a lightweight topology showing only Fabric Planes and Systems of Record (SORs).
     
     This view is optimized for large datasets - it shows aggregate counts instead of
     individual assets, making it suitable for 600+ asset inventories.
-    
-    Use view=fabrics for only fabric plane nodes, view=sources for only source systems.
     """
     from datetime import datetime
     
@@ -3982,75 +3968,48 @@ async def get_topology_summary(view: Optional[str] = Query(None, description="Fi
     nodes = []
     edges = []
     
-    # Plane label mapping for display
+    # Fabric plane nodes
     plane_labels = {
         "IPAAS": "iPaaS",
-        "API_GATEWAY": "Gateway", 
+        "API_GATEWAY": "API Gateway", 
         "EVENT_BUS": "Event Bus",
-        "DATA_WAREHOUSE": "Warehouse"
+        "DATA_WAREHOUSE": "Data Warehouse"
     }
+    for plane, label in plane_labels.items():
+        pipe_count = fabric_counts.get(plane, 0)
+        cand_count = candidate_counts.get(plane, 0)
+        nodes.append({
+            "id": f"plane:{plane}",
+            "label": f"{label}\n({pipe_count} pipes, {cand_count} candidates)",
+            "type": "fabric_plane",
+            "metadata": {
+                "plane_type": plane,
+                "pipe_count": pipe_count,
+                "candidate_count": cand_count
+            }
+        })
     
-    # Count active planes (with data)
-    active_planes = sum(1 for p in ["IPAAS", "API_GATEWAY", "EVENT_BUS", "DATA_WAREHOUSE"] 
-                        if fabric_counts.get(p, 0) > 0 or candidate_counts.get(p, 0) > 0)
-    
-    # Determine what to show based on view filter
-    # "fabrics" = show sources grouped/colored by their fabric type
-    # "sources" = show sources only (no fabric grouping)
-    # default = show sources with fabric type labels
-    
-    # SOR nodes (top 20 by pipe count) - labeled with their fabric type
+    # SOR nodes (top 20 by pipe count)
     sorted_sors = sorted(sor_systems.items(), key=lambda x: x[1]["pipe_count"], reverse=True)[:20]
     for sor_name, sor_data in sorted_sors:
-        # Get primary fabric plane for this source
-        planes_list = list(sor_data.get("planes", []))
-        primary_plane = planes_list[0] if planes_list else None
-        plane_label = plane_labels.get(primary_plane, "") if primary_plane else ""
-        
-        # Build label: "Workato (iPaaS)" or just "Workato" if no plane
-        if view == "sources":
-            label = f"{sor_name}\n({sor_data['pipe_count']} pipes)"
-        else:
-            label = f"{sor_name}\n({plane_label})" if plane_label else f"{sor_name}"
-        
         nodes.append({
             "id": f"sor:{sor_name}",
-            "label": label,
+            "label": f"{sor_name}\n({sor_data['pipe_count']} pipes)",
             "type": "source_system",
             "metadata": {
                 "name": sor_name,
                 "pipe_count": sor_data["pipe_count"],
-                "fabric_plane": primary_plane,
                 "is_candidate_source": sor_data.get("is_candidate", False)
             }
         })
-    
-    # For "fabrics" view, group sources by connecting to plane nodes
-    if view == "fabrics":
-        # Create fabric plane nodes only when explicitly requested
-        for plane, label in plane_labels.items():
-            pipe_count = fabric_counts.get(plane, 0)
-            cand_count = candidate_counts.get(plane, 0)
-            if pipe_count > 0 or cand_count > 0:
-                nodes.append({
-                    "id": f"plane:{plane}",
-                    "label": f"{label}\n({pipe_count} pipes)",
-                    "type": "fabric_plane",
-                    "metadata": {
-                        "plane_type": plane,
-                        "pipe_count": pipe_count,
-                        "candidate_count": cand_count
-                    }
-                })
-        # Connect sources to their planes
-        for sor_name, sor_data in sorted_sors:
-            for plane in sor_data.get("planes", []):
-                edges.append({
-                    "id": f"sor_to_plane:{sor_name}:{plane}",
-                    "source": f"sor:{sor_name}",
-                    "target": f"plane:{plane}",
-                    "type": "sor_in_plane"
-                })
+        # Connect SOR to its planes
+        for plane in sor_data.get("planes", []):
+            edges.append({
+                "id": f"sor_to_plane:{sor_name}:{plane}",
+                "source": f"sor:{sor_name}",
+                "target": f"plane:{plane}",
+                "type": "sor_in_plane"
+            })
     
     return {
         "nodes": nodes,
@@ -4058,7 +4017,7 @@ async def get_topology_summary(view: Optional[str] = Query(None, description="Fi
         "stats": {
             "total_nodes": len(nodes),
             "total_edges": len(edges),
-            "fabric_planes": active_planes,
+            "fabric_planes": 4,
             "source_systems": len(sorted_sors),
             "total_pipes": len(pipes),
             "total_candidates": len(candidates)
