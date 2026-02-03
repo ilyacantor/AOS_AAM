@@ -2110,34 +2110,55 @@ async def ui_topology():
         }}
         .topology-controls {{
             display: flex;
-            gap: 12px;
-            margin-bottom: 16px;
+            gap: 8px;
+            margin-bottom: 12px;
             flex-wrap: wrap;
             align-items: center;
         }}
-        .legend {{
+        .stats.compact {{
             display: flex;
-            gap: 16px;
+            gap: 8px;
+            margin-bottom: 12px;
             flex-wrap: wrap;
-            margin-bottom: 16px;
-            padding: 12px;
+        }}
+        .stats.compact .stat-card {{
+            padding: 6px 12px;
+            min-width: auto;
+        }}
+        .stats.compact .stat-value {{
+            font-size: 1rem;
+            margin-bottom: 0;
+        }}
+        .stats.compact .stat-label {{
+            font-size: 0.65rem;
+        }}
+        .legend-below {{
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-top: 12px;
+            padding: 8px 12px;
             background: rgba(30, 41, 59, 0.6);
-            border-radius: 8px;
+            border-radius: 6px;
+            justify-content: center;
         }}
         .legend-item {{
             display: flex;
             align-items: center;
-            gap: 8px;
-            font-size: 0.85rem;
+            gap: 5px;
+            font-size: 0.7rem;
+            color: var(--slate-300);
         }}
-        .legend-dot {{
+        .legend-shape {{
+            width: 14px;
+            height: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }}
+        .legend-shape svg {{
             width: 12px;
             height: 12px;
-            border-radius: 50%;
-        }}
-        .legend-line {{
-            width: 24px;
-            height: 2px;
         }}
         .node-details {{
             position: absolute;
@@ -2185,14 +2206,14 @@ async def ui_topology():
         <h1>Topology</h1>
         <p class="page-subtitle">Interactive graph visualization of your integration mesh. Shows how fabric planes, pipes, source systems, and candidates connect.</p>
 
-        <div class="stats" id="stats-container">
+        <div class="stats compact" id="stats-container">
             <div class="stat-card">
                 <div class="stat-value" id="stat-nodes">-</div>
-                <div class="stat-label">Total Nodes</div>
+                <div class="stat-label">Nodes</div>
             </div>
             <div class="stat-card">
                 <div class="stat-value" id="stat-edges">-</div>
-                <div class="stat-label">Connections</div>
+                <div class="stat-label">Edges</div>
             </div>
             <div class="stat-card">
                 <div class="stat-value" id="stat-pipes">-</div>
@@ -2204,38 +2225,7 @@ async def ui_topology():
             </div>
             <div class="stat-card">
                 <div class="stat-value" id="stat-drift">-</div>
-                <div class="stat-label">With Drift</div>
-            </div>
-        </div>
-
-        <div class="legend">
-            <div class="legend-item">
-                <div class="legend-dot" style="background: #a78bfa;"></div>
-                <span>API Gateway</span>
-            </div>
-            <div class="legend-item">
-                <div class="legend-dot" style="background: #22d3ee;"></div>
-                <span>iPaaS</span>
-            </div>
-            <div class="legend-item">
-                <div class="legend-dot" style="background: #f97316;"></div>
-                <span>Event Bus</span>
-            </div>
-            <div class="legend-item">
-                <div class="legend-dot" style="background: #10b981;"></div>
-                <span>Data Warehouse</span>
-            </div>
-            <div class="legend-item">
-                <div class="legend-dot" style="background: #60a5fa;"></div>
-                <span>Pipe</span>
-            </div>
-            <div class="legend-item">
-                <div class="legend-dot" style="background: #94a3b8;"></div>
-                <span>Source System</span>
-            </div>
-            <div class="legend-item">
-                <div class="legend-dot" style="background: #c084fc;"></div>
-                <span>Candidate</span>
+                <div class="stat-label">Drift</div>
             </div>
         </div>
 
@@ -2266,6 +2256,37 @@ async def ui_topology():
         </div>
 
         <div id="topology-container"></div>
+
+        <div class="legend-below">
+            <div class="legend-item">
+                <div class="legend-shape"><svg viewBox="0 0 12 12"><polygon points="6,0 12,6 6,12 0,6" fill="#a78bfa"/></svg></div>
+                <span>Gateway</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-shape"><svg viewBox="0 0 12 12"><polygon points="6,0 12,6 6,12 0,6" fill="#22d3ee"/></svg></div>
+                <span>iPaaS</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-shape"><svg viewBox="0 0 12 12"><polygon points="6,0 12,6 6,12 0,6" fill="#f97316"/></svg></div>
+                <span>Event Bus</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-shape"><svg viewBox="0 0 12 12"><polygon points="6,0 12,6 6,12 0,6" fill="#10b981"/></svg></div>
+                <span>Warehouse</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-shape"><svg viewBox="0 0 12 12"><circle cx="6" cy="6" r="5" fill="#60a5fa"/></svg></div>
+                <span>Pipe</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-shape"><svg viewBox="0 0 12 12"><rect x="1" y="1" width="10" height="10" fill="#94a3b8"/></svg></div>
+                <span>Source</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-shape"><svg viewBox="0 0 12 12"><polygon points="6,1 11,11 1,11" fill="#c084fc"/></svg></div>
+                <span>Candidate</span>
+            </div>
+        </div>
 
         <div id="node-details" class="node-details">
             <button class="close-btn" onclick="closeDetails()">&times;</button>
