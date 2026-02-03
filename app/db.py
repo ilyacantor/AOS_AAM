@@ -91,6 +91,22 @@ def init_db():
         )
     """)
 
+    # Fabric Planes (from AOD)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS fabric_planes (
+            plane_id TEXT PRIMARY KEY,
+            plane_type TEXT NOT NULL,
+            vendor TEXT NOT NULL,
+            display_name TEXT,
+            domain TEXT,
+            managed_asset_count INTEGER DEFAULT 0,
+            is_healthy INTEGER DEFAULT 1,
+            aod_run_id TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+
     # AOD Handoff Log (track batch handoffs)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS aod_handoff_log (
@@ -238,6 +254,9 @@ def init_db():
     
     # Add fabric_plane column to declared_pipes (Framework Stability phase)
     _add_column_if_not_exists(cursor, "declared_pipes", "fabric_plane", "TEXT DEFAULT 'API_GATEWAY'")
+    
+    # Add fabric_plane_id to connection_candidates (link to fabric_planes table)
+    _add_column_if_not_exists(cursor, "connection_candidates", "fabric_plane_id", "TEXT")
     
     # Create indexes
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_candidates_status ON connection_candidates(status)")
