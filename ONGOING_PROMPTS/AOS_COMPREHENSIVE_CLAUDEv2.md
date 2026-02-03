@@ -78,19 +78,12 @@ AutonomOS overlays your current systems, abstracts the complexity, and delivers 
 
 ### 2.1 The Moat
 
-> **"The Moat is NOT the Runtime. The Moat is the Data."**
-
 **What AOS Builds (Differentiators):**
-- Introspective data tools exposing DCL/AAM/AOD to agents
-- Semantic schema discovery and mapping
-- Cross-system lineage tracking
-- Enterprise governance controls
-- Fabric Plane compliance
-
-**What AOS Buys/Integrates (Commodity):**
-- Agent execution (LangGraph)
-- Tool protocol (MCP)
-- LLM routing (AI Gateway)
+- We abstract your crappy IT stack with a lightweight, inexpensive, easy and quick to install layer that discovers, connects, unifies your data for agents and humans to consume easily and reliably.  
+- Our platform includes a Natural Language Query and interactive automated dashboard builder which are tuned to answer 90%+ of questions reliably, quickly while learning on the go to reduce inference costs.  
+- Our Agentic Orchestration function harnesses the complexity of agentic sprawl in a governed, secure, coordinated layer
+- In short, AOS is the new operating system for enterprise.  
+- Unlike the masses of start-ups claiming to be creating a data flywheel, we give our clients the promise that we do not see or store your data.  This also facilitates our claim that we can implement in days not months or years, as time consuming governance reviews are minimized. It doesn't mean we will not sell use cases in the future that engage in data modalities, but in order to get in the door fast, this is our strategy.
 
 ### 2.2 Core Development Principles
 
@@ -118,6 +111,37 @@ Every feature must satisfy ALL four criteria:
 - Adding hidden shortcuts that work for demos but fail IRL
 - Band-aids, quick patches, or workarounds
 
+### 2.5 User Interaction
+- Main user / developer (Ilya) is the CEO and co-founder.
+- Ilya is not a developer, he is at the moment both a Chief Architect and a Product Manager.  
+- His IDE is Replit which he uses because its an integrated env - chat - see - debug - deploy - repeat.  His prime developer is Claude Code for Web.
+- DO NOT alter the build/run configuration which has been set to deploy from Replit.
+- Ilya hates shortcuts, bandaids, tech debt, overhead, janky code and monoliths. If you the developer avoid these things, you will be rewarded handsomely.
+
+## Environment: Replit
+
+This project uses Replit as IDE. Key differences from local dev:
+
+### Port Configuration
+- **Backend runs on port 5000** (Replit standard)
+- Vite proxy in `vite.config.ts` must target `localhost:5000`
+- Never assume port 8000 for backend
+
+### Common Issues
+- If frontend API calls fail with 404/connection refused, check vite.config.ts proxy target
+- Replit uses port 5000 for the main exposed service
+
+### Dev Preferences
+- No local environment setup — everything runs in Replit
+- Use Replit's built-in shell and deployment tools
+- Avoid solutions requiring local CLI tools or Docker
+
+### Environment Variables in Replit
+
+- Replit uses Secrets (not .env files) for environment variables
+- Secrets are accessed via os.environ or os.getenv() in Python, but are stored securely in Replit's Secrets tab, not in any file in the codebase
+- Never create .env files — they would expose secrets in version control
+- When documentation or code references .env, translate that to adding the variable in Replit's Secrets panel instead
 ---
 
 ## 3. Architecture Overview
