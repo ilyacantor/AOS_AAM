@@ -2231,14 +2231,28 @@ async def ui_topology():
 
         <div class="topology-controls">
             <div class="filter-group">
-                <label>View:</label>
-                <select id="view-filter" onchange="changeView()">
-                    <option value="summary" selected>Fabrics & SORs</option>
+                <label>Fabric Plane:</label>
+                <select id="fabric-filter" onchange="applyTopologyFilters()">
+                    <option value="all" selected>All Fabrics</option>
+                    <option value="API_GATEWAY">API Gateway</option>
+                    <option value="IPAAS">iPaaS</option>
+                    <option value="EVENT_BUS">Event Bus</option>
+                    <option value="DATA_WAREHOUSE">Data Warehouse</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>SORs:</label>
+                <select id="sor-filter" onchange="applyTopologyFilters()">
+                    <option value="all" selected>All SORs</option>
+                    <option value="show">Show Only SORs</option>
+                    <option value="hide">Hide SORs</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Detail Level:</label>
+                <select id="detail-filter" onchange="applyTopologyFilters()">
+                    <option value="summary" selected>Summary View</option>
                     <option value="all">All Assets (slow)</option>
-                    <option value="API_GATEWAY">API Gateway Plane</option>
-                    <option value="IPAAS">iPaaS Plane</option>
-                    <option value="EVENT_BUS">Event Bus Plane</option>
-                    <option value="DATA_WAREHOUSE">Data Warehouse Plane</option>
                 </select>
             </div>
             <div class="filter-group">
@@ -2320,16 +2334,37 @@ async def ui_topology():
             candidate: 'triangle'
         }};
 
-        async function loadTopology(filter = 'summary') {{
+        async function loadTopology(fabricFilter = 'all', sorFilter = 'all', detailLevel = 'summary') {{
             let url = '/api/topology/summary';
-            if (filter === 'all') {{
+            
+            if (detailLevel === 'all') {{
                 url = '/api/topology';
-            }} else if (filter !== 'summary') {{
-                url = `/api/topology/plane/${{filter}}`;
+            }} else if (fabricFilter !== 'all') {{
+                url = `/api/topology/plane/${{fabricFilter}}`;
             }}
 
             const response = await fetch(url);
-            const data = await response.json();
+            let data = await response.json();
+            
+            // Apply SOR filter client-side
+            if (sorFilter !== 'all') {{
+                if (sorFilter === 'show') {{
+                    // Show only SOR nodes
+                    data.nodes = data.nodes.filter(n => 
+                        n.metadata && n.metadata.is_sor === true || n.type === 'fabric_plane'
+                    );
+                }} else if (sorFilter === 'hide') {{
+                    // Hide SOR nodes
+                    data.nodes = data.nodes.filter(n => 
+                        !n.metadata || n.metadata.is_sor !== true
+                    );
+                }}
+                // Filter edges to only those with both nodes present
+                const nodeIds = new Set(data.nodes.map(n => n.id));
+                data.edges = data.edges.filter(e => 
+                    nodeIds.has(e.source) && nodeIds.has(e.target)
+                );
+            }}
 
             allNodes = data.nodes.map(n => ({{
                 id: n.id,
@@ -2506,9 +2541,11 @@ async def ui_topology():
             document.getElementById('node-details').classList.remove('visible');
         }}
 
-        function changeView() {{
-            const filter = document.getElementById('view-filter').value;
-            loadTopology(filter);
+        function applyTopologyFilters() {{
+            const fabricFilter = document.getElementById('fabric-filter').value;
+            const sorFilter = document.getElementById('sor-filter').value;
+            const detailLevel = document.getElementById('detail-filter').value;
+            loadTopology(fabricFilter, sorFilter, detailLevel);
         }}
 
         function changeLayout() {{
