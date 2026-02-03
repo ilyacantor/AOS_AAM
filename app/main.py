@@ -368,18 +368,21 @@ def ui_nav(active: str = "") -> str:
 
 @app.get("/ui/pipes", response_class=HTMLResponse, include_in_schema=False)
 async def ui_pipes_list(
-    source_system: Optional[str] = Query(None),
-    modality: Optional[str] = Query(None),
-    fabric_plane: Optional[str] = Query(None)
+    filter: Optional[str] = Query("all")
 ):
     """Pipes Inventory Screen"""
-    pipes = list_pipes(source_system=source_system, fabric_plane=fabric_plane)
-    if modality:
-        pipes = [p for p in pipes if p.get("modality") == modality]
-    
     all_pipes = list_pipes()
+    
+    # Single filter for asset classes
+    if filter == "all":
+        pipes = all_pipes
+    elif filter in ["IPAAS", "API_GATEWAY", "EVENT_BUS", "DATA_WAREHOUSE"]:
+        pipes = [p for p in all_pipes if p.get("fabric_plane") == filter]
+    else:
+        # Filter by source system
+        pipes = [p for p in all_pipes if p.get("source_system") == filter]
+    
     source_systems = sorted(set(p.get("source_system", "") for p in all_pipes if p.get("source_system")))
-    modalities = sorted(set(p.get("modality", "") for p in all_pipes if p.get("modality")))
     fabric_planes = ["IPAAS", "API_GATEWAY", "EVENT_BUS", "DATA_WAREHOUSE"]
     
     all_drift = list_all_drift_events(limit=1000)
@@ -428,15 +431,17 @@ async def ui_pipes_list(
     if not pipes:
         rows_html = '<tr><td colspan="8" class="empty-state">No pipes found. Load a preset or run Mock Collector to generate sample data.</td></tr>'
     
-    source_options = '<option value="">All Sources</option>' + ''.join(
-        f'<option value="{s}"{" selected" if s == source_system else ""}>{s}</option>' for s in source_systems
-    )
-    modality_options = '<option value="">All Modalities</option>' + ''.join(
-        f'<option value="{m}"{" selected" if m == modality else ""}>{m}</option>' for m in modalities
-    )
-    fabric_options = '<option value="">All Fabric Planes</option>' + ''.join(
-        f'<option value="{f}"{" selected" if f == fabric_plane else ""}>{f}</option>' for f in fabric_planes
-    )
+    # Build single combined filter dropdown
+    filter_options = '<option value="all"' + (' selected' if filter == "all" else '') + '>All</option>'
+    # Add fabric types
+    for f in fabric_planes:
+        filter_options += f'<option value="{f}"' + (' selected' if filter == f else '') + f'>{f.replace("_", " ").title()}</option>'
+    # Add source systems
+    if source_systems:
+        filter_options += '<optgroup label="Sources">'
+        for s in source_systems:
+            filter_options += f'<option value="{s}"' + (' selected' if filter == s else '') + f'>{s}</option>'
+        filter_options += '</optgroup>'
     
     return HTMLResponse(content=f"""
 <!DOCTYPE html>
@@ -668,9 +673,7 @@ async def ui_pipes_list(
             <button class="btn" id="btn-run-collector" data-testid="btn-run-collector">Run Mock Collector</button>
             <button class="btn" id="btn-load-aod" data-testid="btn-load-aod" style="display:none;">Load AOD Test Data</button>
             <button class="btn" id="btn-export-dcl" data-testid="btn-export-dcl">Export to DCL</button>
-            <select id="filter-fabric" data-testid="filter-fabric" onchange="applyFilters()">{fabric_options}</select>
-            <select id="filter-source" data-testid="filter-source" onchange="applyFilters()">{source_options}</select>
-            <select id="filter-modality" data-testid="filter-modality" onchange="applyFilters()">{modality_options}</select>
+            <select id="filter" data-testid="filter" onchange="applyFilter()">{filter_options}</select>
         </div>
         <table data-testid="pipes-table">
             <thead>
@@ -738,14 +741,10 @@ async def ui_pipes_list(
             setTimeout(() => toast.style.display = 'none', 3000);
         }}
         
-        function applyFilters() {{
-            const fabric = document.getElementById('filter-fabric').value;
-            const source = document.getElementById('filter-source').value;
-            const modality = document.getElementById('filter-modality').value;
+        function applyFilter() {{
+            const filter = document.getElementById('filter').value;
             const params = new URLSearchParams();
-            if (fabric) params.set('fabric_plane', fabric);
-            if (source) params.set('source_system', source);
-            if (modality) params.set('modality', modality);
+            if (filter && filter !== 'all') params.set('filter', filter);
             window.location.href = '/ui/pipes' + (params.toString() ? '?' + params.toString() : '');
         }}
         
@@ -2240,21 +2239,15 @@ async def ui_topology():
 
         <div class="topology-controls">
             <div class="filter-group">
-                <label>Fabric Plane:</label>
-                <select id="fabric-filter" onchange="applyTopologyFilters()">
-                    <option value="all" selected>All Fabrics</option>
+                <label>Filter:</label>
+                <select id="asset-filter" onchange="applyTopologyFilters()">
+                    <option value="all" selected>All</option>
+                    <option value="sors">SORs</option>
+                    <option value="fabrics">Fabrics</option>
                     <option value="API_GATEWAY">API Gateway</option>
                     <option value="IPAAS">iPaaS</option>
                     <option value="EVENT_BUS">Event Bus</option>
                     <option value="DATA_WAREHOUSE">Data Warehouse</option>
-                </select>
-            </div>
-            <div class="filter-group">
-                <label>SORs:</label>
-                <select id="sor-filter" onchange="applyTopologyFilters()">
-                    <option value="all" selected>All SORs</option>
-                    <option value="show">Show Only SORs</option>
-                    <option value="hide">Hide SORs</option>
                 </select>
             </div>
             <div class="filter-group">
@@ -2551,9 +2544,23 @@ async def ui_topology():
         }}
 
         function applyTopologyFilters() {{
-            const fabricFilter = document.getElementById('fabric-filter').value;
-            const sorFilter = document.getElementById('sor-filter').value;
+            const assetFilter = document.getElementById('asset-filter').value;
             const detailLevel = document.getElementById('detail-filter').value;
+            
+            // Map single filter to fabric/sor parameters
+            let fabricFilter = 'all';
+            let sorFilter = 'all';
+            
+            if (assetFilter === 'sors') {{
+                sorFilter = 'show';
+            }} else if (assetFilter === 'fabrics') {{
+                fabricFilter = 'all';
+                sorFilter = 'hide';
+            }} else if (assetFilter !== 'all') {{
+                // Specific fabric type
+                fabricFilter = assetFilter;
+            }}
+            
             loadTopology(fabricFilter, sorFilter, detailLevel);
         }}
 
