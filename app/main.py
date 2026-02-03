@@ -2358,8 +2358,8 @@ async def ui_topology():
             if (data.stats) {{
                 document.getElementById('stat-nodes').textContent = data.stats.total_nodes || 0;
                 document.getElementById('stat-edges').textContent = data.stats.total_edges || 0;
-                document.getElementById('stat-pipes').textContent = (data.stats.nodes_by_type && data.stats.nodes_by_type.pipe) || 0;
-                document.getElementById('stat-candidates').textContent = (data.stats.nodes_by_type && data.stats.nodes_by_type.candidate) || 0;
+                document.getElementById('stat-pipes').textContent = data.stats.total_pipes || (data.stats.nodes_by_type && data.stats.nodes_by_type.pipe) || 0;
+                document.getElementById('stat-candidates').textContent = data.stats.total_candidates || (data.stats.nodes_by_type && data.stats.nodes_by_type.candidate) || 0;
                 document.getElementById('stat-drift').textContent = data.stats.pipes_with_drift || 0;
             }}
 
