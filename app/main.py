@@ -1286,9 +1286,9 @@ async def ui_candidates_list(
         </div>
         <div class="controls">
             <select id="filter-view" data-testid="filter-view" onchange="applyFilter()">
-                <option value="all"{" selected" if view == "all" else ""}>All Candidates</option>
-                <option value="sors"{" selected" if view == "sors" else ""}>SORs Only</option>
-                <option value="fabrics"{" selected" if view == "fabrics" else ""}>Fabrics Only</option>
+                <option value="all"{" selected" if view == "all" else ""}>All</option>
+                <option value="sors"{" selected" if view == "sors" else ""}>SORs</option>
+                <option value="fabrics"{" selected" if view == "fabrics" else ""}>Fabrics</option>
                 <option value="sors_fabrics"{" selected" if view == "sors_fabrics" else ""}>SORs + Fabrics</option>
                 <option value="ipaas"{" selected" if view == "ipaas" else ""}>iPaaS</option>
                 <option value="warehouse"{" selected" if view == "warehouse" else ""}>Warehouse</option>
