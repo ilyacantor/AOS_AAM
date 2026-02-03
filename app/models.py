@@ -173,10 +173,19 @@ class AODHandoffCandidate(ConnectionCandidate):
     aod_asset_id: str = Field(..., description="Original AOD asset ID (required for handoff)")
 
 
+class FabricPlaneSummary(BaseModel):
+    """Summary of a fabric plane from AOD"""
+    plane_type: str
+    vendor: str
+    is_healthy: bool = True
+    source: str = "aod"
+
+
 class AODHandoffRequest(BaseModel):
     """Batch handoff request from AOD"""
     run_id: str = Field(..., description="AOD discovery run ID")
     candidates: list[AODHandoffCandidate] = Field(..., description="Candidates to hand off")
+    fabric_planes: list[FabricPlaneSummary] = Field(default_factory=list, description="Detected fabric planes")
     policy_version: Optional[str] = Field(None, description="Version of governance policy applied")
     handoff_timestamp: datetime = Field(default_factory=datetime.utcnow)
 

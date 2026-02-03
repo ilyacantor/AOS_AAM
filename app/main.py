@@ -2635,7 +2635,19 @@ async def receive_aod_handoff(request: AODHandoffRequest):
     - action_type: "inventory_only" (human review) or "provision" (auto-connect)
     - blocking_findings: Findings that prevent auto-provisioning
     - connected_via_plane: Fabric plane routing hint from AOD
+    - fabric_planes: Detected fabric control planes
     """
+    # Store fabric planes from AOD
+    fabric_planes_stored = 0
+    if request.fabric_planes:
+        for plane in request.fabric_planes:
+            try:
+                plane_dict = plane.model_dump()
+                store_fabric_plane(plane_dict, request.run_id)
+                fabric_planes_stored += 1
+            except Exception as e:
+                print(f"[AAM] Failed to store fabric plane {plane.vendor}: {e}")
+    
     accepted = []
     rejected = []
 
