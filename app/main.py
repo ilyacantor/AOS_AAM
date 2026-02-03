@@ -2248,20 +2248,16 @@ async def ui_topology():
 
         <div class="stats compact" id="stats-container">
             <div class="stat-card">
-                <div class="stat-value" id="stat-nodes">-</div>
-                <div class="stat-label">Nodes</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value" id="stat-edges">-</div>
-                <div class="stat-label">Edges</div>
-            </div>
-            <div class="stat-card">
                 <div class="stat-value" id="stat-pipes">-</div>
                 <div class="stat-label">Pipes</div>
             </div>
             <div class="stat-card">
-                <div class="stat-value" id="stat-candidates">-</div>
-                <div class="stat-label">Candidates</div>
+                <div class="stat-value" id="stat-fabrics">-</div>
+                <div class="stat-label">Fabrics</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="stat-sors">-</div>
+                <div class="stat-label">SORs</div>
             </div>
             <div class="stat-card">
                 <div class="stat-value" id="stat-drift">-</div>
@@ -2425,10 +2421,10 @@ async def ui_topology():
 
             // Update stats
             if (data.stats) {{
-                document.getElementById('stat-nodes').textContent = data.stats.total_nodes || 0;
-                document.getElementById('stat-edges').textContent = data.stats.total_edges || 0;
-                document.getElementById('stat-pipes').textContent = data.stats.total_pipes || (data.stats.nodes_by_type && data.stats.nodes_by_type.pipe) || 0;
-                document.getElementById('stat-candidates').textContent = data.stats.total_candidates || (data.stats.nodes_by_type && data.stats.nodes_by_type.candidate) || 0;
+                // Canonical KPIs: Pipes (= candidates), Fabrics, SORs
+                document.getElementById('stat-pipes').textContent = data.stats.total_candidates || 0;
+                document.getElementById('stat-fabrics').textContent = data.stats.fabrics || 0;
+                document.getElementById('stat-sors').textContent = data.stats.sors || 0;
                 document.getElementById('stat-drift').textContent = data.stats.pipes_with_drift || 0;
             }}
 

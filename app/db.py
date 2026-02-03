@@ -511,9 +511,27 @@ def create_pipe(pipe_data: dict) -> dict:
 
 
 def get_pipe(pipe_id: str) -> Optional[dict]:
-    """Get a pipe by ID"""
+    """
+    Get a pipe by ID.
+    CANONICAL: Pipes = Candidates, so check candidates first.
+    """
     conn = get_connection()
     cursor = conn.cursor()
+    
+    # Check candidates first (canonical source)
+    cursor.execute("""
+        SELECT c.*, fp.plane_type as fabric_plane
+        FROM connection_candidates c
+        LEFT JOIN fabric_planes fp ON c.fabric_plane_id = fp.plane_id
+        WHERE c.candidate_id = ?
+    """, (pipe_id,))
+    row = cursor.fetchone()
+    
+    if row:
+        conn.close()
+        return _candidate_to_pipe(row)
+    
+    # Fallback: check declared_pipes for backward compatibility
     cursor.execute("SELECT * FROM declared_pipes WHERE pipe_id = ?", (pipe_id,))
     row = cursor.fetchone()
     conn.close()
@@ -524,7 +542,12 @@ def get_pipe(pipe_id: str) -> Optional[dict]:
 
 
 def list_pipes(source_system: Optional[str] = None, fabric_plane: Optional[str] = None, limit: int = 100) -> list[dict]:
-    """List pipes with optional source and fabric_plane filters"""
+    """
+    List pipes with optional filters.
+    
+    CANONICAL DEFINITION: Pipes = Candidates
+    This function queries connection_candidates (the source of truth).
+    """
     conn = get_connection()
     cursor = conn.cursor()
     
@@ -532,18 +555,36 @@ def list_pipes(source_system: Optional[str] = None, fabric_plane: Optional[str] 
     params = []
     
     if source_system:
-        conditions.append("source_system = ?")
+        conditions.append("vendor_name = ?")
         params.append(source_system)
     
     if fabric_plane:
-        conditions.append("fabric_plane = ?")
-        params.append(fabric_plane)
+        # Join with fabric_planes to filter by fabric type
+        conditions.append("fp.plane_type = ?")
+        params.append(fabric_plane.lower())
     
-    if conditions:
-        where_clause = " WHERE " + " AND ".join(conditions)
-        query = f"SELECT * FROM declared_pipes{where_clause} ORDER BY fabric_plane, source_system, created_at DESC LIMIT ?"
+    if fabric_plane:
+        # Use JOIN when filtering by fabric_plane
+        where_clause = " WHERE " + " AND ".join(conditions) if conditions else ""
+        query = f"""
+            SELECT c.*, fp.plane_type as fabric_plane
+            FROM connection_candidates c
+            LEFT JOIN fabric_planes fp ON c.fabric_plane_id = fp.plane_id
+            {where_clause}
+            ORDER BY c.category, c.created_at DESC
+            LIMIT ?
+        """
     else:
-        query = "SELECT * FROM declared_pipes ORDER BY fabric_plane, source_system, created_at DESC LIMIT ?"
+        # Simple query without JOIN when no fabric filter
+        where_clause = " WHERE " + " AND ".join(conditions) if conditions else ""
+        query = f"""
+            SELECT c.*, fp.plane_type as fabric_plane
+            FROM connection_candidates c
+            LEFT JOIN fabric_planes fp ON c.fabric_plane_id = fp.plane_id
+            {where_clause}
+            ORDER BY c.category, c.created_at DESC
+            LIMIT ?
+        """
     
     params.append(limit)
     cursor.execute(query, params)
@@ -551,7 +592,8 @@ def list_pipes(source_system: Optional[str] = None, fabric_plane: Optional[str] 
     rows = cursor.fetchall()
     conn.close()
     
-    return [_row_to_pipe(row) for row in rows]
+    # Convert candidates to pipe format for UI compatibility
+    return [_candidate_to_pipe(row) for row in rows]
 
 
 def get_pipe_versions(pipe_id: str) -> list[dict]:
@@ -641,6 +683,54 @@ def update_pipe_with_version(pipe_id: str, pipe_data: dict, new_schema_hash: Opt
     conn.close()
     
     return {"pipe_id": pipe_id, "version": new_version, "drift_detected": drift_id is not None}
+
+
+def _candidate_to_pipe(row) -> dict:
+    """
+    Convert candidate row to pipe format for UI compatibility.
+    CANONICAL: Candidates = Pipes
+    """
+    keys = row.keys()
+    
+    # Extract fabric plane type (from JOIN)
+    fabric_plane = row["fabric_plane"].upper() if "fabric_plane" in keys and row["fabric_plane"] else "API_GATEWAY"
+    
+    # Map category to modality (inferred)
+    category_lower = row["category"].lower() if row["category"] else ""
+    if "ipaas" in category_lower:
+        modality = "CONTROL_PLANE"
+    elif "warehouse" in category_lower or "data" in category_lower:
+        modality = "DECLARED_INTERFACE"
+    elif "gateway" in category_lower or "api" in category_lower:
+        modality = "DECLARED_INTERFACE"
+    else:
+        modality = "DECLARED_INTERFACE"
+    
+    return {
+        "pipe_id": row["candidate_id"],  # Candidate ID = Pipe ID
+        "display_name": row["display_name"],
+        "fabric_plane": fabric_plane,
+        "modality": modality,
+        "source_system": row["vendor_name"],
+        "transport_kind": "API",  # Default
+        "endpoint_ref": {"endpoints": json.loads(row["known_endpoints"]) if row["known_endpoints"] else []},
+        "entity_scope": [row["category"]] if row["category"] else [],
+        "identity_keys": [],
+        "change_semantics": "UNKNOWN",
+        "provenance": {
+            "discovered_by": "aod",
+            "discovered_at": row["created_at"],
+            "aod_run_id": row["aod_run_id"] if "aod_run_id" in keys else None
+        },
+        "owner_signals": [],
+        "trust_labels": [row["governance_status"]] if "governance_status" in keys and row["governance_status"] else [],
+        "schema_info": None,
+        "freshness": None,
+        "access": None,
+        "version": 1,
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"]
+    }
 
 
 def _row_to_pipe(row) -> dict:
@@ -1471,16 +1561,32 @@ def get_topology_data() -> dict:
         edge_type = edge["type"]
         edges_by_type[edge_type] = edges_by_type.get(edge_type, 0) + 1
 
+    # Get SOR count (candidates with SOR categories)
+    sor_categories = ['crm', 'erp', 'hcm', 'idp', 'itsm']
+    placeholders = ','.join('?' * len(sor_categories))
+    cursor.execute(f"""
+        SELECT COUNT(*) FROM connection_candidates
+        WHERE LOWER(category) IN ({placeholders})
+    """, sor_categories)
+    sors_count = cursor.fetchone()[0]
+    
+    # Canonical labels: SORs, Fabrics, Pipes (not "nodes")
     stats = {
+        "total_pipes": len(pipes),  # Canonical: pipes = candidates from declared_pipes (legacy)
+        "total_candidates": total_candidates,  # All candidates (which ARE pipes)
+        "sors": sors_count,
+        "fabrics": len(fabric_planes),
+        "pipes": len(pipes),  # For UI display
+        "connected_candidates": connected_candidates,
+        "unconnected_candidates": total_candidates - connected_candidates,
+        "pipes_with_drift": len(pipes_with_open_drift),
+        # Legacy fields for backward compatibility
         "total_nodes": len(nodes),
         "total_edges": len(edges),
         "nodes_by_type": nodes_by_type,
         "edges_by_type": edges_by_type,
         "fabric_planes": sorted(list(fabric_planes)),
-        "source_systems": sorted(list(source_systems)),
-        "connected_candidates": connected_candidates,
-        "unconnected_candidates": total_candidates - connected_candidates,
-        "pipes_with_drift": len(pipes_with_open_drift)
+        "source_systems": sorted(list(source_systems))
     }
 
     return {
