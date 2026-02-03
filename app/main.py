@@ -2864,6 +2864,25 @@ async def export_for_dcl():
     }
 
 
+@app.get("/api/dcl/export-pipes", tags=["DCL Export"], response_model=None)
+async def export_pipes_for_dcl(aod_run_id: Optional[str] = Query(None, description="Filter by AOD run ID")):
+    """
+    Export pipe definitions grouped by fabric plane for DCL consumption.
+    
+    Returns candidates grouped into 4 fabric planes:
+    - iPaaS (MuleSoft, Workato)
+    - Warehouse (Snowflake, BigQuery)
+    - API Gateway (Kong, Apigee)
+    - Event Bus (Kafka, EventBridge)
+    
+    Each plane includes connections with inferred schemas.
+    """
+    from .dcl_export import build_dcl_export
+    
+    export_data = build_dcl_export(aod_run_id=aod_run_id)
+    return export_data.model_dump()
+
+
 @app.get("/api/drift", tags=["Drift"])
 async def get_all_drift_events(limit: int = Query(100, description="Maximum number of events")):
     """List all drift events"""
