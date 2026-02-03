@@ -1280,9 +1280,9 @@ async def ui_candidates_list(
         </div>
         <div class="controls">
             <select id="filter-view" data-testid="filter-view" onchange="applyFilter()">
-                <option value="fabrics+sources"{"" if view == "all" else " selected"}>Fabrics + Sources</option>
+                <option value="fabrics+sources"{"" if view == "all" else " selected"}>Fabrics + SORs</option>
                 <option value="fabrics">Fabrics Only</option>
-                <option value="sources">Sources Only</option>
+                <option value="sources">SORs Only</option>
                 <option value="all"{" selected" if view == "all" else ""}>All Candidates</option>
             </select>
             <select id="filter-status" data-testid="filter-status" onchange="applyFilter()">{status_options}</select>
@@ -2235,9 +2235,9 @@ async def ui_topology():
             <div class="filter-group">
                 <label>View:</label>
                 <select id="view-filter" onchange="changeView()">
-                    <option value="summary" selected>Sources (by Fabric)</option>
+                    <option value="summary" selected>SORs (by Fabric)</option>
                     <option value="fabrics">Grouped by Fabric</option>
-                    <option value="sources">Sources Only</option>
+                    <option value="sources">SORs Only</option>
                     <option value="all">All Assets (slow)</option>
                     <option value="API_GATEWAY">Gateway Pipes</option>
                     <option value="IPAAS">iPaaS Pipes</option>
@@ -2284,7 +2284,7 @@ async def ui_topology():
             </div>
             <div class="legend-item">
                 <div class="legend-shape"><svg viewBox="0 0 12 12"><rect x="1" y="1" width="10" height="10" fill="#94a3b8"/></svg></div>
-                <span>Source</span>
+                <span>SOR</span>
             </div>
             <div class="legend-item">
                 <div class="legend-shape"><svg viewBox="0 0 12 12"><polygon points="6,1 11,11 1,11" fill="#c084fc"/></svg></div>
