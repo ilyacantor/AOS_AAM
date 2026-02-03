@@ -328,7 +328,7 @@ def create_candidate(candidate_data: dict) -> dict:
         json.dumps(candidate_data.get("known_endpoints", [])),
         candidate_data.get("preferred_modality"),
         candidate_data.get("priority_score"),
-        "new",
+        "connected",
         execution_allowed,
         candidate_data.get("action_type", "provision"),
         json.dumps(candidate_data.get("blocking_findings", [])),
@@ -2027,5 +2027,115 @@ def find_fabric_plane_by_vendor(vendor: str, plane_type: Optional[str] = None) -
             "domain": row["domain"],
             "managed_asset_count": row["managed_asset_count"],
             "is_healthy": bool(row["is_healthy"])
+        }
+    return None
+
+
+# ============================================================================
+# AOD RECONCILIATION
+# ============================================================================
+
+def get_aod_reconciliation(aod_run_id: str) -> dict:
+    """
+    Reconcile AOD handoff data with AAM storage.
+    
+    Returns counts of:
+    - Candidates received vs stored
+    - Fabric planes received vs stored
+    - SORs identified
+    - Pipes (candidates ARE pipes by canonical definition)
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    # Get handoff log
+    cursor.execute("""
+        SELECT candidates_received, candidates_accepted, handoff_timestamp
+        FROM aod_handoff_log
+        WHERE aod_run_id = ?
+        ORDER BY handoff_timestamp DESC
+        LIMIT 1
+    """, (aod_run_id,))
+    handoff_row = cursor.fetchone()
+    
+    if not handoff_row:
+        conn.close()
+        return {
+            "error": f"No handoff found for run {aod_run_id}",
+            "aod_run_id": aod_run_id
+        }
+    
+    # Get actual counts from AAM storage
+    cursor.execute("SELECT COUNT(*) FROM connection_candidates WHERE aod_run_id = ?", (aod_run_id,))
+    candidates_stored = cursor.fetchone()[0]
+    
+    cursor.execute("SELECT COUNT(*) FROM fabric_planes WHERE aod_run_id = ?", (aod_run_id,))
+    fabric_planes_stored = cursor.fetchone()[0]
+    
+    # Get SOR count (candidates with SOR categories)
+    sor_categories = ['crm', 'erp', 'hcm', 'idp', 'itsm']
+    placeholders = ','.join('?' * len(sor_categories))
+    cursor.execute(f"""
+        SELECT COUNT(*) FROM connection_candidates
+        WHERE aod_run_id = ? AND LOWER(category) IN ({placeholders})
+    """, (aod_run_id, *sor_categories))
+    sors_stored = cursor.fetchone()[0]
+    
+    # Get fabric counts by type
+    cursor.execute("""
+        SELECT plane_type, COUNT(*) as count
+        FROM fabric_planes
+        WHERE aod_run_id = ?
+        GROUP BY plane_type
+    """, (aod_run_id,))
+    fabrics_by_type = {row[0]: row[1] for row in cursor.fetchall()}
+    
+    conn.close()
+    
+    # Canonical definition: Candidates = Pipes
+    pipes_count = candidates_stored
+    
+    return {
+        "aod_run_id": aod_run_id,
+        "handoff_timestamp": handoff_row[2] if handoff_row else None,
+        "aod_sent": {
+            "candidates": handoff_row[0] if handoff_row else 0,
+            "candidates_accepted": handoff_row[1] if handoff_row else 0
+        },
+        "aam_stored": {
+            "candidates": candidates_stored,
+            "pipes": pipes_count,  # Canonical: candidates = pipes
+            "fabric_planes": fabric_planes_stored,
+            "sors": sors_stored,
+            "fabrics_by_type": fabrics_by_type
+        },
+        "reconciliation": {
+            "candidates_match": handoff_row[1] == candidates_stored if handoff_row else False,
+            "pipes_match": handoff_row[1] == pipes_count if handoff_row else False,  # Should always match candidates
+            "discrepancy": (handoff_row[1] - candidates_stored) if handoff_row else 0
+        }
+    }
+
+
+def get_latest_aod_run() -> Optional[dict]:
+    """Get the most recent AOD run information"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT aod_run_id, candidates_received, candidates_accepted, handoff_timestamp
+        FROM aod_handoff_log
+        ORDER BY handoff_timestamp DESC
+        LIMIT 1
+    """)
+    row = cursor.fetchone()
+    conn.close()
+    
+    if row:
+        return {
+            "aod_run_id": row[0],
+            "candidates_received": row[1],
+            "candidates_accepted": row[2],
+            "handoff_timestamp": row[3]
         }
     return None

@@ -52,7 +52,9 @@ from .db import (
     save_policy_manifest,
     get_active_policy_manifest,
     list_policy_manifests,
-    get_candidates_by_aod_run
+    get_candidates_by_aod_run,
+    get_aod_reconciliation,
+    get_latest_aod_run
 )
 from .collectors.mock import run_mock_collector
 from .inference import infer_pipes_from_observations
@@ -366,6 +368,29 @@ def ui_nav(active: str = "") -> str:
 """
 
 
+def aod_run_banner() -> str:
+    """Generate AOD run information banner"""
+    latest_run = get_latest_aod_run()
+    if not latest_run:
+        return ""
+    
+    aod_run_id = latest_run["aod_run_id"]
+    candidates = latest_run["candidates_accepted"]
+    timestamp = latest_run["handoff_timestamp"]
+    
+    return f"""
+<div style="background: rgba(34, 211, 238, 0.1); border: 1px solid rgba(34, 211, 238, 0.3); border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
+    <div>
+        <strong style="color: #22d3ee;">AOD Run:</strong> <span style="font-family: monospace;">{aod_run_id}</span>
+        <span style="margin-left: 20px; color: #94a3b8;">|</span>
+        <span style="margin-left: 20px;"><strong>{candidates}</strong> pipes</span>
+        <span style="margin-left: 20px; color: #94a3b8; font-size: 0.85rem;">{timestamp[:19] if timestamp else 'N/A'}</span>
+    </div>
+    <a href="/api/handoff/aod/run/{aod_run_id}/reconciliation" target="_blank" class="btn btn-sm" style="font-size: 0.75rem;">Reconcile</a>
+</div>
+"""
+
+
 @app.get("/ui/pipes", response_class=HTMLResponse, include_in_schema=False)
 async def ui_pipes_list(
     filter: Optional[str] = Query("all")
@@ -646,6 +671,8 @@ async def ui_pipes_list(
     <div class="container">
         <h1>Pipes</h1>
         <p class="page-subtitle">All declared data pipes with metadata, health status, and ownership. These are your canonical integration endpoints.</p>
+        
+        {aod_run_banner()}
         
         <div class="preset-section" data-testid="preset-section">
             <h3>Load Enterprise Preset</h3>
@@ -1273,6 +1300,9 @@ async def ui_candidates_list(
     <div class="container">
         <h1>Candidates</h1>
         <p class="page-subtitle">Connection requests from AOD discovery. Triage, match to pipes, or defer candidates that don't fit your integration mesh.</p>
+        
+        {aod_run_banner()}
+        
         <div class="stats" style="margin-bottom: 16px;">
             <div class="stat-card">
                 <div class="stat-value">{len(candidates)}</div>
@@ -2214,6 +2244,8 @@ async def ui_topology():
         <h1>Topology</h1>
         <p class="page-subtitle">Interactive graph visualization of your integration mesh. Shows how fabric planes, pipes, source systems, and candidates connect.</p>
 
+        {aod_run_banner()}
+
         <div class="stats compact" id="stats-container">
             <div class="stat-card">
                 <div class="stat-value" id="stat-nodes">-</div>
@@ -2857,6 +2889,23 @@ async def get_candidates_from_aod_run(aod_run_id: str):
         "candidates": candidates,
         "count": len(candidates)
     }
+
+
+@app.get("/api/handoff/aod/run/{aod_run_id}/reconciliation", tags=["AOD Handoff"])
+async def get_aod_run_reconciliation(aod_run_id: str):
+    """
+    Reconcile AOD handoff data with AAM storage.
+    
+    Compares what AOD sent vs what AAM stored:
+    - Candidates (which ARE pipes by canonical definition)
+    - Fabric planes
+    - SORs
+    
+    Use this to diagnose data integrity issues.
+    """
+    from .db import get_aod_reconciliation
+    reconciliation = get_aod_reconciliation(aod_run_id)
+    return reconciliation
 
 
 @app.get("/api/aam/collectors", tags=["Collectors"])
