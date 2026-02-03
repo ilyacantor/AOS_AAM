@@ -1280,10 +1280,14 @@ async def ui_candidates_list(
         </div>
         <div class="controls">
             <select id="filter-view" data-testid="filter-view" onchange="applyFilter()">
+                <option value="fabrics">Fabrics</option>
+                <option value="sources">SORs</option>
                 <option value="fabrics+sources"{"" if view == "all" else " selected"}>Fabrics + SORs</option>
-                <option value="fabrics">Fabrics Only</option>
-                <option value="sources">SORs Only</option>
                 <option value="all"{" selected" if view == "all" else ""}>All Candidates</option>
+                <option value="API_GATEWAY">API Gateway</option>
+                <option value="IPAAS">iPaaS</option>
+                <option value="EVENT_BUS">Event Bus</option>
+                <option value="DATA_WAREHOUSE">Warehouse</option>
             </select>
             <select id="filter-status" data-testid="filter-status" onchange="applyFilter()">{status_options}</select>
         </div>
@@ -2235,14 +2239,14 @@ async def ui_topology():
             <div class="filter-group">
                 <label>View:</label>
                 <select id="view-filter" onchange="changeView()">
-                    <option value="summary" selected>SORs (by Fabric)</option>
-                    <option value="fabrics">Grouped by Fabric</option>
-                    <option value="sources">SORs Only</option>
-                    <option value="all">All Assets (slow)</option>
-                    <option value="API_GATEWAY">Gateway Pipes</option>
-                    <option value="IPAAS">iPaaS Pipes</option>
-                    <option value="EVENT_BUS">Event Bus Pipes</option>
-                    <option value="DATA_WAREHOUSE">Warehouse Pipes</option>
+                    <option value="fabrics">Fabrics</option>
+                    <option value="sources">SORs</option>
+                    <option value="summary" selected>Fabrics + SORs</option>
+                    <option value="all">All Assets</option>
+                    <option value="API_GATEWAY">API Gateway</option>
+                    <option value="IPAAS">iPaaS</option>
+                    <option value="EVENT_BUS">Event Bus</option>
+                    <option value="DATA_WAREHOUSE">Warehouse</option>
                 </select>
             </div>
             <div class="filter-group">
