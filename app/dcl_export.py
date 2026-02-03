@@ -2,6 +2,7 @@
 AAM → DCL Export Module
 
 Provides pipe definitions grouped by fabric plane for DCL consumption.
+Uses REAL fabric plane data from AOD instead of hardcoded vendors.
 """
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
@@ -25,8 +26,8 @@ class DCLConnectionSchema(BaseModel):
 
 class DCLFabricPlane(BaseModel):
     """A fabric plane with its connections"""
-    plane_type: str  # ipaas, warehouse, gateway, eventbus
-    vendor: str  # MuleSoft, Snowflake, Kong, Kafka
+    plane_type: str  # ipaas, warehouse, api_gateway, event_bus
+    vendor: str  # Actual vendor from AOD: mulesoft, kong, snowflake, kafka, etc.
     connection_count: int
     connections: List[DCLConnectionSchema]
     health: str = "healthy"
@@ -39,9 +40,6 @@ class DCLExportResponse(BaseModel):
     fabric_planes: List[DCLFabricPlane]
     total_connections: int
     source: str = "aam"
-
-
-# Removed hardcoded vendor mappings - now uses real fabric plane data from AOD
 
 
 def _infer_fields_from_category(category: str) -> List[str]:
@@ -81,57 +79,81 @@ def _infer_fields_from_category(category: str) -> List[str]:
 
 def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
     """
-    Build DCL export from AAM candidates.
+    Build DCL export from AAM candidates using REAL fabric planes from AOD.
     
     Groups candidates by fabric plane and formats for DCL consumption.
     If aod_run_id is provided, filters to that run. Otherwise, uses all candidates.
     """
+    # Fetch real fabric planes from database
+    fabric_planes_db = get_fabric_planes(aod_run_id)
+    
     # Fetch candidates
     if aod_run_id:
         candidates = get_candidates_by_aod_run(aod_run_id)
     else:
-        # Get all candidates with status 'connected' or 'triaged' - no limit for DCL export
+        # Get all candidates with status 'connected' or 'triaged'
         all_candidates = list_candidates(limit=10000)
         candidates = [c for c in all_candidates if c.get("status") in ["connected", "triaged", "new"]]
     
-    # Group by fabric plane
-    planes_dict: Dict[FabricPlane, List[Dict]] = {
-        FabricPlane.IPAAS: [],
-        FabricPlane.DATA_WAREHOUSE: [],
-        FabricPlane.API_GATEWAY: [],
-        FabricPlane.EVENT_BUS: []
-    }
+    # Group candidates by fabric plane (using vendor matching)
+    planes_dict: Dict[str, Dict] = {}
+    for plane_db in fabric_planes_db:
+        plane_id = plane_db["plane_id"]
+        planes_dict[plane_id] = {
+            "plane": plane_db,
+            "candidates": []
+        }
     
+    # Assign candidates to their fabric plane
     for candidate in candidates:
-        # Parse connected_via_plane from candidate
-        plane_str = candidate.get("connected_via_plane")
+        # Try to match by connected_via_plane string
+        connected_via = candidate.get("connected_via_plane", "")
         
-        if plane_str:
-            try:
-                plane = FabricPlane(plane_str)
-            except ValueError:
-                # Default to IPAAS if unknown
-                plane = FabricPlane.IPAAS
-        else:
-            # Infer from category if not specified
+        # Extract vendor from "Connect via MuleSoft" format
+        matched_plane = None
+        if connected_via:
+            for plane_id, data in planes_dict.items():
+                plane = data["plane"]
+                if plane["vendor"].lower() in connected_via.lower():
+                    matched_plane = plane_id
+                    break
+        
+        # Fallback: infer from category
+        if not matched_plane and planes_dict:
             category = candidate.get("category", "").lower()
+            # Map category to plane type
             if "data" in category or "warehouse" in category:
-                plane = FabricPlane.DATA_WAREHOUSE
+                target_type = "warehouse"
             elif "event" in category or "stream" in category:
-                plane = FabricPlane.EVENT_BUS
+                target_type = "event_bus"
             elif "gateway" in category or "api" in category:
-                plane = FabricPlane.API_GATEWAY
+                target_type = "api_gateway"
             else:
-                plane = FabricPlane.IPAAS
+                target_type = "ipaas"
+            
+            # Find first plane of that type
+            for plane_id, data in planes_dict.items():
+                if data["plane"]["plane_type"] == target_type:
+                    matched_plane = plane_id
+                    break
+            
+            # Ultimate fallback: first available plane
+            if not matched_plane:
+                matched_plane = next(iter(planes_dict.keys()), None)
         
-        planes_dict[plane].append(candidate)
+        if matched_plane:
+            planes_dict[matched_plane]["candidates"].append(candidate)
     
-    # Build fabric plane objects
-    fabric_planes = []
+    # Build fabric plane objects for DCL
+    fabric_planes_output = []
     total_connections = 0
     
-    for plane, candidates_list in planes_dict.items():
+    for plane_id, data in planes_dict.items():
+        plane = data["plane"]
+        candidates_list = data["candidates"]
+        
         if not candidates_list:
+            # Skip empty fabric planes
             continue
         
         connections = []
@@ -153,19 +175,19 @@ def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
             connections.append(connection)
         
         fabric_plane_obj = DCLFabricPlane(
-            plane_type=_map_fabric_plane_to_dcl_type(plane),
-            vendor=_map_fabric_plane_to_vendor(plane),
+            plane_type=plane["plane_type"],
+            vendor=plane["vendor"],
             connection_count=len(connections),
             connections=connections,
-            health="healthy"
+            health="healthy" if plane["is_healthy"] else "degraded"
         )
-        fabric_planes.append(fabric_plane_obj)
+        fabric_planes_output.append(fabric_plane_obj)
         total_connections += len(connections)
     
     return DCLExportResponse(
         run_id=aod_run_id,
         timestamp=datetime.utcnow().isoformat() + "Z",
-        fabric_planes=fabric_planes,
+        fabric_planes=fabric_planes_output,
         total_connections=total_connections,
         source="aam"
     )
