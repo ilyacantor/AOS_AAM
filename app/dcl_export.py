@@ -7,8 +7,7 @@ from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
 from datetime import datetime
 
-from .db import get_candidates_by_aod_run, list_candidates
-from .models import FabricPlane
+from .db import get_candidates_by_aod_run, list_candidates, get_fabric_planes
 
 
 class DCLConnectionSchema(BaseModel):
@@ -42,26 +41,7 @@ class DCLExportResponse(BaseModel):
     source: str = "aam"
 
 
-def _map_fabric_plane_to_vendor(plane: FabricPlane) -> str:
-    """Map fabric plane enum to vendor display name"""
-    mapping = {
-        FabricPlane.IPAAS: "MuleSoft",
-        FabricPlane.DATA_WAREHOUSE: "Snowflake",
-        FabricPlane.API_GATEWAY: "Kong",
-        FabricPlane.EVENT_BUS: "Kafka"
-    }
-    return mapping.get(plane, "Unknown")
-
-
-def _map_fabric_plane_to_dcl_type(plane: FabricPlane) -> str:
-    """Map fabric plane to DCL source type"""
-    mapping = {
-        FabricPlane.IPAAS: "ipaas",
-        FabricPlane.DATA_WAREHOUSE: "warehouse",
-        FabricPlane.API_GATEWAY: "gateway",
-        FabricPlane.EVENT_BUS: "eventbus"
-    }
-    return mapping.get(plane, "unknown")
+# Removed hardcoded vendor mappings - now uses real fabric plane data from AOD
 
 
 def _infer_fields_from_category(category: str) -> List[str]:
