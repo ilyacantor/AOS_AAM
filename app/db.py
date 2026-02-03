@@ -325,7 +325,7 @@ def create_candidate(candidate_data: dict) -> dict:
 
     return {
         "candidate_id": candidate_id,
-        "status": "new",
+        "status": "connected",
         "execution_allowed": bool(execution_allowed),
         "action_type": candidate_data.get("action_type", "provision"),
         "created_at": now,
