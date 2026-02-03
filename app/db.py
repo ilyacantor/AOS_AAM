@@ -57,7 +57,7 @@ def init_db():
             known_endpoints TEXT,
             preferred_modality TEXT,
             priority_score REAL,
-            status TEXT DEFAULT 'new',
+            status TEXT DEFAULT 'connected',
             matched_pipe_id TEXT,
             match_score REAL,
             match_reason TEXT,
