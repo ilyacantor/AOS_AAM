@@ -2722,6 +2722,9 @@ async def receive_aod_handoff(request: AODHandoffRequest):
     - connected_via_plane: Fabric plane routing hint from AOD
     - fabric_planes: Detected fabric control planes
     """
+    # LOG INCOMING REQUEST
+    print(f"[AAM HANDOFF] run_id={request.run_id}, snapshot_name={request.snapshot_name}, candidates={len(request.candidates)}")
+    
     # Store fabric planes from AOD and build lookup map
     fabric_planes_stored = 0
     fabric_plane_map = {}  # vendor -> plane_id mapping
