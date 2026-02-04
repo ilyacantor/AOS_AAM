@@ -90,8 +90,8 @@ def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
     if aod_run_id:
         candidates = get_candidates_by_aod_run(aod_run_id)
     else:
-        # Get all candidates with status 'connected' or 'triaged' - no limit for DCL export
-        all_candidates = list_candidates(limit=10000)
+        # Get all candidates with status 'connected' or 'triaged'
+        all_candidates = list_candidates()
         candidates = [c for c in all_candidates if c.get("status") in ["connected", "triaged", "new"]]
     
     # Group by fabric plane

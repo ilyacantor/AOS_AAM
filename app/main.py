@@ -410,7 +410,7 @@ async def ui_pipes_list(
     source_systems = sorted(set(p.get("source_system", "") for p in all_pipes if p.get("source_system")))
     fabric_planes = ["IPAAS", "API_GATEWAY", "EVENT_BUS", "DATA_WAREHOUSE"]
     
-    all_drift = list_all_drift_events(limit=1000)
+    all_drift = list_all_drift_events()
     drift_by_pipe = {}
     for d in all_drift:
         pid = d.get("pipe_id")
@@ -1232,7 +1232,7 @@ async def ui_candidates_list(
     view: Optional[str] = Query("sors_fabrics", description="View filter: all, sors, fabrics, sors_fabrics, ipaas, warehouse, gateway, eventbus")
 ):
     """Candidates Screen"""
-    all_candidates = list_candidates(limit=10000)
+    all_candidates = list_candidates()
     
     # Define category groups
     sor_categories = {"crm", "erp", "hcm", "idp", "itsm"}
@@ -1487,7 +1487,7 @@ async def ui_candidates_list(
 
             // Fetch pipes
             try {{
-                const res = await fetch('/api/pipes?limit=100');
+                const res = await fetch('/api/pipes');
                 const data = await res.json();
                 const pipes = data.pipes || [];
 
@@ -3050,7 +3050,7 @@ async def export_pipes_for_dcl(aod_run_id: Optional[str] = Query(None, descripti
 
 
 @app.get("/api/drift", tags=["Drift"])
-async def get_all_drift_events(limit: int = Query(100, description="Maximum number of events")):
+async def get_all_drift_events(limit: Optional[int] = Query(None, description="Maximum number of events (optional)")):
     """List all drift events"""
     events = list_all_drift_events(limit=limit)
     return {"drift_events": events, "count": len(events)}
@@ -3148,7 +3148,7 @@ async def run_collector(collector: str, request: Optional[MockCollectorRequest] 
 @app.get("/api/collect/runs", tags=["Collectors"])
 async def get_collector_runs(
     collector_id: Optional[str] = Query(None, description="Filter by collector ID"),
-    limit: int = Query(100, description="Maximum number of runs")
+    limit: Optional[int] = Query(None, description="Maximum number of runs (optional)")
 ):
     """List collector runs"""
     runs = list_collector_runs(collector_id=collector_id, limit=limit)
@@ -4066,7 +4066,7 @@ async def get_topology_summary():
     from datetime import datetime
     
     pipes = list_pipes()
-    candidates = list_candidates(limit=10000)
+    candidates = list_candidates()
     
     # Build fabric plane nodes with counts
     fabric_counts = {"IPAAS": 0, "API_GATEWAY": 0, "EVENT_BUS": 0, "DATA_WAREHOUSE": 0}

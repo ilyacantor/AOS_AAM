@@ -366,22 +366,23 @@ def get_candidate(candidate_id: str) -> Optional[dict]:
     return None
 
 
-def list_candidates(status: Optional[str] = None, limit: int = 100) -> list[dict]:
+def list_candidates(status: Optional[str] = None, limit: Optional[int] = None) -> list[dict]:
     """List candidates with optional status filter, sorted by category"""
     conn = get_connection()
     cursor = conn.cursor()
     
     if status:
-        cursor.execute(
-            "SELECT * FROM connection_candidates WHERE status = ? ORDER BY category ASC, created_at DESC LIMIT ?",
-            (status, limit)
-        )
+        query = "SELECT * FROM connection_candidates WHERE status = ? ORDER BY category ASC, created_at DESC"
+        params = [status]
     else:
-        cursor.execute(
-            "SELECT * FROM connection_candidates ORDER BY category ASC, created_at DESC LIMIT ?",
-            (limit,)
-        )
+        query = "SELECT * FROM connection_candidates ORDER BY category ASC, created_at DESC"
+        params = []
     
+    if limit:
+        query += " LIMIT ?"
+        params.append(limit)
+    
+    cursor.execute(query, params)
     rows = cursor.fetchall()
     conn.close()
     
@@ -541,7 +542,7 @@ def get_pipe(pipe_id: str) -> Optional[dict]:
     return None
 
 
-def list_pipes(source_system: Optional[str] = None, fabric_plane: Optional[str] = None, limit: int = 100) -> list[dict]:
+def list_pipes(source_system: Optional[str] = None, fabric_plane: Optional[str] = None, limit: Optional[int] = None) -> list[dict]:
     """
     List pipes with optional filters.
     
@@ -563,30 +564,18 @@ def list_pipes(source_system: Optional[str] = None, fabric_plane: Optional[str] 
         conditions.append("fp.plane_type = ?")
         params.append(fabric_plane.lower())
     
-    if fabric_plane:
-        # Use JOIN when filtering by fabric_plane
-        where_clause = " WHERE " + " AND ".join(conditions) if conditions else ""
-        query = f"""
-            SELECT c.*, fp.plane_type as fabric_plane
-            FROM connection_candidates c
-            LEFT JOIN fabric_planes fp ON c.fabric_plane_id = fp.plane_id
-            {where_clause}
-            ORDER BY c.category, c.created_at DESC
-            LIMIT ?
-        """
-    else:
-        # Simple query without JOIN when no fabric filter
-        where_clause = " WHERE " + " AND ".join(conditions) if conditions else ""
-        query = f"""
-            SELECT c.*, fp.plane_type as fabric_plane
-            FROM connection_candidates c
-            LEFT JOIN fabric_planes fp ON c.fabric_plane_id = fp.plane_id
-            {where_clause}
-            ORDER BY c.category, c.created_at DESC
-            LIMIT ?
-        """
+    where_clause = " WHERE " + " AND ".join(conditions) if conditions else ""
+    query = f"""
+        SELECT c.*, fp.plane_type as fabric_plane
+        FROM connection_candidates c
+        LEFT JOIN fabric_planes fp ON c.fabric_plane_id = fp.plane_id
+        {where_clause}
+        ORDER BY c.category, c.created_at DESC
+    """
     
-    params.append(limit)
+    if limit:
+        query += f" LIMIT {limit}"
+    
     cursor.execute(query, params)
     
     rows = cursor.fetchall()
@@ -832,11 +821,14 @@ def get_drift_events(pipe_id: str) -> list[dict]:
     return [_row_to_drift_event(row) for row in rows]
 
 
-def list_all_drift_events(limit: int = 100) -> list[dict]:
+def list_all_drift_events(limit: Optional[int] = None) -> list[dict]:
     """List all drift events"""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM drift_events ORDER BY detected_at DESC LIMIT ?", (limit,))
+    query = "SELECT * FROM drift_events ORDER BY detected_at DESC"
+    if limit:
+        query += f" LIMIT {limit}"
+    cursor.execute(query)
     rows = cursor.fetchall()
     conn.close()
     
@@ -1027,21 +1019,23 @@ def get_collector_run(run_id: str) -> Optional[dict]:
     return None
 
 
-def list_collector_runs(collector_id: Optional[str] = None, limit: int = 100) -> list[dict]:
+def list_collector_runs(collector_id: Optional[str] = None, limit: Optional[int] = None) -> list[dict]:
     """List collector runs with optional collector filter"""
     conn = get_connection()
     cursor = conn.cursor()
     
     if collector_id:
-        cursor.execute(
-            "SELECT * FROM collector_runs WHERE collector_id = ? ORDER BY started_at DESC LIMIT ?",
-            (collector_id, limit)
-        )
+        query = "SELECT * FROM collector_runs WHERE collector_id = ? ORDER BY started_at DESC"
+        params = [collector_id]
     else:
-        cursor.execute(
-            "SELECT * FROM collector_runs ORDER BY started_at DESC LIMIT ?",
-            (limit,)
-        )
+        query = "SELECT * FROM collector_runs ORDER BY started_at DESC"
+        params = []
+    
+    if limit:
+        query += " LIMIT ?"
+        params.append(limit)
+    
+    cursor.execute(query, params)
     
     rows = cursor.fetchall()
     conn.close()
