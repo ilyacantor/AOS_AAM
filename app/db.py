@@ -112,6 +112,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS aod_handoff_log (
             handoff_id TEXT PRIMARY KEY,
             aod_run_id TEXT NOT NULL,
+            snapshot_name TEXT,
             candidates_received INTEGER NOT NULL,
             candidates_accepted INTEGER NOT NULL,
             candidates_rejected INTEGER NOT NULL,
@@ -278,6 +279,9 @@ def init_db():
         "Generates sample observations from JSON for testing",
         datetime.utcnow().isoformat()
     ))
+    
+    # Migrations - add new columns to existing tables
+    _add_column_if_not_exists(cursor, "aod_handoff_log", "snapshot_name", "TEXT")
     
     conn.commit()
     conn.close()
@@ -1848,13 +1852,14 @@ def create_handoff_log(handoff_data: dict) -> dict:
 
     cursor.execute("""
         INSERT INTO aod_handoff_log (
-            handoff_id, aod_run_id, candidates_received, candidates_accepted,
+            handoff_id, aod_run_id, snapshot_name, candidates_received, candidates_accepted,
             candidates_rejected, rejected_reasons, policy_version,
             handoff_timestamp, processed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         handoff_id,
         handoff_data["aod_run_id"],
+        handoff_data.get("snapshot_name"),
         handoff_data["candidates_received"],
         handoff_data["candidates_accepted"],
         handoff_data["candidates_rejected"],
@@ -1870,6 +1875,7 @@ def create_handoff_log(handoff_data: dict) -> dict:
     return {
         "handoff_id": handoff_id,
         "aod_run_id": handoff_data["aod_run_id"],
+        "snapshot_name": handoff_data.get("snapshot_name"),
         "processed_at": now
     }
 
@@ -1886,6 +1892,7 @@ def get_handoff_log(handoff_id: str) -> Optional[dict]:
         return {
             "handoff_id": row["handoff_id"],
             "aod_run_id": row["aod_run_id"],
+            "snapshot_name": row["snapshot_name"] if "snapshot_name" in row.keys() else None,
             "candidates_received": row["candidates_received"],
             "candidates_accepted": row["candidates_accepted"],
             "candidates_rejected": row["candidates_rejected"],
@@ -1897,28 +1904,30 @@ def get_handoff_log(handoff_id: str) -> Optional[dict]:
     return None
 
 
-def list_handoff_logs(aod_run_id: Optional[str] = None, limit: int = 50) -> list[dict]:
+def list_handoff_logs(aod_run_id: Optional[str] = None, limit: Optional[int] = None) -> list[dict]:
     """List handoff logs with optional run_id filter"""
     conn = get_connection()
     cursor = conn.cursor()
 
     if aod_run_id:
-        cursor.execute(
-            "SELECT * FROM aod_handoff_log WHERE aod_run_id = ? ORDER BY processed_at DESC LIMIT ?",
-            (aod_run_id, limit)
-        )
+        query = "SELECT * FROM aod_handoff_log WHERE aod_run_id = ? ORDER BY processed_at DESC"
+        params = [aod_run_id]
     else:
-        cursor.execute(
-            "SELECT * FROM aod_handoff_log ORDER BY processed_at DESC LIMIT ?",
-            (limit,)
-        )
-
+        query = "SELECT * FROM aod_handoff_log ORDER BY processed_at DESC"
+        params = []
+    
+    if limit:
+        query += " LIMIT ?"
+        params.append(limit)
+    
+    cursor.execute(query, params)
     rows = cursor.fetchall()
     conn.close()
 
     return [{
         "handoff_id": row["handoff_id"],
         "aod_run_id": row["aod_run_id"],
+        "snapshot_name": row["snapshot_name"] if "snapshot_name" in row.keys() else None,
         "candidates_received": row["candidates_received"],
         "candidates_accepted": row["candidates_accepted"],
         "candidates_rejected": row["candidates_rejected"],
@@ -2223,7 +2232,7 @@ def get_latest_aod_run() -> Optional[dict]:
     cursor = conn.cursor()
     
     cursor.execute("""
-        SELECT aod_run_id, candidates_received, candidates_accepted, handoff_timestamp
+        SELECT aod_run_id, snapshot_name, candidates_received, candidates_accepted, handoff_timestamp
         FROM aod_handoff_log
         ORDER BY handoff_timestamp DESC
         LIMIT 1
@@ -2234,8 +2243,9 @@ def get_latest_aod_run() -> Optional[dict]:
     if row:
         return {
             "aod_run_id": row[0],
-            "candidates_received": row[1],
-            "candidates_accepted": row[2],
-            "handoff_timestamp": row[3]
+            "snapshot_name": row[1],
+            "candidates_received": row[2],
+            "candidates_accepted": row[3],
+            "handoff_timestamp": row[4]
         }
     return None

@@ -375,13 +375,17 @@ def aod_run_banner() -> str:
         return ""
     
     aod_run_id = latest_run["aod_run_id"]
+    snapshot_name = latest_run.get("snapshot_name")
     candidates = latest_run["candidates_accepted"]
     timestamp = latest_run["handoff_timestamp"]
+    
+    # Show snapshot name if available, otherwise show run ID
+    display_name = f'<strong style="color: #f0abfc;">{snapshot_name}</strong> <span style="color: #64748b; font-size: 0.8rem;">({aod_run_id})</span>' if snapshot_name else f'<span style="font-family: monospace;">{aod_run_id}</span>'
     
     return f"""
 <div style="background: rgba(34, 211, 238, 0.1); border: 1px solid rgba(34, 211, 238, 0.3); border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
     <div>
-        <strong style="color: #22d3ee;">AOD Run:</strong> <span style="font-family: monospace;">{aod_run_id}</span>
+        <strong style="color: #22d3ee;">AOD Run:</strong> {display_name}
         <span style="margin-left: 20px; color: #94a3b8;">|</span>
         <span style="margin-left: 20px;"><strong>{candidates}</strong> pipes</span>
         <span style="margin-left: 20px; color: #94a3b8; font-size: 0.85rem;">{timestamp[:19] if timestamp else 'N/A'}</span>
@@ -2801,6 +2805,7 @@ async def receive_aod_handoff(request: AODHandoffRequest):
     # Log the handoff
     handoff_log = create_handoff_log({
         "aod_run_id": request.run_id,
+        "snapshot_name": request.snapshot_name,
         "candidates_received": len(request.candidates),
         "candidates_accepted": len(accepted),
         "candidates_rejected": len(rejected),

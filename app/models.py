@@ -184,6 +184,7 @@ class FabricPlaneSummary(BaseModel):
 class AODHandoffRequest(BaseModel):
     """Batch handoff request from AOD"""
     run_id: str = Field(..., description="AOD discovery run ID")
+    snapshot_name: Optional[str] = Field(None, description="Human-readable snapshot name (e.g., Networks-5OS6)")
     candidates: list[AODHandoffCandidate] = Field(..., description="Candidates to hand off")
     fabric_planes: list[FabricPlaneSummary] = Field(default_factory=list, description="Detected fabric planes")
     policy_version: Optional[str] = Field(None, description="Version of governance policy applied")
