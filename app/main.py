@@ -54,7 +54,8 @@ from .db import (
     list_policy_manifests,
     get_candidates_by_aod_run,
     get_aod_reconciliation,
-    get_latest_aod_run
+    get_latest_aod_run,
+    get_canonical_stats
 )
 from .collectors.mock import run_mock_collector
 from .inference import infer_pipes_from_observations
@@ -4065,16 +4066,19 @@ async def get_topology_summary():
                 "type": "sor_in_plane"
             })
     
+    # Get canonical stats from single source of truth
+    canonical_stats = get_canonical_stats()
+
     return {
         "nodes": nodes,
         "edges": edges,
         "stats": {
+            # Canonical KPIs from single source of truth
+            **canonical_stats,
+            # Topology-specific stats
             "total_nodes": len(nodes),
             "total_edges": len(edges),
-            "fabric_planes": 4,
-            "source_systems": len(sorted_sors),
-            "total_pipes": len(pipes),
-            "total_candidates": len(candidates)
+            "source_systems": len(sorted_sors)
         },
         "generated_at": datetime.utcnow().isoformat()
     }
