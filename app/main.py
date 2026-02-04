@@ -3986,38 +3986,55 @@ async def get_topology_summary():
             fabric_counts[plane] += 1
     
     # Count candidates by category mapped to planes
-    category_to_plane = {
-        "iPaaS": "IPAAS", "ipaas": "IPAAS",
-        "API Gateway": "API_GATEWAY", "api_gateway": "API_GATEWAY",
-        "Event Bus": "EVENT_BUS", "event_bus": "EVENT_BUS",
-        "Data Warehouse": "DATA_WAREHOUSE", "data_warehouse": "DATA_WAREHOUSE", "data": "DATA_WAREHOUSE"
-    }
+    # Note: AOD categories are business categories (CRM, ERP, etc.)
+    # We need to use fabric_plane_id or connected_via_plane from the candidate
     candidate_counts = {"IPAAS": 0, "API_GATEWAY": 0, "EVENT_BUS": 0, "DATA_WAREHOUSE": 0, "OTHER": 0}
     for c in candidates:
-        cat = c.get("category", "other")
-        plane = category_to_plane.get(cat, "OTHER")
+        # Use fabric_plane_id to determine plane (set during AOD handoff)
+        fabric_plane_id = c.get("fabric_plane_id", "")
+        connected_via = c.get("connected_via_plane", "")
+
+        # Extract plane type from fabric_plane_id (format: "PLANE_TYPE:vendor")
+        if fabric_plane_id and ":" in fabric_plane_id:
+            plane = fabric_plane_id.split(":")[0].upper()
+        elif connected_via:
+            plane = connected_via.upper()
+        else:
+            plane = "OTHER"
+
         if plane in candidate_counts:
             candidate_counts[plane] += 1
         else:
             candidate_counts["OTHER"] += 1
-    
+
     # Build SOR nodes from source systems
     sor_systems = {}
     for p in pipes:
         source = p.get("source_system")
         if source:
             if source not in sor_systems:
-                sor_systems[source] = {"pipe_count": 0, "planes": set()}
+                sor_systems[source] = {"pipe_count": 0, "candidate_count": 0, "planes": set()}
             sor_systems[source]["pipe_count"] += 1
             sor_systems[source]["planes"].add(p.get("fabric_plane", "API_GATEWAY"))
-    
+
     for c in candidates:
         vendor = c.get("vendor_name")
         if vendor:
             if vendor not in sor_systems:
-                sor_systems[vendor] = {"pipe_count": 0, "planes": set(), "is_candidate": True}
+                sor_systems[vendor] = {"pipe_count": 0, "candidate_count": 0, "planes": set(), "is_candidate": True}
+            sor_systems[vendor]["candidate_count"] = sor_systems[vendor].get("candidate_count", 0) + 1
             if "is_candidate" not in sor_systems[vendor]:
                 sor_systems[vendor]["is_candidate"] = True
+
+            # Add plane connection for candidates using fabric_plane_id or connected_via_plane
+            fabric_plane_id = c.get("fabric_plane_id", "")
+            connected_via = c.get("connected_via_plane", "")
+
+            if fabric_plane_id and ":" in fabric_plane_id:
+                plane = fabric_plane_id.split(":")[0].upper()
+                sor_systems[vendor]["planes"].add(plane)
+            elif connected_via:
+                sor_systems[vendor]["planes"].add(connected_via.upper())
     
     # Create nodes
     nodes = []
@@ -4044,16 +4061,31 @@ async def get_topology_summary():
             }
         })
     
-    # SOR nodes (top 20 by pipe count)
-    sorted_sors = sorted(sor_systems.items(), key=lambda x: x[1]["pipe_count"], reverse=True)[:20]
+    # SOR nodes (top 20 by total count: pipes + candidates)
+    sorted_sors = sorted(
+        sor_systems.items(),
+        key=lambda x: x[1]["pipe_count"] + x[1].get("candidate_count", 0),
+        reverse=True
+    )[:20]
     for sor_name, sor_data in sorted_sors:
+        pipe_count = sor_data["pipe_count"]
+        cand_count = sor_data.get("candidate_count", 0)
+        # Show both counts in label
+        if pipe_count > 0 and cand_count > 0:
+            label = f"{sor_name}\n({pipe_count} pipes, {cand_count} candidates)"
+        elif cand_count > 0:
+            label = f"{sor_name}\n({cand_count} candidates)"
+        else:
+            label = f"{sor_name}\n({pipe_count} pipes)"
+
         nodes.append({
             "id": f"sor:{sor_name}",
-            "label": f"{sor_name}\n({sor_data['pipe_count']} pipes)",
+            "label": label,
             "type": "source_system",
             "metadata": {
                 "name": sor_name,
-                "pipe_count": sor_data["pipe_count"],
+                "pipe_count": pipe_count,
+                "candidate_count": cand_count,
                 "is_candidate_source": sor_data.get("is_candidate", False)
             }
         })
