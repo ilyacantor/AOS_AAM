@@ -841,7 +841,6 @@ async def ui_pipes_list(
                 indicator.className = 'source-indicator mock';
                 indicator.textContent = 'Creates sample pipes directly';
                 mockCollectorBtn.style.display = 'inline-block';
-                aodLoadBtn.style.display = 'none';
                 aodNote.style.display = 'none';
             }} else {{
                 aodBtn.classList.add('active');
@@ -849,7 +848,6 @@ async def ui_pipes_list(
                 indicator.className = 'source-indicator aod';
                 indicator.textContent = 'Creates candidates for triage';
                 mockCollectorBtn.style.display = 'none';
-                aodLoadBtn.style.display = 'inline-block';
                 aodNote.style.display = 'block';
             }}
         }}

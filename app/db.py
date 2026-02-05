@@ -282,6 +282,7 @@ def init_db():
     
     # Migrations - add new columns to existing tables
     _add_column_if_not_exists(cursor, "aod_handoff_log", "snapshot_name", "TEXT")
+    _add_column_if_not_exists(cursor, "declared_pipes", "drift_status", "TEXT DEFAULT 'NONE'")
     
     conn.commit()
     conn.close()
