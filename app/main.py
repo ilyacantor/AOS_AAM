@@ -55,7 +55,8 @@ from .db import (
     get_candidates_by_aod_run,
     get_aod_reconciliation,
     get_latest_aod_run,
-    get_canonical_stats
+    get_canonical_stats,
+    store_fabric_plane
 )
 from .collectors.mock import run_mock_collector
 from .inference import infer_pipes_from_observations
@@ -2639,6 +2640,43 @@ async def receive_aod_handoff(request: AODHandoffRequest):
             except Exception as e:
                 print(f"[AAM] Failed to store fabric plane {plane.vendor}: {e}")
     
+    # Auto-create fabric planes from SOR candidates if none provided
+    sor_categories = {'crm', 'erp', 'hcm', 'idp', 'itsm', 'saas', 'hr', 'finance', 'cmdb', 'identity'}
+    if not request.fabric_planes:
+        seen_vendors = set()
+        for candidate in request.candidates:
+            cat_lower = candidate.category.lower() if candidate.category else ""
+            if cat_lower in sor_categories and candidate.vendor_name:
+                vendor_key = candidate.vendor_name.lower()
+                if vendor_key not in seen_vendors:
+                    seen_vendors.add(vendor_key)
+                    # Create fabric plane from SOR candidate
+                    plane_type = "API_GATEWAY"  # SORs typically expose APIs
+                    if cat_lower in {'erp', 'finance'}:
+                        plane_type = "DATA_WAREHOUSE"
+                    elif cat_lower in {'crm', 'saas', 'hr', 'hcm'}:
+                        plane_type = "API_GATEWAY"
+                    elif cat_lower in {'idp', 'identity'}:
+                        plane_type = "API_GATEWAY"
+                    elif cat_lower in {'itsm', 'cmdb'}:
+                        plane_type = "IPAAS"
+                    
+                    plane_dict = {
+                        "plane_type": plane_type,
+                        "vendor": candidate.vendor_name,
+                        "display_name": f"{candidate.asset_key} ({candidate.category})",
+                        "domain": cat_lower,
+                        "managed_asset_count": 1
+                    }
+                    try:
+                        result = store_fabric_plane(plane_dict, request.run_id)
+                        plane_id = result["plane_id"]
+                        fabric_plane_map[vendor_key] = plane_id
+                        fabric_planes_stored += 1
+                        print(f"[AAM] Auto-created fabric plane for SOR: {candidate.vendor_name} ({plane_type})")
+                    except Exception as e:
+                        print(f"[AAM] Failed to auto-create fabric plane for {candidate.vendor_name}: {e}")
+    
     accepted = []
     rejected = []
 
@@ -2756,6 +2794,59 @@ async def get_current_aod_policy():
     if not policy:
         return {"message": "No active policy manifest", "policy": None}
     return {"policy": policy}
+
+
+@app.post("/api/fabric-planes/backfill", tags=["Fabric Planes"])
+async def backfill_fabric_planes_from_candidates():
+    """
+    Backfill fabric planes from existing SOR candidates.
+    Creates fabric plane entries for each unique vendor in SOR categories.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    sor_categories = ('crm', 'erp', 'hcm', 'idp', 'itsm', 'saas', 'hr', 'finance', 'cmdb', 'identity')
+    placeholders = ','.join('?' * len(sor_categories))
+    
+    cursor.execute(f"""
+        SELECT DISTINCT vendor_name, category, asset_key, aod_run_id
+        FROM connection_candidates 
+        WHERE LOWER(category) IN ({placeholders})
+        AND vendor_name IS NOT NULL AND vendor_name != ''
+    """, sor_categories)
+    
+    candidates = cursor.fetchall()
+    conn.close()
+    
+    created = 0
+    for row in candidates:
+        vendor_name, category, asset_key, aod_run_id = row
+        cat_lower = category.lower() if category else ""
+        
+        plane_type = "API_GATEWAY"
+        if cat_lower in {'erp', 'finance'}:
+            plane_type = "DATA_WAREHOUSE"
+        elif cat_lower in {'itsm', 'cmdb'}:
+            plane_type = "IPAAS"
+        
+        plane_dict = {
+            "plane_type": plane_type,
+            "vendor": vendor_name,
+            "display_name": f"{asset_key} ({category})",
+            "domain": cat_lower,
+            "managed_asset_count": 1
+        }
+        try:
+            store_fabric_plane(plane_dict, aod_run_id)
+            created += 1
+            print(f"[AAM] Backfilled fabric plane: {vendor_name} ({plane_type})")
+        except Exception as e:
+            print(f"[AAM] Skip duplicate fabric plane {vendor_name}: {e}")
+    
+    return {
+        "message": f"Backfilled {created} fabric planes from SOR candidates",
+        "created": created
+    }
 
 
 @app.get("/api/handoff/aod/policy/history", tags=["AOD Handoff"])
