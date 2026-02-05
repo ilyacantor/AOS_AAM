@@ -4097,12 +4097,15 @@ async def get_topology_summary():
             candidate_counts["OTHER"] += 1
 
     # Build SOR nodes from source systems
+    # SOR categories per canonical definition
+    sor_categories = {"crm", "erp", "hcm", "idp", "itsm"}
+    
     sor_systems = {}
     for p in pipes:
         source = p.get("source_system")
         if source:
             if source not in sor_systems:
-                sor_systems[source] = {"pipe_count": 0, "candidate_count": 0, "planes": set()}
+                sor_systems[source] = {"pipe_count": 0, "candidate_count": 0, "planes": set(), "is_sor": False, "category": None}
             sor_systems[source]["pipe_count"] += 1
             sor_systems[source]["planes"].add(p.get("fabric_plane", "API_GATEWAY"))
 
@@ -4110,10 +4113,16 @@ async def get_topology_summary():
         vendor = c.get("vendor_name")
         if vendor:
             if vendor not in sor_systems:
-                sor_systems[vendor] = {"pipe_count": 0, "candidate_count": 0, "planes": set(), "is_candidate": True}
+                sor_systems[vendor] = {"pipe_count": 0, "candidate_count": 0, "planes": set(), "is_candidate": True, "is_sor": False, "category": None}
             sor_systems[vendor]["candidate_count"] = sor_systems[vendor].get("candidate_count", 0) + 1
             if "is_candidate" not in sor_systems[vendor]:
                 sor_systems[vendor]["is_candidate"] = True
+            
+            # Mark as SOR if category matches
+            category = c.get("category", "").lower()
+            if category in sor_categories:
+                sor_systems[vendor]["is_sor"] = True
+                sor_systems[vendor]["category"] = category
 
             # Add plane connection for candidates using fabric_plane_id or connected_via_plane
             fabric_plane_id = c.get("fabric_plane_id", "")
@@ -4150,12 +4159,18 @@ async def get_topology_summary():
             }
         })
     
-    # SOR nodes (top 20 by total count: pipes + candidates)
-    sorted_sors = sorted(
-        sor_systems.items(),
-        key=lambda x: x[1]["pipe_count"] + x[1].get("candidate_count", 0),
-        reverse=True
-    )[:20]
+    # SOR nodes: Prioritize actual SORs (CRM, ERP, etc.), then fill with top others
+    # First, get all true SORs (those with SOR categories)
+    true_sors = [(name, data) for name, data in sor_systems.items() if data.get("is_sor")]
+    true_sors = sorted(true_sors, key=lambda x: x[1]["pipe_count"] + x[1].get("candidate_count", 0), reverse=True)
+    
+    # Then get remaining non-SOR systems
+    other_systems = [(name, data) for name, data in sor_systems.items() if not data.get("is_sor")]
+    other_systems = sorted(other_systems, key=lambda x: x[1]["pipe_count"] + x[1].get("candidate_count", 0), reverse=True)
+    
+    # Combine: all true SORs + top remaining to reach 20 total
+    remaining_slots = max(0, 20 - len(true_sors))
+    sorted_sors = true_sors + other_systems[:remaining_slots]
     for sor_name, sor_data in sorted_sors:
         pipe_count = sor_data["pipe_count"]
         cand_count = sor_data.get("candidate_count", 0)
@@ -4175,7 +4190,9 @@ async def get_topology_summary():
                 "name": sor_name,
                 "pipe_count": pipe_count,
                 "candidate_count": cand_count,
-                "is_candidate_source": sor_data.get("is_candidate", False)
+                "is_candidate_source": sor_data.get("is_candidate", False),
+                "is_sor": sor_data.get("is_sor", False),
+                "category": sor_data.get("category")
             }
         })
         # Connect SOR to its planes
