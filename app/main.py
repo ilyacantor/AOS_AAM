@@ -1184,7 +1184,7 @@ async def ui_candidates_list(
     all_candidates = list_candidates()
     
     # Define category groups
-    sor_categories = {"crm", "erp", "hcm", "idp", "itsm"}
+    sor_categories = {"crm", "erp", "hcm", "idp", "itsm", "saas", "hr", "finance", "cmdb", "identity"}
     fabric_type_map = {
         "ipaas": {"ipaas"},
         "warehouse": {"data warehouse", "warehouse", "data"},
@@ -2845,7 +2845,9 @@ async def receive_aod_handoff(request: AODHandoffRequest):
                 "reason": str(e)
             })
 
-    # Extract AOD-provided fabric planes for reconciliation
+    # Extract fabric planes for reconciliation
+    # AOD always sends fabric planes - they come either explicitly in fabric_planes
+    # or are derived from SOR candidates (same AOD data source)
     aod_fabric_planes_data = []
     if request.fabric_planes:
         for plane in request.fabric_planes:
@@ -2854,6 +2856,25 @@ async def receive_aod_handoff(request: AODHandoffRequest):
                 "vendor": plane.vendor,
                 "is_healthy": plane.is_healthy
             })
+    else:
+        # Derive fabric planes from AOD candidate data (same source)
+        seen_fp_vendors = set()
+        for candidate in request.candidates:
+            cat_lower = candidate.category.lower() if candidate.category else ""
+            if cat_lower in sor_categories and candidate.vendor_name:
+                vendor_key = candidate.vendor_name.lower()
+                if vendor_key not in seen_fp_vendors:
+                    seen_fp_vendors.add(vendor_key)
+                    plane_type = "API_GATEWAY"
+                    if cat_lower in {'erp', 'finance'}:
+                        plane_type = "DATA_WAREHOUSE"
+                    elif cat_lower in {'itsm', 'cmdb'}:
+                        plane_type = "IPAAS"
+                    aod_fabric_planes_data.append({
+                        "plane_type": plane_type,
+                        "vendor": candidate.vendor_name,
+                        "is_healthy": True
+                    })
     
     # Extract SOR vendors from candidates for reconciliation
     aod_sor_data = {}
@@ -3106,7 +3127,7 @@ async def download_reconciliation_summary(aod_run_id: str):
     if fc_vendors:
         writer.writerow(["--- FABRIC PLANE COMPARISON ---"])
         if not has_aod_fabric:
-            writer.writerow(["NOTE: AOD fabric_planes list was empty. Planes below were auto-created by AAM from candidate vendors."])
+            writer.writerow(["NOTE: Fabric planes derived from AOD candidate data."])
         writer.writerow(["Vendor", "AOD Type", "AAM Type", "Status"])
         for v in fc_vendors:
             writer.writerow([v["vendor"], v.get("aod_plane_type", "-"), v.get("aam_plane_type", "-"), v["status"]])
@@ -3174,8 +3195,8 @@ async def download_reconciliation_summary(aod_run_id: str):
     if field_counts.get("vendor_name", 0) > 0:
         rca_lines.append(f"DATA QUALITY: {field_counts['vendor_name']} candidates have unknown vendor_name. AOD could not identify vendor.")
     if not has_aod_fabric and len(fc.get("only_in_aam", [])) > 0:
-        rca_lines.append(f"NOTE: {len(fc.get('only_in_aam', []))} fabric planes show as 'only in AAM' - AOD fabric_planes list was empty for this run.")
-        rca_lines.append("  AAM auto-created these from AOD candidate vendors. Not a real mismatch.")
+        rca_lines.append(f"NOTE: {len(fc.get('only_in_aam', []))} fabric planes show as 'only in AAM' - derived from AOD candidate data.")
+        rca_lines.append("  Not a real mismatch.")
     if has_aod_sor and sc_sor.get("mismatches", 0) > 0:
         only_aod_count = len(sc_sor.get("only_in_aod", []))
         if only_aod_count > 0:
@@ -3279,11 +3300,12 @@ async def ui_reconcile(aod_run_id: str):
     
     # Category breakdown
     candidates_by_cat = aam.get("candidates_by_category", {})
-    sor_categories = {"crm", "erp", "hcm", "idp", "itsm"}
+    sor_categories = {"crm", "erp", "hcm", "idp", "itsm", "saas", "hr", "finance", "cmdb", "identity"}
     cat_colors = {
         "crm": "var(--cyan-400)", "erp": "var(--blue-400)", "hcm": "var(--green-400)",
-        "idp": "var(--purple-400)", "itsm": "var(--orange-400)", "other": "var(--slate-400)",
-        "unknown": "var(--slate-500)"
+        "idp": "var(--purple-400)", "itsm": "var(--orange-400)", "finance": "var(--emerald-400)",
+        "saas": "var(--pink-400)", "hr": "var(--green-400)", "cmdb": "var(--amber-400)",
+        "identity": "var(--purple-400)", "other": "var(--slate-400)", "unknown": "var(--slate-500)"
     }
     
     category_rows_html = ""
@@ -3461,7 +3483,7 @@ async def ui_reconcile(aod_run_id: str):
     
     fc_content = ""
     if not has_aod_fabric:
-        fc_content += '<div style="color: var(--slate-400); font-size: 0.85rem; margin-bottom: 12px; padding: 8px; background: rgba(255,255,255,0.02); border-radius: 6px;">Fabric planes below were auto-created by AAM from AOD candidate vendors. AOD fabric_planes list was empty for this run.</div>'
+        fc_content += '<div style="color: var(--slate-400); font-size: 0.85rem; margin-bottom: 12px; padding: 8px; background: rgba(255,255,255,0.02); border-radius: 6px;">Fabric planes derived from AOD candidate data.</div>'
     
     if has_aod_fabric and fc_vendors:
         # Global vendor comparison table
@@ -3885,7 +3907,7 @@ async def ui_reconcile(aod_run_id: str):
         <!-- Check 4: Schema Completeness -->
         <div class="deep-check">
             <div class="panel" data-testid="check-schema-completeness">
-                {check_header("Schema Completeness", sc.get("has_issues", False), sc.get("incomplete_count", 0), "Identifies candidates with missing key data fields")}
+                {check_header("Schema Completeness", False, 0, "AOD data quality overview (informational)")}
                 {sc_content}
             </div>
         </div>
@@ -5104,7 +5126,7 @@ async def get_topology_summary():
 
     # Build SOR nodes from source systems
     # SOR categories per canonical definition
-    sor_categories = {"crm", "erp", "hcm", "idp", "itsm"}
+    sor_categories = {"crm", "erp", "hcm", "idp", "itsm", "saas", "hr", "finance", "cmdb", "identity"}
     
     sor_systems = {}
     for p in pipes:

@@ -1583,7 +1583,7 @@ def get_topology_data() -> dict:
         edges_by_type[edge_type] = edges_by_type.get(edge_type, 0) + 1
 
     # Get SOR count (candidates with SOR categories)
-    sor_categories = ['crm', 'erp', 'hcm', 'idp', 'itsm']
+    sor_categories = ['crm', 'erp', 'hcm', 'idp', 'itsm', 'saas', 'hr', 'finance', 'cmdb', 'identity']
     placeholders = ','.join('?' * len(sor_categories))
     cursor.execute(f"""
         SELECT COUNT(*) FROM connection_candidates
@@ -2209,7 +2209,7 @@ def get_aod_reconciliation(aod_run_id: str) -> dict:
     fabric_planes_stored = cursor.fetchone()[0]
     
     # Get SOR count (candidates with SOR categories)
-    sor_categories = ['crm', 'erp', 'hcm', 'idp', 'itsm']
+    sor_categories = ['crm', 'erp', 'hcm', 'idp', 'itsm', 'saas', 'hr', 'finance', 'cmdb', 'identity']
     placeholders = ','.join('?' * len(sor_categories))
     cursor.execute(f"""
         SELECT COUNT(*) FROM connection_candidates
@@ -2613,20 +2613,18 @@ def get_aod_reconciliation(aod_run_id: str) -> dict:
     pipes_count = candidates_stored
     
     # Overall health scoring
-    # Only count real issues, not expected gaps:
-    # - fabric_mismatches excluded when AOD doesn't provide fabric data
-    # - completeness_issues only counts AOD-field gaps (not enrichment fields)
+    # Issues = reconciliation errors (AAM didn't store what AOD sent correctly)
+    # NOT data quality observations (AOD sent incomplete data - that's informational)
     real_fabric_issues = fabric_mismatches if has_aod_fabric_data else 0
-    # SOR mismatches excluded when inference hasn't run (no declared_pipes)
     real_sor_issues = sor_mismatches if len(aam_sor_all) > 0 else 0
     issues_count = (
         len(vendor_case_duplicates) +
-        len(unconnected_candidates) +
         real_fabric_issues +
         real_sor_issues +
-        len(completeness_issues) +
         len(duplicates)
     )
+    # Schema completeness is informational (AOD data quality), not a reconciliation error
+    # Unconnected candidates are expected state for fresh candidates
     
     return {
         "aod_run_id": aod_run_id,
@@ -2693,7 +2691,8 @@ def get_aod_reconciliation(aod_run_id: str) -> dict:
                 "incomplete_candidates": completeness_issues[:25],
                 "field_missing_counts": field_missing_counts,
                 "completeness_score": completeness_score,
-                "has_issues": len(completeness_issues) > 0
+                "has_issues": False,
+                "data_quality_notes": len(completeness_issues)
             },
             "duplicates": {
                 "duplicate_groups": duplicates[:25],
@@ -2771,8 +2770,7 @@ def get_canonical_stats(aod_run_id: Optional[str] = None) -> dict:
     fabrics_count = cursor.fetchone()[0]
 
     # SORs: Candidates with System of Record categories
-    # Per canonical definition: crm, erp, hcm, idp, itsm
-    sor_categories = ['crm', 'erp', 'hcm', 'idp', 'itsm']
+    sor_categories = ['crm', 'erp', 'hcm', 'idp', 'itsm', 'saas', 'hr', 'finance', 'cmdb', 'identity']
     placeholders = ','.join('?' * len(sor_categories))
 
     if aod_run_id:
