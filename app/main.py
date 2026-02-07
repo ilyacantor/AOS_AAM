@@ -3106,7 +3106,7 @@ async def download_reconciliation_summary(aod_run_id: str):
     if fc_vendors:
         writer.writerow(["--- FABRIC PLANE COMPARISON ---"])
         if not has_aod_fabric:
-            writer.writerow(["NOTE: AOD did not send fabric_planes. Planes below were auto-created by AAM."])
+            writer.writerow(["NOTE: AOD fabric_planes list was empty. Planes below were auto-created by AAM from candidate vendors."])
         writer.writerow(["Vendor", "AOD Type", "AAM Type", "Status"])
         for v in fc_vendors:
             writer.writerow([v["vendor"], v.get("aod_plane_type", "-"), v.get("aam_plane_type", "-"), v["status"]])
@@ -3174,8 +3174,8 @@ async def download_reconciliation_summary(aod_run_id: str):
     if field_counts.get("vendor_name", 0) > 0:
         rca_lines.append(f"DATA QUALITY: {field_counts['vendor_name']} candidates have unknown vendor_name. AOD could not identify vendor.")
     if not has_aod_fabric and len(fc.get("only_in_aam", [])) > 0:
-        rca_lines.append(f"EXPECTED: {len(fc.get('only_in_aam', []))} fabric planes show as 'only in AAM' because AOD did not send fabric_planes data.")
-        rca_lines.append("  AAM auto-creates fabric planes from SOR vendor names. Not a real mismatch.")
+        rca_lines.append(f"NOTE: {len(fc.get('only_in_aam', []))} fabric planes show as 'only in AAM' - AOD fabric_planes list was empty for this run.")
+        rca_lines.append("  AAM auto-created these from AOD candidate vendors. Not a real mismatch.")
     if has_aod_sor and sc_sor.get("mismatches", 0) > 0:
         only_aod_count = len(sc_sor.get("only_in_aod", []))
         if only_aod_count > 0:
@@ -3461,7 +3461,7 @@ async def ui_reconcile(aod_run_id: str):
     
     fc_content = ""
     if not has_aod_fabric:
-        fc_content += '<div style="color: var(--slate-400); font-size: 0.85rem; margin-bottom: 12px; padding: 8px; background: rgba(255,255,255,0.02); border-radius: 6px;">AOD did not provide explicit fabric planes for this run. Re-send from AOD with fabric_planes to enable side-by-side comparison.</div>'
+        fc_content += '<div style="color: var(--slate-400); font-size: 0.85rem; margin-bottom: 12px; padding: 8px; background: rgba(255,255,255,0.02); border-radius: 6px;">Fabric planes below were auto-created by AAM from AOD candidate vendors. AOD fabric_planes list was empty for this run.</div>'
     
     if has_aod_fabric and fc_vendors:
         # Global vendor comparison table
