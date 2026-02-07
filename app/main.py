@@ -386,21 +386,17 @@ async function fetchAodData() {
     btn.disabled = true;
     btn.style.opacity = '0.5';
     try {
-        await fetch('/api/handoff/aod/reset', { method: 'POST' });
-        var res = await fetch('/api/collect/mock/run', { method: 'POST' });
+        var res = await fetch('/api/handoff/aod/fetch', { method: 'POST' });
         var data = await res.json();
         if (res.ok) {
-            var res2 = await fetch('/api/aam/infer', { method: 'POST' });
-            await res2.json();
             window.location.reload();
         } else {
-            btn.textContent = 'Fetch AOD Data';
-            btn.disabled = false;
+            btn.textContent = data.detail || 'No AOD data stored';
             btn.style.opacity = '1';
             _fetchRunning = false;
         }
     } catch(e) {
-        btn.textContent = 'Fetch AOD Data';
+        btn.textContent = 'Fetch Failed';
         btn.disabled = false;
         btn.style.opacity = '1';
         _fetchRunning = false;
@@ -2674,22 +2670,44 @@ async def reset_aod_data():
 
 
 @app.post("/api/handoff/aod/fetch", tags=["AOD Handoff"])
-async def fetch_aod_data(request: AODHandoffRequest):
+async def fetch_aod_data():
     """
-    Fetch AOD data with full reset of prior state.
+    Reset all AAM state, then replay the last AOD handoff data.
+    """
+    payload = _load_aod_payload()
+    if not payload:
+        raise HTTPException(status_code=404, detail="No AOD payload stored. Receive a handoff first.")
     
-    Resets ALL existing data first, then processes the new handoff.
-    This ensures AAM state reflects only the current AOD run
-    with no stale data from prior runs.
-    """
     reset_result = reset_aod_state()
-    print(f"[AAM FETCH] Reset complete: {reset_result['total_rows_deleted']} rows cleared across {len(reset_result['tables_cleared'])} tables")
+    print(f"[AAM FETCH] Reset complete: {reset_result['total_rows_deleted']} rows cleared")
     
+    request = AODHandoffRequest(**payload)
     handoff_response = await receive_aod_handoff(request)
     
     result = handoff_response.model_dump() if hasattr(handoff_response, 'model_dump') else dict(handoff_response)
     result["reset"] = reset_result
     return result
+
+
+AOD_PAYLOAD_FILE = "aod_last_payload.json"
+
+def _save_aod_payload(request: AODHandoffRequest):
+    """Save raw AOD payload to file so it can be replayed after reset."""
+    try:
+        import json as _json
+        with open(AOD_PAYLOAD_FILE, "w") as f:
+            _json.dump(request.model_dump(mode="json"), f)
+    except Exception as e:
+        print(f"[AAM] Failed to save AOD payload: {e}")
+
+def _load_aod_payload() -> Optional[dict]:
+    """Load last saved AOD payload from file."""
+    try:
+        import json as _json
+        with open(AOD_PAYLOAD_FILE, "r") as f:
+            return _json.load(f)
+    except Exception:
+        return None
 
 
 @app.post("/api/handoff/aod/receive", tags=["AOD Handoff"])
@@ -2705,6 +2723,8 @@ async def receive_aod_handoff(request: AODHandoffRequest):
     - connected_via_plane: Fabric plane routing hint from AOD
     - fabric_planes: Detected fabric control planes
     """
+    _save_aod_payload(request)
+    
     # LOG INCOMING REQUEST
     print(f"[AAM HANDOFF] run_id={request.run_id}, snapshot_name={request.snapshot_name}, candidates={len(request.candidates)}")
     
