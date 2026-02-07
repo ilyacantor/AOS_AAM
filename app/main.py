@@ -376,27 +376,35 @@ def aod_run_banner() -> str:
     latest_run = get_latest_aod_run()
     
     fetch_btn = """<button class="btn btn-sm" style="font-size: 0.75rem; background: rgba(251, 146, 60, 0.2); border-color: rgba(251, 146, 60, 0.5); color: #fb923c;" onclick="resetAamState()" data-testid="button-fetch-aod" id="fetch-aod-btn">Fetch AOD Data</button>
+<span id="fetch-status" style="display:none; margin-left: 12px; font-size: 0.8rem;"></span>
 <script>
 async function resetAamState() {
     const btn = document.getElementById('fetch-aod-btn');
-    const origText = btn.textContent;
-    if (!confirm('This will reset ALL existing AAM data (pipes, candidates, drift, fabric planes, handoff logs) and prepare for a fresh AOD handoff. Continue?')) return;
+    const status = document.getElementById('fetch-status');
     btn.textContent = 'Resetting...';
     btn.disabled = true;
+    status.style.display = 'none';
     try {
         const res = await fetch('/api/handoff/aod/reset', { method: 'POST' });
         const data = await res.json();
         if (res.ok) {
-            alert('Reset complete: ' + data.total_rows_deleted + ' rows cleared across all tables. AAM is ready for fresh AOD handoff.');
-            window.location.reload();
+            status.textContent = 'Reset complete: ' + data.total_rows_deleted + ' rows cleared. Ready for AOD handoff.';
+            status.style.color = '#22d3ee';
+            status.style.display = 'inline';
+            btn.textContent = 'Fetch AOD Data';
+            btn.disabled = false;
         } else {
-            alert('Error: ' + (data.detail || JSON.stringify(data)));
-            btn.textContent = origText;
+            status.textContent = 'Error: ' + (data.detail || 'Unknown error');
+            status.style.color = '#f87171';
+            status.style.display = 'inline';
+            btn.textContent = 'Fetch AOD Data';
             btn.disabled = false;
         }
     } catch(e) {
-        alert('Reset failed: ' + e.message);
-        btn.textContent = origText;
+        status.textContent = 'Failed: ' + e.message;
+        status.style.color = '#f87171';
+        status.style.display = 'inline';
+        btn.textContent = 'Fetch AOD Data';
         btn.disabled = false;
     }
 }
