@@ -3189,10 +3189,12 @@ async def ui_reconcile(aod_run_id: str):
             """
         fc_content += f"""
         <div style="font-size: 0.85rem; font-weight: 500; color: var(--orange-400); margin-bottom: 8px;">SOR Vendors Without Fabric Planes</div>
+        <div style="max-height: 300px; overflow-y: auto; border-radius: 6px;">
         <table>
-            <thead><tr><th>Vendor</th><th>Category</th><th style="text-align: right;">Candidates</th><th style="text-align: center;">Plane</th></tr></thead>
+            <thead style="position: sticky; top: 0; background: var(--slate-900);"><tr><th>Vendor</th><th>Category</th><th style="text-align: right;">Candidates</th><th style="text-align: center;">Plane</th></tr></thead>
             <tbody>{fm_rows}</tbody>
         </table>
+        </div>
         """
     
     if fc_covered:
@@ -3208,10 +3210,12 @@ async def ui_reconcile(aod_run_id: str):
             """
         fc_content += f"""
         <div style="font-size: 0.85rem; font-weight: 500; color: var(--green-400); margin: {'16px' if fc_missing else '0'} 0 8px 0;">SOR Vendors With Fabric Planes ({len(fc_covered)})</div>
+        <div style="max-height: 300px; overflow-y: auto; border-radius: 6px;">
         <table>
-            <thead><tr><th>Vendor</th><th>Category</th><th style="text-align: right;">Candidates</th><th style="text-align: center;">Plane</th></tr></thead>
+            <thead style="position: sticky; top: 0; background: var(--slate-900);"><tr><th>Vendor</th><th>Category</th><th style="text-align: right;">Candidates</th><th style="text-align: center;">Plane</th></tr></thead>
             <tbody>{fc_rows}</tbody>
         </table>
+        </div>
         """
     
     # --- Deep Check 4: Schema Completeness ---
