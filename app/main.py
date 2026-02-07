@@ -375,50 +375,50 @@ def aod_run_banner() -> str:
     """Generate AOD run information banner with Fetch AOD Data button"""
     latest_run = get_latest_aod_run()
     
-    fetch_btn = """<button class="btn btn-sm" style="font-size: 0.75rem; background: rgba(251, 146, 60, 0.2); border-color: rgba(251, 146, 60, 0.5); color: #fb923c;" onclick="resetAamState()" data-testid="button-fetch-aod" id="fetch-aod-btn">Fetch AOD Data</button>
-<span id="fetch-status" style="display:none; margin-left: 12px; font-size: 0.8rem;"></span>
+    fetch_script = """
 <script>
-async function resetAamState() {
-    const btn = document.getElementById('fetch-aod-btn');
-    const status = document.getElementById('fetch-status');
-    btn.textContent = 'Resetting...';
+var _fetchRunning = false;
+async function fetchAodData() {
+    if (_fetchRunning) return;
+    _fetchRunning = true;
+    var btn = document.getElementById('fetch-aod-btn');
+    btn.textContent = 'Fetching...';
     btn.disabled = true;
-    status.style.display = 'none';
+    btn.style.opacity = '0.5';
     try {
-        const res = await fetch('/api/handoff/aod/reset', { method: 'POST' });
-        const data = await res.json();
+        await fetch('/api/handoff/aod/reset', { method: 'POST' });
+        var res = await fetch('/api/collect/mock/run', { method: 'POST' });
+        var data = await res.json();
         if (res.ok) {
-            status.textContent = 'Reset complete: ' + data.total_rows_deleted + ' rows cleared. Ready for AOD handoff.';
-            status.style.color = '#22d3ee';
-            status.style.display = 'inline';
-            btn.textContent = 'Fetch AOD Data';
-            btn.disabled = false;
+            var res2 = await fetch('/api/aam/infer', { method: 'POST' });
+            await res2.json();
+            window.location.reload();
         } else {
-            status.textContent = 'Error: ' + (data.detail || 'Unknown error');
-            status.style.color = '#f87171';
-            status.style.display = 'inline';
             btn.textContent = 'Fetch AOD Data';
             btn.disabled = false;
+            btn.style.opacity = '1';
+            _fetchRunning = false;
         }
     } catch(e) {
-        status.textContent = 'Failed: ' + e.message;
-        status.style.color = '#f87171';
-        status.style.display = 'inline';
         btn.textContent = 'Fetch AOD Data';
         btn.disabled = false;
+        btn.style.opacity = '1';
+        _fetchRunning = false;
     }
 }
 </script>"""
+    
+    fetch_btn = '<button class="btn btn-sm" style="font-size: 0.75rem; background: rgba(251, 146, 60, 0.2); border-color: rgba(251, 146, 60, 0.5); color: #fb923c;" onclick="fetchAodData()" data-testid="button-fetch-aod" id="fetch-aod-btn">Fetch AOD Data</button>'
     
     if not latest_run:
         return f"""
 <div style="background: rgba(251, 146, 60, 0.1); border: 1px solid rgba(251, 146, 60, 0.3); border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
     <div>
         <strong style="color: #fb923c;">No AOD Run Loaded</strong>
-        <span style="margin-left: 20px; color: #94a3b8;">Press Fetch to reset state and prepare for new AOD data</span>
     </div>
     {fetch_btn}
 </div>
+{fetch_script}
 """
     
     aod_run_id = latest_run["aod_run_id"]
@@ -441,6 +441,7 @@ async function resetAamState() {
         <a href="/ui/reconcile/{aod_run_id}" class="btn btn-sm" style="font-size: 0.75rem;" data-testid="link-reconcile">Reconcile</a>
     </div>
 </div>
+{fetch_script}
 """
 
 
