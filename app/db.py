@@ -1319,23 +1319,41 @@ def update_tee_request_status(tee_id: str, status: str) -> Optional[dict]:
 # PRESET / SEED DATA OPERATIONS
 # ============================================================================
 
-def clear_all_data():
-    """Clear all data from the database (for preset loading)"""
+def reset_aod_state():
+    """Full reset of all prior run state. Called before fetching new AOD data."""
     conn = get_connection()
     cursor = conn.cursor()
     
-    cursor.execute("DELETE FROM drift_events")
-    cursor.execute("DELETE FROM pipe_versions")
-    cursor.execute("DELETE FROM declared_pipes")
-    cursor.execute("DELETE FROM observations")
-    cursor.execute("DELETE FROM collector_runs")
-    cursor.execute("DELETE FROM connection_candidates")
-    cursor.execute("DELETE FROM tee_requests")
+    tables = [
+        "drift_events",
+        "pipe_versions",
+        "declared_pipes",
+        "observations",
+        "collector_runs",
+        "connection_candidates",
+        "tee_requests",
+        "fabric_planes",
+        "aod_handoff_log",
+        "aod_policy_manifest",
+        "collectors",
+    ]
+    
+    counts = {}
+    for table in tables:
+        cursor.execute(f"SELECT COUNT(*) FROM {table}")
+        counts[table] = cursor.fetchone()[0]
+        cursor.execute(f"DELETE FROM {table}")
     
     conn.commit()
     conn.close()
     
-    return {"cleared": True}
+    total_deleted = sum(counts.values())
+    return {"reset": True, "tables_cleared": counts, "total_rows_deleted": total_deleted}
+
+
+def clear_all_data():
+    """Clear all data from the database (for preset loading)"""
+    return reset_aod_state()
 
 
 def get_pipe_stats() -> dict:

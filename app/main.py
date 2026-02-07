@@ -39,6 +39,7 @@ from .db import (
     get_drift_event,
     create_drift_event,
     clear_all_data,
+    reset_aod_state,
     get_pipe_stats,
     create_observation,
     get_topology_data,
@@ -371,28 +372,71 @@ def ui_nav(active: str = "") -> str:
 
 
 def aod_run_banner() -> str:
-    """Generate AOD run information banner"""
+    """Generate AOD run information banner with Fetch AOD Data button"""
     latest_run = get_latest_aod_run()
+    
+    fetch_btn = """<button class="btn btn-sm" style="font-size: 0.75rem; background: rgba(251, 146, 60, 0.2); border-color: rgba(251, 146, 60, 0.5); color: #fb923c;" onclick="fetchAodData()" data-testid="button-fetch-aod" id="fetch-aod-btn">Fetch AOD Data</button>
+<script>
+async function fetchAodData() {
+    const btn = document.getElementById('fetch-aod-btn');
+    const origText = btn.textContent;
+    if (!confirm('This will reset ALL existing AAM data (pipes, candidates, drift, fabric planes, handoff logs) and fetch fresh data from AOD. Continue?')) return;
+    btn.textContent = 'Resetting & Fetching...';
+    btn.disabled = true;
+    try {
+        const res = await fetch('/api/handoff/aod/fetch', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({run_id: 'pending', snapshot_name: 'pending', candidates: []})
+        });
+        const data = await res.json();
+        if (res.ok) {
+            const deleted = data.reset ? data.reset.total_rows_deleted : 0;
+            alert('Reset complete: ' + deleted + ' rows cleared. AAM is ready for fresh AOD handoff.');
+            window.location.reload();
+        } else {
+            alert('Error: ' + (data.detail || JSON.stringify(data)));
+            btn.textContent = origText;
+            btn.disabled = false;
+        }
+    } catch(e) {
+        alert('Fetch failed: ' + e.message);
+        btn.textContent = origText;
+        btn.disabled = false;
+    }
+}
+</script>"""
+    
     if not latest_run:
-        return ""
+        return f"""
+<div style="background: rgba(251, 146, 60, 0.1); border: 1px solid rgba(251, 146, 60, 0.3); border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
+    <div>
+        <strong style="color: #fb923c;">No AOD Run Loaded</strong>
+        <span style="margin-left: 20px; color: #94a3b8;">Press Fetch to reset state and prepare for new AOD data</span>
+    </div>
+    {fetch_btn}
+</div>
+"""
     
     aod_run_id = latest_run["aod_run_id"]
     snapshot_name = latest_run.get("snapshot_name")
     candidates = latest_run["candidates_accepted"]
     timestamp = latest_run["handoff_timestamp"]
     
-    # Show snapshot name if available, otherwise show run ID
     display_name = f'<strong style="color: #f0abfc;">{snapshot_name}</strong> <span style="color: #64748b; font-size: 0.8rem;">({aod_run_id})</span>' if snapshot_name else f'<span style="font-family: monospace;">{aod_run_id}</span>'
     
     return f"""
-<div style="background: rgba(34, 211, 238, 0.1); border: 1px solid rgba(34, 211, 238, 0.3); border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
+<div style="background: rgba(34, 211, 238, 0.1); border: 1px solid rgba(34, 211, 238, 0.3); border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; gap: 8px;">
     <div>
         <strong style="color: #22d3ee;">AOD Run:</strong> {display_name}
         <span style="margin-left: 20px; color: #94a3b8;">|</span>
         <span style="margin-left: 20px;"><strong>{candidates}</strong> pipes</span>
         <span style="margin-left: 20px; color: #94a3b8; font-size: 0.85rem;">{timestamp[:19] if timestamp else 'N/A'}</span>
     </div>
-    <a href="/ui/reconcile/{aod_run_id}" class="btn btn-sm" style="font-size: 0.75rem;" data-testid="link-reconcile">Reconcile</a>
+    <div style="display: flex; gap: 8px; align-items: center;">
+        {fetch_btn}
+        <a href="/ui/reconcile/{aod_run_id}" class="btn btn-sm" style="font-size: 0.75rem;" data-testid="link-reconcile">Reconcile</a>
+    </div>
 </div>
 """
 
@@ -2609,6 +2653,40 @@ async def update_status(candidate_id: str, update: StatusUpdate):
 # ============================================================================
 # AOD HANDOFF ENDPOINTS
 # ============================================================================
+
+@app.post("/api/handoff/aod/reset", tags=["AOD Handoff"])
+async def reset_aod_data():
+    """
+    Reset ALL prior AAM state.
+    
+    Clears ALL existing data (fabric planes, candidates, pipes, drift,
+    handoff logs, observations, collectors, tee requests, policy manifests).
+    Call this before sending a new AOD handoff to ensure no stale data
+    from prior runs pollutes the current state.
+    """
+    reset_result = reset_aod_state()
+    print(f"[AAM RESET] Reset complete: {reset_result['total_rows_deleted']} rows cleared across {len(reset_result['tables_cleared'])} tables")
+    return reset_result
+
+
+@app.post("/api/handoff/aod/fetch", tags=["AOD Handoff"])
+async def fetch_aod_data(request: AODHandoffRequest):
+    """
+    Fetch AOD data with full reset of prior state.
+    
+    Resets ALL existing data first, then processes the new handoff.
+    This ensures AAM state reflects only the current AOD run
+    with no stale data from prior runs.
+    """
+    reset_result = reset_aod_state()
+    print(f"[AAM FETCH] Reset complete: {reset_result['total_rows_deleted']} rows cleared across {len(reset_result['tables_cleared'])} tables")
+    
+    handoff_response = await receive_aod_handoff(request)
+    
+    result = handoff_response.model_dump() if hasattr(handoff_response, 'model_dump') else dict(handoff_response)
+    result["reset"] = reset_result
+    return result
+
 
 @app.post("/api/handoff/aod/receive", tags=["AOD Handoff"])
 async def receive_aod_handoff(request: AODHandoffRequest):
