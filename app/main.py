@@ -3004,28 +3004,6 @@ async def ui_reconcile(aod_run_id: str):
         </tr>
         """
     
-    # Top vendors table
-    top_vendors = aam.get("top_vendors", [])
-    vendor_rows_html = ""
-    for v in top_vendors:
-        vendor = v["vendor"]
-        cat = v["category"]
-        count = v["count"]
-        is_sor = cat in sor_categories
-        color = cat_colors.get(cat, "var(--slate-400)")
-        sor_badge = f'<span class="badge badge-connected" style="font-size: 0.65rem;">SOR</span>' if is_sor else ''
-        vendor_rows_html += f"""
-        <tr>
-            <td style="font-weight: 500;">{vendor}</td>
-            <td>
-                <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: {color}; margin-right: 6px;"></span>
-                <span style="text-transform: uppercase; font-size: 0.8rem;">{cat}</span>
-                {sor_badge}
-            </td>
-            <td style="text-align: right; font-weight: 600;">{count}</td>
-        </tr>
-        """
-    
     # Reconciliation check rows
     def check_row(label, expected, actual, match):
         icon = "&#10003;" if match else "&#10007;"
@@ -3416,18 +3394,6 @@ async def ui_reconcile(aod_run_id: str):
                     <thead><tr><th>Category</th><th style="text-align: right;">Count</th></tr></thead>
                     <tbody>
                         {category_rows_html if category_rows_html else '<tr><td colspan="2" style="color: var(--slate-500);">No categories found.</td></tr>'}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-        <div class="section">
-            <div class="panel">
-                <div class="panel-title">Top Vendors</div>
-                <table>
-                    <thead><tr><th>Vendor</th><th>Category</th><th style="text-align: right;">Candidates</th></tr></thead>
-                    <tbody>
-                        {vendor_rows_html if vendor_rows_html else '<tr><td colspan="3" style="color: var(--slate-500);">No vendors found.</td></tr>'}
                     </tbody>
                 </table>
             </div>
