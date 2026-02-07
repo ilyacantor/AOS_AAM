@@ -259,6 +259,10 @@ def init_db():
     # Add fabric_plane_id to connection_candidates (link to fabric_planes table)
     _add_column_if_not_exists(cursor, "connection_candidates", "fabric_plane_id", "TEXT")
     
+    # Store AOD-provided fabric planes and SOR metadata in handoff log for reconciliation
+    _add_column_if_not_exists(cursor, "aod_handoff_log", "aod_fabric_planes", "TEXT")
+    _add_column_if_not_exists(cursor, "aod_handoff_log", "aod_sor_vendors", "TEXT")
+    
     # Create indexes
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_candidates_status ON connection_candidates(status)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_candidates_asset_key ON connection_candidates(asset_key)")
@@ -1855,8 +1859,8 @@ def create_handoff_log(handoff_data: dict) -> dict:
         INSERT INTO aod_handoff_log (
             handoff_id, aod_run_id, snapshot_name, candidates_received, candidates_accepted,
             candidates_rejected, rejected_reasons, policy_version,
-            handoff_timestamp, processed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            handoff_timestamp, processed_at, aod_fabric_planes, aod_sor_vendors
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         handoff_id,
         handoff_data["aod_run_id"],
@@ -1867,7 +1871,9 @@ def create_handoff_log(handoff_data: dict) -> dict:
         json.dumps(handoff_data.get("rejected_reasons", [])),
         handoff_data.get("policy_version"),
         handoff_data.get("handoff_timestamp", now),
-        now
+        now,
+        json.dumps(handoff_data.get("aod_fabric_planes", [])),
+        json.dumps(handoff_data.get("aod_sor_vendors", []))
     ))
 
     conn.commit()
@@ -2302,45 +2308,141 @@ def get_aod_reconciliation(aod_run_id: str) -> dict:
                 "status": status
             })
     
-    # ===== DEEP CHECK 3: Fabric Plane Coverage =====
-    # Which SOR vendors DON'T have a fabric plane assigned?
+    # ===== DEEP CHECK 3: Fabric Plane Comparison (AOD vs AAM) =====
+    # Get AOD-provided fabric planes from handoff log
     cursor.execute("""
-        SELECT LOWER(COALESCE(vendor_name, 'unknown')) as vendor,
-               LOWER(COALESCE(category, 'unknown')) as cat,
-               connected_via_plane
-        FROM connection_candidates
-        WHERE aod_run_id = ? AND LOWER(category) IN ({placeholders})
-    """.format(placeholders=placeholders), (aod_run_id, *sor_categories))
-    sor_rows = cursor.fetchall()
+        SELECT aod_fabric_planes, aod_sor_vendors
+        FROM aod_handoff_log
+        WHERE aod_run_id = ?
+        ORDER BY handoff_timestamp DESC LIMIT 1
+    """, (aod_run_id,))
+    handoff_meta = cursor.fetchone()
+    aod_fabric_planes_raw = []
+    aod_sor_vendors_raw = []
+    if handoff_meta:
+        try:
+            if handoff_meta[0]:
+                aod_fabric_planes_raw = json.loads(handoff_meta[0])
+        except (json.JSONDecodeError, TypeError):
+            pass
+        try:
+            if handoff_meta[1]:
+                aod_sor_vendors_raw = json.loads(handoff_meta[1])
+        except (json.JSONDecodeError, TypeError):
+            pass
     
-    # Get existing fabric planes for this run
+    # Group AOD fabric planes by type
+    aod_fabrics_by_type = {}
+    for p in aod_fabric_planes_raw:
+        pt = p.get("plane_type", "").upper()
+        if pt not in aod_fabrics_by_type:
+            aod_fabrics_by_type[pt] = []
+        aod_fabrics_by_type[pt].append({"vendor": p.get("vendor", "unknown"), "is_healthy": p.get("is_healthy", True)})
+    
+    # Get AAM fabric planes from fabric_planes table
     cursor.execute("""
-        SELECT LOWER(vendor) as vendor, plane_type
+        SELECT plane_type, vendor, display_name
         FROM fabric_planes
         WHERE aod_run_id = ?
+        ORDER BY plane_type, vendor
     """, (aod_run_id,))
-    fabric_vendors = {}
-    for row in cursor.fetchall():
-        fabric_vendors[row[0]] = row[1]
+    aam_fabric_rows = cursor.fetchall()
     
-    # Find SOR vendors missing fabric planes
-    sor_vendor_cats = {}
-    for vendor, cat, plane in sor_rows:
-        if vendor not in sor_vendor_cats:
-            sor_vendor_cats[vendor] = {"category": cat, "count": 0, "has_plane": plane is not None and plane != "", "plane_name": plane}
-        sor_vendor_cats[vendor]["count"] += 1
-        if vendor in fabric_vendors:
-            sor_vendor_cats[vendor]["has_plane"] = True
-            sor_vendor_cats[vendor]["plane_name"] = fabric_vendors[vendor]
+    # Group AAM fabrics by plane_type
+    aam_fabrics_by_type = {}
+    for row in aam_fabric_rows:
+        pt = row[0]
+        if pt not in aam_fabrics_by_type:
+            aam_fabrics_by_type[pt] = []
+        aam_fabrics_by_type[pt].append({"vendor": row[1], "display_name": row[2]})
     
-    sors_missing_planes = []
-    sors_with_planes = []
-    for vendor, info in sorted(sor_vendor_cats.items(), key=lambda x: -x[1]["count"]):
-        entry = {"vendor": vendor, "category": info["category"], "count": info["count"], "plane": info.get("plane_name")}
-        if info["has_plane"]:
-            sors_with_planes.append(entry)
-        else:
-            sors_missing_planes.append(entry)
+    # Build per-type side-by-side comparison
+    all_plane_types = ["IPAAS", "API_GATEWAY", "EVENT_BUS", "DATA_WAREHOUSE"]
+    fabric_comparison = []
+    fabric_mismatches = 0
+    for pt in all_plane_types:
+        aod_vendors = aod_fabrics_by_type.get(pt, [])
+        aam_vendors = aam_fabrics_by_type.get(pt, [])
+        
+        # Determine match status
+        aod_vendor_names = {v["vendor"].lower() for v in aod_vendors}
+        aam_vendor_names = {v["vendor"].lower() for v in aam_vendors}
+        is_match = aod_vendor_names == aam_vendor_names if (aod_vendors or aam_vendors) else True
+        only_in_aod = aod_vendor_names - aam_vendor_names
+        only_in_aam = aam_vendor_names - aod_vendor_names
+        
+        if not is_match:
+            fabric_mismatches += 1
+        
+        fabric_comparison.append({
+            "plane_type": pt,
+            "aod_vendors": aod_vendors,
+            "aam_vendors": aam_vendors,
+            "aod_count": len(aod_vendors),
+            "aam_count": len(aam_vendors),
+            "is_match": is_match,
+            "only_in_aod": list(only_in_aod),
+            "only_in_aam": list(only_in_aam),
+            "has_coverage": len(aam_vendors) > 0
+        })
+    
+    has_aod_fabric_data = len(aod_fabric_planes_raw) > 0
+    
+    # ===== DEEP CHECK 3b: SOR Vendor Comparison (AOD vs AAM) =====
+    # Group AOD SOR vendors by category
+    aod_sor_by_category = {}
+    for s in aod_sor_vendors_raw:
+        cat = s.get("category", "unknown")
+        if cat not in aod_sor_by_category:
+            aod_sor_by_category[cat] = []
+        aod_sor_by_category[cat].append({"vendor": s.get("vendor", "unknown"), "count": s.get("count", 0)})
+    
+    # Get AAM SOR vendors from candidates in this run
+    cursor.execute("""
+        SELECT DISTINCT LOWER(COALESCE(vendor_name, 'unknown')) as vendor,
+               LOWER(COALESCE(category, 'unknown')) as cat,
+               COUNT(*) as cnt
+        FROM connection_candidates
+        WHERE aod_run_id = ? AND LOWER(category) IN ({placeholders})
+        GROUP BY vendor, cat
+        ORDER BY cat, vendor
+    """.format(placeholders=placeholders), (aod_run_id, *sor_categories))
+    sor_vendor_rows = cursor.fetchall()
+    
+    # Group AAM SOR vendors by category
+    aam_sor_by_category = {}
+    for row in sor_vendor_rows:
+        cat = row[1]
+        if cat not in aam_sor_by_category:
+            aam_sor_by_category[cat] = []
+        aam_sor_by_category[cat].append({"vendor": row[0], "count": row[2]})
+    
+    # Build side-by-side SOR comparison
+    all_sor_cats = sorted(set(list(aod_sor_by_category.keys()) + list(aam_sor_by_category.keys())))
+    sor_comparison = []
+    sor_mismatches = 0
+    for cat in all_sor_cats:
+        aod_vendors = aod_sor_by_category.get(cat, [])
+        aam_vendors = aam_sor_by_category.get(cat, [])
+        aod_names = {v["vendor"].lower() for v in aod_vendors}
+        aam_names = {v["vendor"].lower() for v in aam_vendors}
+        is_match = aod_names == aam_names if (aod_vendors or aam_vendors) else True
+        only_in_aod = aod_names - aam_names
+        only_in_aam = aam_names - aod_names
+        if not is_match:
+            sor_mismatches += 1
+        sor_comparison.append({
+            "category": cat,
+            "aod_vendors": aod_vendors,
+            "aam_vendors": aam_vendors,
+            "is_match": is_match,
+            "only_in_aod": list(only_in_aod),
+            "only_in_aam": list(only_in_aam),
+            "vendor_count": len(aam_vendors),
+            "total_candidates": sum(v["count"] for v in aam_vendors)
+        })
+    
+    has_aod_sor_data = len(aod_sor_vendors_raw) > 0
     
     # ===== DEEP CHECK 4: Schema Completeness =====
     # Find candidates missing key fields
@@ -2426,7 +2528,7 @@ def get_aod_reconciliation(aod_run_id: str) -> dict:
     issues_count = (
         len(vendor_case_duplicates) +
         len(unconnected_candidates) +
-        len(sors_missing_planes) +
+        fabric_mismatches +
         len(completeness_issues) +
         len(duplicates)
     )
@@ -2468,11 +2570,22 @@ def get_aod_reconciliation(aod_run_id: str) -> dict:
                 "blocked_count": len(blocked_candidates),
                 "has_issues": len(unconnected_candidates) > 0 or len(blocked_candidates) > 0
             },
-            "fabric_coverage": {
-                "sors_with_planes": sors_with_planes,
-                "sors_missing_planes": sors_missing_planes,
-                "coverage_pct": round(len(sors_with_planes) / max(len(sors_with_planes) + len(sors_missing_planes), 1) * 100, 1),
-                "has_issues": len(sors_missing_planes) > 0
+            "fabric_comparison": {
+                "by_type": fabric_comparison,
+                "total_types": len(all_plane_types),
+                "types_with_coverage": len(all_plane_types) - fabric_mismatches,
+                "mismatches": fabric_mismatches,
+                "has_aod_data": has_aod_fabric_data,
+                "has_issues": fabric_mismatches > 0
+            },
+            "sor_comparison": {
+                "by_category": sor_comparison,
+                "total_categories": len(sor_comparison),
+                "total_sor_vendors": sum(s["vendor_count"] for s in sor_comparison),
+                "total_sor_candidates": sum(s["total_candidates"] for s in sor_comparison),
+                "mismatches": sor_mismatches,
+                "has_aod_data": has_aod_sor_data,
+                "has_issues": sor_mismatches > 0
             },
             "schema_completeness": {
                 "total_candidates": total_for_completeness,

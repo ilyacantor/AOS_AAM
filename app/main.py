@@ -2743,6 +2743,27 @@ async def receive_aod_handoff(request: AODHandoffRequest):
                 "reason": str(e)
             })
 
+    # Extract AOD-provided fabric planes for reconciliation
+    aod_fabric_planes_data = []
+    if request.fabric_planes:
+        for plane in request.fabric_planes:
+            aod_fabric_planes_data.append({
+                "plane_type": plane.plane_type,
+                "vendor": plane.vendor,
+                "is_healthy": plane.is_healthy
+            })
+    
+    # Extract SOR vendors from candidates for reconciliation
+    aod_sor_data = {}
+    sor_cat_set = {'crm', 'erp', 'hcm', 'idp', 'itsm', 'saas', 'hr', 'finance', 'cmdb', 'identity'}
+    for candidate in request.candidates:
+        cat_lower = candidate.category.lower() if candidate.category else ""
+        if cat_lower in sor_cat_set and candidate.vendor_name:
+            vendor_key = candidate.vendor_name.lower()
+            if vendor_key not in aod_sor_data:
+                aod_sor_data[vendor_key] = {"vendor": candidate.vendor_name, "category": cat_lower, "count": 0}
+            aod_sor_data[vendor_key]["count"] += 1
+    
     # Log the handoff
     handoff_log = create_handoff_log({
         "aod_run_id": request.run_id,
@@ -2752,7 +2773,9 @@ async def receive_aod_handoff(request: AODHandoffRequest):
         "candidates_rejected": len(rejected),
         "rejected_reasons": rejected,
         "policy_version": request.policy_version,
-        "handoff_timestamp": request.handoff_timestamp.isoformat() if request.handoff_timestamp else None
+        "handoff_timestamp": request.handoff_timestamp.isoformat() if request.handoff_timestamp else None,
+        "aod_fabric_planes": aod_fabric_planes_data,
+        "aod_sor_vendors": list(aod_sor_data.values())
     })
 
     return AODHandoffResponse(
@@ -3134,65 +3157,182 @@ async def ui_reconcile(aod_run_id: str):
     if not cr_content:
         cr_content = f'<div style="color: var(--slate-400); font-size: 0.85rem;">All {cr.get("total", 0)} candidates are connected and execution-allowed.</div>'
     
-    # --- Deep Check 3: Fabric Plane Coverage ---
-    fc = deep.get("fabric_coverage", {})
-    fc_missing = fc.get("sors_missing_planes", [])
-    fc_covered = fc.get("sors_with_planes", [])
-    fc_pct = fc.get("coverage_pct", 0)
+    # --- Deep Check 3: Fabric Plane Comparison ---
+    fc = deep.get("fabric_comparison", {})
+    fc_by_type = fc.get("by_type", [])
+    fc_mismatches = fc.get("mismatches", 0)
+    has_aod_fabric = fc.get("has_aod_data", False)
     
-    fc_bar_color = "var(--green-400)" if fc_pct >= 80 else ("var(--orange-400)" if fc_pct >= 50 else "var(--red-400)")
+    plane_colors = {
+        "IPAAS": "var(--cyan-400)",
+        "API_GATEWAY": "var(--purple-400)",
+        "EVENT_BUS": "var(--orange-400)",
+        "DATA_WAREHOUSE": "var(--green-400)"
+    }
+    plane_labels = {
+        "IPAAS": "iPaaS",
+        "API_GATEWAY": "API Gateway",
+        "EVENT_BUS": "Event Bus",
+        "DATA_WAREHOUSE": "Data Warehouse"
+    }
     
-    fc_content = f"""
-    <div style="margin-bottom: 16px;">
-        <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-            <span style="font-size: 0.85rem; color: #cbd5e1;">SOR Fabric Coverage</span>
-            <span style="font-size: 0.85rem; font-weight: 600; color: {fc_bar_color};">{fc_pct}%</span>
-        </div>
-        <div style="height: 8px; background: var(--slate-800); border-radius: 4px; overflow: hidden;">
-            <div style="height: 100%; width: {fc_pct}%; background: {fc_bar_color}; border-radius: 4px;"></div>
-        </div>
-    </div>
-    """
+    def vendor_badge(name, style_type="default"):
+        if style_type == "aod":
+            return f'<span style="display: inline-block; background: rgba(99,102,241,0.1); border: 1px solid rgba(99,102,241,0.3); padding: 3px 10px; border-radius: 4px; font-size: 0.8rem; margin: 2px; color: #a5b4fc;">{name}</span>'
+        elif style_type == "aam":
+            return f'<span style="display: inline-block; background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.3); padding: 3px 10px; border-radius: 4px; font-size: 0.8rem; margin: 2px; color: #86efac;">{name}</span>'
+        elif style_type == "mismatch":
+            return f'<span style="display: inline-block; background: rgba(248,113,113,0.1); border: 1px solid rgba(248,113,113,0.3); padding: 3px 10px; border-radius: 4px; font-size: 0.8rem; margin: 2px; color: #fca5a5;">{name}</span>'
+        else:
+            return f'<span style="display: inline-block; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); padding: 3px 10px; border-radius: 4px; font-size: 0.8rem; margin: 2px; color: #e2e8f0;">{name}</span>'
     
-    if fc_missing:
-        fm_rows = ""
-        for s in fc_missing:
-            fm_rows += f"""
-            <tr>
-                <td style="font-weight: 500;">{s["vendor"]}</td>
-                <td><span style="text-transform: uppercase; font-size: 0.8rem;">{s["category"]}</span></td>
-                <td style="text-align: right;">{s["count"]}</td>
-                <td style="text-align: center; color: var(--red-400);">&#10007;</td>
-            </tr>
+    fc_content = ""
+    if not has_aod_fabric:
+        fc_content += '<div style="color: var(--slate-400); font-size: 0.85rem; margin-bottom: 12px; padding: 8px; background: rgba(255,255,255,0.02); border-radius: 6px;">AOD did not provide explicit fabric planes for this run. AAM auto-inferred planes from SOR candidates. Re-send from AOD with fabric_planes to enable side-by-side comparison.</div>'
+    
+    for pt_data in fc_by_type:
+        pt = pt_data["plane_type"]
+        aod_vendors = pt_data.get("aod_vendors", [])
+        aam_vendors = pt_data.get("aam_vendors", [])
+        is_match = pt_data.get("is_match", True)
+        only_in_aod = pt_data.get("only_in_aod", [])
+        only_in_aam = pt_data.get("only_in_aam", [])
+        color = plane_colors.get(pt, "var(--slate-400)")
+        label = plane_labels.get(pt, pt)
+        
+        if is_match and (aod_vendors or aam_vendors):
+            status_icon = "&#10003;"
+            status_color = "var(--green-400)"
+        elif not aod_vendors and not aam_vendors:
+            status_icon = "&#8212;"
+            status_color = "var(--slate-500)"
+        else:
+            status_icon = "&#10007;"
+            status_color = "var(--red-400)"
+        
+        # Build side-by-side rows
+        if has_aod_fabric:
+            aod_html = " ".join([vendor_badge(v["vendor"], "aod") for v in aod_vendors]) if aod_vendors else '<span style="color: var(--slate-500); font-size: 0.8rem; font-style: italic;">none</span>'
+            aam_html = " ".join([vendor_badge(v["vendor"], "aam") for v in aam_vendors]) if aam_vendors else '<span style="color: var(--slate-500); font-size: 0.8rem; font-style: italic;">none</span>'
+            
+            delta_html = ""
+            if only_in_aod:
+                delta_html += '<div style="margin-top: 4px; font-size: 0.75rem; color: var(--red-400);">Only in AOD: ' + ", ".join(only_in_aod) + '</div>'
+            if only_in_aam:
+                delta_html += '<div style="margin-top: 4px; font-size: 0.75rem; color: var(--orange-400);">Only in AAM: ' + ", ".join(only_in_aam) + '</div>'
+            
+            vendors_html = f"""
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 8px;">
+                <div>
+                    <div style="font-size: 0.7rem; text-transform: uppercase; color: var(--slate-500); margin-bottom: 4px; letter-spacing: 0.05em;">AOD</div>
+                    {aod_html}
+                </div>
+                <div>
+                    <div style="font-size: 0.7rem; text-transform: uppercase; color: var(--slate-500); margin-bottom: 4px; letter-spacing: 0.05em;">AAM</div>
+                    {aam_html}
+                </div>
+            </div>
+            {delta_html}
             """
+        else:
+            if aam_vendors:
+                aam_html = " ".join([vendor_badge(v["vendor"]) for v in aam_vendors])
+                vendors_html = f'<div style="margin-top: 6px;">{aam_html}</div>'
+            else:
+                vendors_html = '<div style="margin-top: 6px; color: var(--slate-500); font-size: 0.8rem; font-style: italic;">No vendors assigned</div>'
+        
         fc_content += f"""
-        <div style="font-size: 0.85rem; font-weight: 500; color: var(--orange-400); margin-bottom: 8px;">SOR Vendors Without Fabric Planes</div>
-        <div style="max-height: 300px; overflow-y: auto; border-radius: 6px;">
-        <table>
-            <thead style="position: sticky; top: 0; background: var(--slate-900);"><tr><th>Vendor</th><th>Category</th><th style="text-align: right;">Candidates</th><th style="text-align: center;">Plane</th></tr></thead>
-            <tbody>{fm_rows}</tbody>
-        </table>
+        <div style="padding: 12px; margin-bottom: 8px; background: rgba(255,255,255,0.02); border-radius: 6px; border-left: 3px solid {color};">
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="color: {color}; font-weight: 600; font-size: 0.9rem;">{label}</span>
+                </div>
+                <span style="color: {status_color}; font-size: 1rem;">{status_icon}</span>
+            </div>
+            {vendors_html}
         </div>
         """
     
-    if fc_covered:
-        fc_rows = ""
-        for s in fc_covered:
-            fc_rows += f"""
-            <tr>
-                <td style="font-weight: 500;">{s["vendor"]}</td>
-                <td><span style="text-transform: uppercase; font-size: 0.8rem;">{s["category"]}</span></td>
-                <td style="text-align: right;">{s["count"]}</td>
-                <td style="text-align: center; color: var(--green-400);">&#10003;</td>
-            </tr>
+    # --- Deep Check 3b: SOR Vendor Comparison ---
+    sc_sor = deep.get("sor_comparison", {})
+    sor_by_cat = sc_sor.get("by_category", [])
+    total_sor_vendors = sc_sor.get("total_sor_vendors", 0)
+    total_sor_candidates = sc_sor.get("total_sor_candidates", 0)
+    sor_mismatches = sc_sor.get("mismatches", 0)
+    has_aod_sor = sc_sor.get("has_aod_data", False)
+    
+    cat_colors_sor = {
+        "crm": "var(--cyan-400)", "erp": "var(--blue-400)", "hcm": "var(--green-400)",
+        "idp": "var(--purple-400)", "itsm": "var(--orange-400)"
+    }
+    cat_labels_sor = {
+        "crm": "CRM", "erp": "ERP", "hcm": "HCM", "idp": "Identity", "itsm": "ITSM"
+    }
+    
+    sor_content = f"""
+    <div style="margin-bottom: 12px; font-size: 0.85rem; color: var(--slate-400);">
+        {total_sor_vendors} SOR vendor{"s" if total_sor_vendors != 1 else ""} across {len(sor_by_cat)} categor{"ies" if len(sor_by_cat) != 1 else "y"} ({total_sor_candidates} candidates)
+    </div>
+    """
+    
+    if not has_aod_sor:
+        sor_content += '<div style="color: var(--slate-400); font-size: 0.85rem; margin-bottom: 12px; padding: 8px; background: rgba(255,255,255,0.02); border-radius: 6px;">AOD SOR data not stored for this run. Future handoffs will capture AOD SOR vendors for side-by-side comparison.</div>'
+    
+    for cat_data in sor_by_cat:
+        cat = cat_data["category"]
+        aod_vendors = cat_data.get("aod_vendors", [])
+        aam_vendors = cat_data.get("aam_vendors", [])
+        is_match = cat_data.get("is_match", True)
+        only_in_aod = cat_data.get("only_in_aod", [])
+        only_in_aam = cat_data.get("only_in_aam", [])
+        color = cat_colors_sor.get(cat, "var(--slate-400)")
+        label = cat_labels_sor.get(cat, cat.upper())
+        
+        if is_match:
+            cat_status = '<span style="color: var(--green-400); font-size: 0.9rem;">&#10003;</span>'
+        else:
+            cat_status = '<span style="color: var(--red-400); font-size: 0.9rem;">&#10007;</span>'
+        
+        if has_aod_sor and aod_vendors:
+            aod_html = " ".join([vendor_badge(f'{v["vendor"]} ({v["count"]})', "aod") for v in aod_vendors])
+            aam_html = " ".join([vendor_badge(f'{v["vendor"]} ({v["count"]})', "aam") for v in aam_vendors]) if aam_vendors else '<span style="color: var(--slate-500); font-size: 0.8rem; font-style: italic;">none</span>'
+            
+            delta_html = ""
+            if only_in_aod:
+                delta_html += '<div style="margin-top: 4px; font-size: 0.75rem; color: var(--red-400);">Only in AOD: ' + ", ".join(only_in_aod) + '</div>'
+            if only_in_aam:
+                delta_html += '<div style="margin-top: 4px; font-size: 0.75rem; color: var(--orange-400);">Only in AAM: ' + ", ".join(only_in_aam) + '</div>'
+            
+            inner_html = f"""
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 8px;">
+                <div>
+                    <div style="font-size: 0.7rem; text-transform: uppercase; color: var(--slate-500); margin-bottom: 4px; letter-spacing: 0.05em;">AOD</div>
+                    {aod_html}
+                </div>
+                <div>
+                    <div style="font-size: 0.7rem; text-transform: uppercase; color: var(--slate-500); margin-bottom: 4px; letter-spacing: 0.05em;">AAM</div>
+                    {aam_html}
+                </div>
+            </div>
+            {delta_html}
             """
-        fc_content += f"""
-        <div style="font-size: 0.85rem; font-weight: 500; color: var(--green-400); margin: {'16px' if fc_missing else '0'} 0 8px 0;">SOR Vendors With Fabric Planes ({len(fc_covered)})</div>
-        <div style="max-height: 300px; overflow-y: auto; border-radius: 6px;">
-        <table>
-            <thead style="position: sticky; top: 0; background: var(--slate-900);"><tr><th>Vendor</th><th>Category</th><th style="text-align: right;">Candidates</th><th style="text-align: center;">Plane</th></tr></thead>
-            <tbody>{fc_rows}</tbody>
-        </table>
+        else:
+            vendor_badges = " ".join([
+                vendor_badge(f'{v["vendor"]} ({v["count"]})')
+                for v in aam_vendors
+            ])
+            inner_html = f'<div style="margin-top: 6px;">{vendor_badges}</div>' if vendor_badges else '<div style="margin-top: 6px; color: var(--slate-500); font-size: 0.8rem; font-style: italic;">No vendors</div>'
+        
+        sor_content += f"""
+        <div style="padding: 12px; margin-bottom: 8px; background: rgba(255,255,255,0.02); border-radius: 6px; border-left: 3px solid {color};">
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="color: {color}; font-weight: 600; font-size: 0.9rem;">{label}</span>
+                    <span style="color: var(--slate-400); font-size: 0.8rem;">({len(aam_vendors)} vendor{"s" if len(aam_vendors) != 1 else ""})</span>
+                </div>
+                {cat_status}
+            </div>
+            {inner_html}
         </div>
         """
     
@@ -3401,7 +3541,7 @@ async def ui_reconcile(aod_run_id: str):
 
         <!-- Deep Checks Section -->
         <h2 style="margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--slate-700);">Deep Reconciliation Checks</h2>
-        <p class="page-subtitle" style="margin-top: -8px;">Detailed data quality analysis across 5 dimensions</p>
+        <p class="page-subtitle" style="margin-top: -8px;">Detailed data quality analysis across 6 dimensions</p>
 
         <!-- Check 1: Vendor Matching -->
         <div class="deep-check">
@@ -3419,11 +3559,19 @@ async def ui_reconcile(aod_run_id: str):
             </div>
         </div>
 
-        <!-- Check 3: Fabric Plane Coverage -->
+        <!-- Check 3: Fabric Plane Comparison -->
         <div class="deep-check">
-            <div class="panel" data-testid="check-fabric-coverage">
-                {check_header("SOR Fabric Plane Coverage", fc.get("has_issues", False), len(fc_missing), "Checks if every SOR vendor has an assigned fabric plane")}
+            <div class="panel" data-testid="check-fabric-comparison">
+                {check_header("Fabric Plane Comparison", fc.get("has_issues", False), fc_mismatches, "Compares fabric plane vendors per plane type")}
                 {fc_content}
+            </div>
+        </div>
+
+        <!-- Check 3b: SOR Vendor Comparison -->
+        <div class="deep-check">
+            <div class="panel" data-testid="check-sor-comparison">
+                {check_header("SOR Vendor Comparison", sc_sor.get("has_issues", False), sor_mismatches, "Compares SOR vendors by category between AOD and AAM")}
+                {sor_content}
             </div>
         </div>
 
