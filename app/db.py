@@ -2525,6 +2525,9 @@ def get_aod_reconciliation(aod_run_id: str) -> dict:
     
     # ===== DEEP CHECK 4: Schema Completeness =====
     # Find candidates missing key fields
+    # IMPORTANT: Separate AOD-provided fields from AAM-enrichment fields
+    # AOD fields: vendor_name, display_name, category, known_endpoints
+    # AAM enrichment fields: preferred_modality, connected_via_plane (NOT from AOD)
     cursor.execute("""
         SELECT candidate_id, vendor_name, display_name, category, 
                known_endpoints, preferred_modality, priority_score,
@@ -2533,42 +2536,48 @@ def get_aod_reconciliation(aod_run_id: str) -> dict:
         WHERE aod_run_id = ?
     """, (aod_run_id,))
     completeness_issues = []
-    field_missing_counts = {"vendor_name": 0, "display_name": 0, "category": 0, "known_endpoints": 0, "preferred_modality": 0, "connected_via_plane": 0}
+    aod_field_missing = {"vendor_name": 0, "display_name": 0, "category": 0, "known_endpoints": 0}
+    enrichment_field_missing = {"preferred_modality": 0, "connected_via_plane": 0}
     total_for_completeness = 0
     
     for row in cursor.fetchall():
         cid, vendor, display, cat, endpoints, modality, score, plane = row
         total_for_completeness += 1
-        missing = []
+        missing_aod = []
+        missing_enrichment = []
         if not vendor or vendor.lower() in ('unknown', ''):
-            missing.append("vendor_name")
-            field_missing_counts["vendor_name"] += 1
+            missing_aod.append("vendor_name")
+            aod_field_missing["vendor_name"] += 1
         if not display or display.lower() in ('unknown', ''):
-            missing.append("display_name")
-            field_missing_counts["display_name"] += 1
+            missing_aod.append("display_name")
+            aod_field_missing["display_name"] += 1
         if not cat or cat.lower() in ('unknown', ''):
-            missing.append("category")
-            field_missing_counts["category"] += 1
+            missing_aod.append("category")
+            aod_field_missing["category"] += 1
         if not endpoints or endpoints in ('[]', '', 'null'):
-            missing.append("known_endpoints")
-            field_missing_counts["known_endpoints"] += 1
+            missing_aod.append("known_endpoints")
+            aod_field_missing["known_endpoints"] += 1
         if not modality or modality.lower() in ('unknown', ''):
-            missing.append("preferred_modality")
-            field_missing_counts["preferred_modality"] += 1
+            missing_enrichment.append("preferred_modality")
+            enrichment_field_missing["preferred_modality"] += 1
         if not plane or plane == '':
-            missing.append("connected_via_plane")
-            field_missing_counts["connected_via_plane"] += 1
-        if missing:
+            missing_enrichment.append("connected_via_plane")
+            enrichment_field_missing["connected_via_plane"] += 1
+        if missing_aod:
             completeness_issues.append({
                 "candidate_id": cid,
                 "vendor": vendor,
                 "display_name": display,
-                "missing_fields": missing
+                "missing_fields": missing_aod
             })
     
+    # Completeness score based ONLY on AOD-provided fields (not enrichment)
     completeness_score = round(
         (1 - len(completeness_issues) / max(total_for_completeness, 1)) * 100, 1
     )
+    
+    # Combined field_missing_counts for backward compatibility, but tag source
+    field_missing_counts = {**aod_field_missing, **enrichment_field_missing}
     
     # ===== DEEP CHECK 5: Duplicate Detection =====
     # Find candidates that share the same vendor + endpoint combination
@@ -2604,10 +2613,17 @@ def get_aod_reconciliation(aod_run_id: str) -> dict:
     pipes_count = candidates_stored
     
     # Overall health scoring
+    # Only count real issues, not expected gaps:
+    # - fabric_mismatches excluded when AOD doesn't provide fabric data
+    # - completeness_issues only counts AOD-field gaps (not enrichment fields)
+    real_fabric_issues = fabric_mismatches if has_aod_fabric_data else 0
+    # SOR mismatches excluded when inference hasn't run (no declared_pipes)
+    real_sor_issues = sor_mismatches if len(aam_sor_all) > 0 else 0
     issues_count = (
         len(vendor_case_duplicates) +
         len(unconnected_candidates) +
-        fabric_mismatches +
+        real_fabric_issues +
+        real_sor_issues +
         len(completeness_issues) +
         len(duplicates)
     )
@@ -2657,7 +2673,7 @@ def get_aod_reconciliation(aod_run_id: str) -> dict:
                 "in_both": [aod_vendor_map[k]["vendor"] for k in sorted(in_both_global)],
                 "mismatches": fabric_mismatches,
                 "has_aod_data": has_aod_fabric_data,
-                "has_issues": fabric_mismatches > 0
+                "has_issues": real_fabric_issues > 0
             },
             "sor_comparison": {
                 "vendors": sor_vendors,
@@ -2668,7 +2684,8 @@ def get_aod_reconciliation(aod_run_id: str) -> dict:
                 "total_categories": len(sor_comparison),
                 "mismatches": sor_mismatches,
                 "has_aod_data": has_aod_sor_data,
-                "has_issues": sor_mismatches > 0
+                "has_issues": real_sor_issues > 0,
+                "inference_pending": len(aam_sor_all) == 0 and has_aod_sor_data
             },
             "schema_completeness": {
                 "total_candidates": total_for_completeness,

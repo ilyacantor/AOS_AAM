@@ -3028,6 +3028,179 @@ async def get_aod_run_reconciliation(aod_run_id: str):
     return reconciliation
 
 
+@app.get("/api/handoff/aod/run/{aod_run_id}/reconciliation/download", tags=["AOD Handoff"])
+async def download_reconciliation_summary(aod_run_id: str):
+    """
+    Download a CSV summary of all reconciliation mismatches and issues.
+    Returns a downloadable CSV file with one row per issue found.
+    """
+    from .db import get_aod_reconciliation
+    import csv
+    import io
+    
+    data = get_aod_reconciliation(aod_run_id)
+    if data.get("error"):
+        raise HTTPException(status_code=404, detail=data["error"])
+    
+    output = io.StringIO()
+    writer = csv.writer(output)
+    
+    writer.writerow(["AAM Reconciliation Summary"])
+    writer.writerow(["Run ID", data["aod_run_id"]])
+    writer.writerow(["Snapshot", data.get("snapshot_name", "")])
+    writer.writerow(["Timestamp", data.get("handoff_timestamp", "")])
+    writer.writerow(["AOD Candidates Sent", data["aod_sent"]["candidates_accepted"]])
+    writer.writerow(["AAM Candidates Stored", data["aam_stored"]["candidates"]])
+    writer.writerow([])
+    
+    deep = data.get("deep_checks", {})
+    
+    writer.writerow(["=" * 60])
+    writer.writerow(["CHECK", "STATUS", "ISSUE COUNT"])
+    writer.writerow(["=" * 60])
+    
+    checks = [
+        ("Vendor Name Consistency", deep.get("vendor_matching", {})),
+        ("Candidate Row Integrity", deep.get("candidate_rows", {})),
+        ("Fabric Plane Comparison", deep.get("fabric_comparison", {})),
+        ("SOR Vendor Comparison", deep.get("sor_comparison", {})),
+        ("Schema Completeness", deep.get("schema_completeness", {})),
+        ("Duplicate Detection", deep.get("duplicates", {})),
+    ]
+    for name, check in checks:
+        has_issues = check.get("has_issues", False)
+        status = "FAIL" if has_issues else "PASS"
+        writer.writerow([name, status])
+    
+    writer.writerow([])
+    
+    vm = deep.get("vendor_matching", {})
+    case_dups = vm.get("case_duplicates", [])
+    if case_dups:
+        writer.writerow(["--- VENDOR CASE DUPLICATES ---"])
+        writer.writerow(["Canonical Name", "Variants", "Total Count"])
+        for d in case_dups:
+            variants = "; ".join([f'{v["name"]} ({v["count"]})' for v in d["variants"]])
+            writer.writerow([d["canonical"], variants, d["total"]])
+        writer.writerow([])
+    
+    cr = deep.get("candidate_rows", {})
+    unconnected = cr.get("unconnected", [])
+    blocked = cr.get("blocked", [])
+    if unconnected:
+        writer.writerow(["--- UNCONNECTED CANDIDATES ---"])
+        writer.writerow(["Candidate ID", "Vendor", "Display Name", "Category", "Status"])
+        for c in unconnected:
+            writer.writerow([c["candidate_id"], c.get("vendor", ""), c.get("display_name", ""), c.get("category", ""), c.get("status", "")])
+        writer.writerow([])
+    if blocked:
+        writer.writerow(["--- BLOCKED CANDIDATES ---"])
+        writer.writerow(["Candidate ID", "Vendor", "Display Name", "Category", "Status"])
+        for c in blocked:
+            writer.writerow([c["candidate_id"], c.get("vendor", ""), c.get("display_name", ""), c.get("category", ""), c.get("status", "")])
+        writer.writerow([])
+    
+    fc = deep.get("fabric_comparison", {})
+    fc_vendors = fc.get("vendors", [])
+    has_aod_fabric = fc.get("has_aod_data", False)
+    if fc_vendors:
+        writer.writerow(["--- FABRIC PLANE COMPARISON ---"])
+        if not has_aod_fabric:
+            writer.writerow(["NOTE: AOD did not send fabric_planes. Planes below were auto-created by AAM."])
+        writer.writerow(["Vendor", "AOD Type", "AAM Type", "Status"])
+        for v in fc_vendors:
+            writer.writerow([v["vendor"], v.get("aod_plane_type", "-"), v.get("aam_plane_type", "-"), v["status"]])
+        writer.writerow([])
+    
+    sc_sor = deep.get("sor_comparison", {})
+    sor_vendors = sc_sor.get("vendors", [])
+    has_aod_sor = sc_sor.get("has_aod_data", False)
+    if sor_vendors:
+        writer.writerow(["--- SOR VENDOR COMPARISON ---"])
+        if not has_aod_sor:
+            writer.writerow(["NOTE: AOD SOR data not stored for this run."])
+        writer.writerow(["Vendor", "AOD Category", "AAM Pipe Count", "Status"])
+        for v in sor_vendors:
+            writer.writerow([v["vendor"], v.get("aod_category", "-"), v.get("aam_pipe_count", 0), v["status"]])
+        writer.writerow([])
+    
+    sc = deep.get("schema_completeness", {})
+    field_counts = sc.get("field_missing_counts", {})
+    if any(v > 0 for v in field_counts.values()):
+        writer.writerow(["--- SCHEMA COMPLETENESS ---"])
+        writer.writerow(["Field", "Missing Count", "Source"])
+        field_sources = {
+            "vendor_name": "AOD (data quality)",
+            "display_name": "AOD (data quality)",
+            "category": "AOD (data quality)",
+            "known_endpoints": "AOD (optional)",
+            "preferred_modality": "AAM enrichment (not from AOD)",
+            "connected_via_plane": "AAM enrichment (not from AOD)",
+        }
+        for field, count in sorted(field_counts.items(), key=lambda x: -x[1]):
+            if count > 0:
+                source = field_sources.get(field, "Unknown")
+                writer.writerow([field, count, source])
+        writer.writerow([])
+        
+        incomplete = sc.get("incomplete_candidates", [])
+        if incomplete:
+            writer.writerow(["--- INCOMPLETE CANDIDATES (sample) ---"])
+            writer.writerow(["Candidate ID", "Vendor", "Display Name", "Missing Fields"])
+            for c in incomplete:
+                aod_missing = [f for f in c.get("missing_fields", []) if f not in ("preferred_modality", "connected_via_plane")]
+                if aod_missing:
+                    writer.writerow([c["candidate_id"], c.get("vendor", ""), c.get("display_name", ""), "; ".join(aod_missing)])
+        writer.writerow([])
+    
+    dd = deep.get("duplicates", {})
+    dup_groups = dd.get("duplicate_groups", [])
+    if dup_groups:
+        writer.writerow(["--- DUPLICATE CANDIDATES ---"])
+        writer.writerow(["Vendor", "Display Name", "Category", "Count"])
+        for g in dup_groups:
+            writer.writerow([g["vendor"], g["display_name"], g["category"], g["count"]])
+        writer.writerow([])
+    
+    writer.writerow(["=" * 60])
+    writer.writerow(["ROOT CAUSE ANALYSIS"])
+    writer.writerow(["=" * 60])
+    writer.writerow([])
+    
+    rca_lines = []
+    if field_counts.get("preferred_modality", 0) > 0 or field_counts.get("connected_via_plane", 0) > 0:
+        rca_lines.append("EXPECTED: preferred_modality and connected_via_plane are AAM-enrichment fields NOT provided by AOD.")
+        rca_lines.append("  These are populated during operator assignment or inference - not a data quality issue.")
+    if field_counts.get("vendor_name", 0) > 0:
+        rca_lines.append(f"DATA QUALITY: {field_counts['vendor_name']} candidates have unknown vendor_name. AOD could not identify vendor.")
+    if not has_aod_fabric and len(fc.get("only_in_aam", [])) > 0:
+        rca_lines.append(f"EXPECTED: {len(fc.get('only_in_aam', []))} fabric planes show as 'only in AAM' because AOD did not send fabric_planes data.")
+        rca_lines.append("  AAM auto-creates fabric planes from SOR vendor names. Not a real mismatch.")
+    if has_aod_sor and sc_sor.get("mismatches", 0) > 0:
+        only_aod_count = len(sc_sor.get("only_in_aod", []))
+        if only_aod_count > 0:
+            rca_lines.append(f"NOTE: {only_aod_count} SOR vendors from AOD show as 'not in AAM' - inference has not been run yet.")
+            rca_lines.append("  Run inference (POST /api/aam/infer) to create declared pipes from candidates.")
+    
+    if not rca_lines:
+        rca_lines.append("No significant root causes identified. Data is clean.")
+    
+    for line in rca_lines:
+        writer.writerow([line])
+    
+    csv_content = output.getvalue()
+    output.close()
+    
+    from starlette.responses import Response
+    snapshot = data.get("snapshot_name", aod_run_id)
+    filename = f"reconciliation_{snapshot}_{aod_run_id}.csv"
+    return Response(
+        content=csv_content,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
+
+
 @app.get("/ui/reconcile/{aod_run_id}", response_class=HTMLResponse, include_in_schema=False)
 async def ui_reconcile(aod_run_id: str):
     """Reconciliation UI - human-readable view of AOD handoff reconciliation"""
@@ -3371,9 +3544,13 @@ async def ui_reconcile(aod_run_id: str):
     sor_in_both = sc_sor.get("in_both", [])
     
     sor_content = ""
+    inference_pending = sc_sor.get("inference_pending", False)
     
     if not has_aod_sor:
         sor_content += '<div style="color: var(--slate-400); font-size: 0.85rem; margin-bottom: 12px; padding: 8px; background: rgba(255,255,255,0.02); border-radius: 6px;">AOD SOR data not stored for this run. Future handoffs will capture AOD SOR vendors for side-by-side comparison.</div>'
+    
+    if inference_pending:
+        sor_content += '<div style="color: var(--cyan-400); font-size: 0.85rem; margin-bottom: 12px; padding: 8px; background: rgba(34,211,238,0.05); border: 1px solid rgba(34,211,238,0.2); border-radius: 6px;">Inference has not been run yet. AAM has no declared pipes to compare against AOD SOR vendors. Run inference to populate this comparison.</div>'
     
     if has_aod_sor and sor_vendors_list:
         cat_labels_sor = {
@@ -3457,15 +3634,18 @@ async def ui_reconcile(aod_run_id: str):
     sc_content = f"""
     <div style="margin-bottom: 16px;">
         <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-            <span style="font-size: 0.85rem; color: #cbd5e1;">Data Completeness</span>
+            <span style="font-size: 0.85rem; color: #cbd5e1;">AOD Data Completeness</span>
             <span style="font-size: 0.85rem; font-weight: 600; color: {sc_bar_color};">{sc_score}%</span>
         </div>
         <div style="height: 8px; background: var(--slate-800); border-radius: 4px; overflow: hidden;">
             <div style="height: 100%; width: {sc_score}%; background: {sc_bar_color}; border-radius: 4px;"></div>
         </div>
-        <div style="font-size: 0.8rem; color: var(--slate-400); margin-top: 4px;">{sc.get("incomplete_count", 0)} of {sc_total} candidates have missing fields</div>
+        <div style="font-size: 0.8rem; color: var(--slate-400); margin-top: 4px;">{sc.get("incomplete_count", 0)} of {sc_total} candidates missing AOD-provided fields</div>
     </div>
     """
+    
+    aod_fields = {"vendor_name", "display_name", "category", "known_endpoints"}
+    enrichment_fields = {"preferred_modality", "connected_via_plane"}
     
     if sc_field_counts:
         field_labels = {
@@ -3476,23 +3656,41 @@ async def ui_reconcile(aod_run_id: str):
             "preferred_modality": "Modality",
             "connected_via_plane": "Fabric Plane"
         }
-        max_field = max(sc_field_counts.values()) if sc_field_counts else 1
-        for field, count in sorted(sc_field_counts.items(), key=lambda x: -x[1]):
-            if count == 0:
-                continue
-            pct = int((count / max(max_field, 1)) * 100)
-            label = field_labels.get(field, field)
-            sc_content += f"""
-            <div style="margin-bottom: 6px;">
-                <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
-                    <span style="font-size: 0.8rem; color: #cbd5e1;">{label}</span>
-                    <span style="font-size: 0.8rem; color: var(--orange-400);">{count} missing</span>
+        
+        aod_missing = {f: c for f, c in sc_field_counts.items() if f in aod_fields and c > 0}
+        enrich_missing = {f: c for f, c in sc_field_counts.items() if f in enrichment_fields and c > 0}
+        
+        if aod_missing:
+            max_aod = max(aod_missing.values()) if aod_missing else 1
+            sc_content += '<div style="font-size: 0.8rem; font-weight: 500; color: var(--orange-400); margin-bottom: 8px;">AOD Data Quality Issues</div>'
+            for field, count in sorted(aod_missing.items(), key=lambda x: -x[1]):
+                pct = int((count / max(max_aod, 1)) * 100)
+                label = field_labels.get(field, field)
+                sc_content += f"""
+                <div style="margin-bottom: 6px;">
+                    <div style="display: flex; justify-content: space-between; gap: 8px; margin-bottom: 2px;">
+                        <span style="font-size: 0.8rem; color: #cbd5e1;">{label}</span>
+                        <span style="font-size: 0.8rem; color: var(--orange-400);">{count} missing</span>
+                    </div>
+                    <div style="height: 4px; background: var(--slate-800); border-radius: 2px; overflow: hidden;">
+                        <div style="height: 100%; width: {pct}%; background: var(--orange-400); border-radius: 2px;"></div>
+                    </div>
                 </div>
-                <div style="height: 4px; background: var(--slate-800); border-radius: 2px; overflow: hidden;">
-                    <div style="height: 100%; width: {pct}%; background: var(--orange-400); border-radius: 2px;"></div>
+                """
+        elif not aod_missing:
+            sc_content += '<div style="color: var(--green-400); font-size: 0.8rem; margin-bottom: 12px;">All AOD-provided fields are complete.</div>'
+        
+        if enrich_missing:
+            sc_content += '<div style="font-size: 0.8rem; font-weight: 500; color: var(--slate-400); margin-top: 12px; margin-bottom: 8px;">AAM Enrichment Fields (not from AOD - expected to be empty)</div>'
+            for field, count in sorted(enrich_missing.items(), key=lambda x: -x[1]):
+                label = field_labels.get(field, field)
+                sc_content += f"""
+                <div style="margin-bottom: 4px; display: flex; justify-content: space-between; gap: 8px;">
+                    <span style="font-size: 0.8rem; color: var(--slate-500);">{label}</span>
+                    <span style="font-size: 0.8rem; color: var(--slate-500);">{count} pending</span>
                 </div>
-            </div>
-            """
+                """
+            sc_content += '<div style="font-size: 0.75rem; color: var(--slate-500); margin-top: 4px; font-style: italic;">These fields are populated during operator assignment or inference, not by AOD.</div>'
     
     # --- Deep Check 5: Duplicate Detection ---
     dd = deep.get("duplicates", {})
@@ -3702,6 +3900,7 @@ async def ui_reconcile(aod_run_id: str):
 
         <div style="text-align: center; margin-top: 24px; padding-bottom: 32px;">
             <a href="/ui/pipes" class="btn" data-testid="link-back-pipes" style="margin-right: 8px;">Back to Pipes</a>
+            <a href="/api/handoff/aod/run/{aod_run_id}/reconciliation/download" class="btn btn-sm" data-testid="link-download-csv" style="margin-right: 8px; color: var(--cyan-400); border-color: rgba(34,211,238,0.3);">Download Summary (CSV)</a>
             <a href="/api/handoff/aod/run/{aod_run_id}/reconciliation" target="_blank" class="btn btn-sm" data-testid="link-raw-json" style="color: var(--slate-400); border-color: var(--slate-600);">View Raw JSON</a>
         </div>
     </div>
