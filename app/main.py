@@ -375,24 +375,19 @@ def aod_run_banner() -> str:
     """Generate AOD run information banner with Fetch AOD Data button"""
     latest_run = get_latest_aod_run()
     
-    fetch_btn = """<button class="btn btn-sm" style="font-size: 0.75rem; background: rgba(251, 146, 60, 0.2); border-color: rgba(251, 146, 60, 0.5); color: #fb923c;" onclick="fetchAodData()" data-testid="button-fetch-aod" id="fetch-aod-btn">Fetch AOD Data</button>
+    fetch_btn = """<button class="btn btn-sm" style="font-size: 0.75rem; background: rgba(251, 146, 60, 0.2); border-color: rgba(251, 146, 60, 0.5); color: #fb923c;" onclick="resetAamState()" data-testid="button-fetch-aod" id="fetch-aod-btn">Fetch AOD Data</button>
 <script>
-async function fetchAodData() {
+async function resetAamState() {
     const btn = document.getElementById('fetch-aod-btn');
     const origText = btn.textContent;
-    if (!confirm('This will reset ALL existing AAM data (pipes, candidates, drift, fabric planes, handoff logs) and fetch fresh data from AOD. Continue?')) return;
-    btn.textContent = 'Resetting & Fetching...';
+    if (!confirm('This will reset ALL existing AAM data (pipes, candidates, drift, fabric planes, handoff logs) and prepare for a fresh AOD handoff. Continue?')) return;
+    btn.textContent = 'Resetting...';
     btn.disabled = true;
     try {
-        const res = await fetch('/api/handoff/aod/fetch', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({run_id: 'pending', snapshot_name: 'pending', candidates: []})
-        });
+        const res = await fetch('/api/handoff/aod/reset', { method: 'POST' });
         const data = await res.json();
         if (res.ok) {
-            const deleted = data.reset ? data.reset.total_rows_deleted : 0;
-            alert('Reset complete: ' + deleted + ' rows cleared. AAM is ready for fresh AOD handoff.');
+            alert('Reset complete: ' + data.total_rows_deleted + ' rows cleared across all tables. AAM is ready for fresh AOD handoff.');
             window.location.reload();
         } else {
             alert('Error: ' + (data.detail || JSON.stringify(data)));
@@ -400,7 +395,7 @@ async function fetchAodData() {
             btn.disabled = false;
         }
     } catch(e) {
-        alert('Fetch failed: ' + e.message);
+        alert('Reset failed: ' + e.message);
         btn.textContent = origText;
         btn.disabled = false;
     }
