@@ -2200,6 +2200,38 @@ def get_aod_reconciliation(aod_run_id: str) -> dict:
     """, (aod_run_id,))
     fabrics_by_type = {row[0]: row[1] for row in cursor.fetchall()}
     
+    # Get candidates breakdown by category
+    cursor.execute("""
+        SELECT LOWER(COALESCE(category, 'unknown')) as cat, COUNT(*) as count
+        FROM connection_candidates
+        WHERE aod_run_id = ?
+        GROUP BY cat
+        ORDER BY count DESC
+    """, (aod_run_id,))
+    candidates_by_category = {row[0]: row[1] for row in cursor.fetchall()}
+    
+    # Get top vendors
+    cursor.execute("""
+        SELECT COALESCE(vendor_name, 'unknown') as vendor,
+               LOWER(COALESCE(category, 'unknown')) as cat,
+               COUNT(*) as count
+        FROM connection_candidates
+        WHERE aod_run_id = ?
+        GROUP BY vendor, cat
+        ORDER BY count DESC
+        LIMIT 20
+    """, (aod_run_id,))
+    top_vendors = [{"vendor": row[0], "category": row[1], "count": row[2]} for row in cursor.fetchall()]
+    
+    # Get snapshot_name from handoff log
+    cursor.execute("""
+        SELECT snapshot_name FROM aod_handoff_log
+        WHERE aod_run_id = ?
+        ORDER BY handoff_timestamp DESC LIMIT 1
+    """, (aod_run_id,))
+    snap_row = cursor.fetchone()
+    snapshot_name = snap_row[0] if snap_row else None
+    
     conn.close()
     
     # Canonical definition: Candidates = Pipes
@@ -2207,6 +2239,7 @@ def get_aod_reconciliation(aod_run_id: str) -> dict:
     
     return {
         "aod_run_id": aod_run_id,
+        "snapshot_name": snapshot_name,
         "handoff_timestamp": handoff_row[2] if handoff_row else None,
         "aod_sent": {
             "candidates": handoff_row[0] if handoff_row else 0,
@@ -2214,14 +2247,16 @@ def get_aod_reconciliation(aod_run_id: str) -> dict:
         },
         "aam_stored": {
             "candidates": candidates_stored,
-            "pipes": pipes_count,  # Canonical: candidates = pipes
+            "pipes": pipes_count,
             "fabric_planes": fabric_planes_stored,
             "sors": sors_stored,
-            "fabrics_by_type": fabrics_by_type
+            "fabrics_by_type": fabrics_by_type,
+            "candidates_by_category": candidates_by_category,
+            "top_vendors": top_vendors
         },
         "reconciliation": {
             "candidates_match": handoff_row[1] == candidates_stored if handoff_row else False,
-            "pipes_match": handoff_row[1] == pipes_count if handoff_row else False,  # Should always match candidates
+            "pipes_match": handoff_row[1] == pipes_count if handoff_row else False,
             "discrepancy": (handoff_row[1] - candidates_stored) if handoff_row else 0
         }
     }

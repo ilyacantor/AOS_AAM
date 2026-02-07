@@ -392,7 +392,7 @@ def aod_run_banner() -> str:
         <span style="margin-left: 20px;"><strong>{candidates}</strong> pipes</span>
         <span style="margin-left: 20px; color: #94a3b8; font-size: 0.85rem;">{timestamp[:19] if timestamp else 'N/A'}</span>
     </div>
-    <a href="/api/handoff/aod/run/{aod_run_id}/reconciliation" target="_blank" class="btn btn-sm" style="font-size: 0.75rem;">Reconcile</a>
+    <a href="/ui/reconcile/{aod_run_id}" class="btn btn-sm" style="font-size: 0.75rem;" data-testid="link-reconcile">Reconcile</a>
 </div>
 """
 
@@ -2901,6 +2901,302 @@ async def get_aod_run_reconciliation(aod_run_id: str):
     from .db import get_aod_reconciliation
     reconciliation = get_aod_reconciliation(aod_run_id)
     return reconciliation
+
+
+@app.get("/ui/reconcile/{aod_run_id}", response_class=HTMLResponse, include_in_schema=False)
+async def ui_reconcile(aod_run_id: str):
+    """Reconciliation UI - human-readable view of AOD handoff reconciliation"""
+    from .db import get_aod_reconciliation
+    data = get_aod_reconciliation(aod_run_id)
+    
+    if data.get("error"):
+        return HTMLResponse(content=f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Reconciliation - AAM</title>
+    {NAV_STYLE}
+    {UI_STYLE}
+</head>
+<body>
+    {ui_nav()}
+    <div class="container">
+        <h1>Reconciliation</h1>
+        <div class="panel" style="text-align: center; padding: 48px;">
+            <div style="font-size: 1.1rem; color: var(--red-400); margin-bottom: 8px;">Run Not Found</div>
+            <div style="color: var(--slate-400); font-family: monospace;">{aod_run_id}</div>
+            <a href="/ui/pipes" class="btn" style="margin-top: 16px;">Back to Pipes</a>
+        </div>
+    </div>
+</body>
+</html>
+""")
+    
+    aod_sent = data["aod_sent"]
+    aam = data["aam_stored"]
+    recon = data["reconciliation"]
+    snapshot = data.get("snapshot_name") or ""
+    timestamp = data.get("handoff_timestamp", "")[:19] if data.get("handoff_timestamp") else "N/A"
+    
+    # Overall status
+    all_match = recon["candidates_match"] and recon["pipes_match"]
+    status_color = "var(--green-400)" if all_match else "var(--red-400)"
+    status_icon = "&#10003;" if all_match else "&#10007;"
+    status_text = "All Reconciled" if all_match else "Discrepancy Detected"
+    
+    # Fabric plane bars
+    fabric_types = ["API_GATEWAY", "DATA_WAREHOUSE", "IPAAS", "EVENT_BUS"]
+    fabric_colors = {
+        "API_GATEWAY": "var(--cyan-400)",
+        "DATA_WAREHOUSE": "var(--blue-400)",
+        "IPAAS": "var(--purple-400)",
+        "EVENT_BUS": "var(--orange-400)"
+    }
+    fabric_labels = {
+        "API_GATEWAY": "API Gateway",
+        "DATA_WAREHOUSE": "Data Warehouse",
+        "IPAAS": "iPaaS",
+        "EVENT_BUS": "Event Bus"
+    }
+    fabrics_by_type = aam.get("fabrics_by_type", {})
+    max_fabric = max(fabrics_by_type.values()) if fabrics_by_type else 1
+    
+    fabric_bars_html = ""
+    for ft in fabric_types:
+        count = fabrics_by_type.get(ft, 0)
+        pct = int((count / max_fabric) * 100) if max_fabric > 0 and count > 0 else 0
+        color = fabric_colors.get(ft, "var(--slate-400)")
+        label = fabric_labels.get(ft, ft)
+        fabric_bars_html += f"""
+        <div style="margin-bottom: 10px;">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                <span style="font-size: 0.8rem; color: #cbd5e1;">{label}</span>
+                <span style="font-size: 0.8rem; font-weight: 600; color: {color};">{count}</span>
+            </div>
+            <div style="height: 6px; background: var(--slate-800); border-radius: 3px; overflow: hidden;">
+                <div style="height: 100%; width: {pct}%; background: {color}; border-radius: 3px; transition: width 0.3s;"></div>
+            </div>
+        </div>
+        """
+    
+    # Category breakdown
+    candidates_by_cat = aam.get("candidates_by_category", {})
+    sor_categories = {"crm", "erp", "hcm", "idp", "itsm"}
+    cat_colors = {
+        "crm": "var(--cyan-400)", "erp": "var(--blue-400)", "hcm": "var(--green-400)",
+        "idp": "var(--purple-400)", "itsm": "var(--orange-400)", "other": "var(--slate-400)",
+        "unknown": "var(--slate-500)"
+    }
+    
+    category_rows_html = ""
+    for cat, count in sorted(candidates_by_cat.items(), key=lambda x: -x[1]):
+        is_sor = cat in sor_categories
+        color = cat_colors.get(cat, "var(--slate-400)")
+        sor_badge = f'<span class="badge badge-connected" style="margin-left: 8px; font-size: 0.65rem;">SOR</span>' if is_sor else ''
+        category_rows_html += f"""
+        <tr>
+            <td>
+                <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: {color}; margin-right: 8px;"></span>
+                <span style="text-transform: uppercase; font-weight: 500;">{cat}</span>
+                {sor_badge}
+            </td>
+            <td style="text-align: right; font-weight: 600; color: {color};">{count}</td>
+        </tr>
+        """
+    
+    # Top vendors table
+    top_vendors = aam.get("top_vendors", [])
+    vendor_rows_html = ""
+    for v in top_vendors:
+        vendor = v["vendor"]
+        cat = v["category"]
+        count = v["count"]
+        is_sor = cat in sor_categories
+        color = cat_colors.get(cat, "var(--slate-400)")
+        sor_badge = f'<span class="badge badge-connected" style="font-size: 0.65rem;">SOR</span>' if is_sor else ''
+        vendor_rows_html += f"""
+        <tr>
+            <td style="font-weight: 500;">{vendor}</td>
+            <td>
+                <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: {color}; margin-right: 6px;"></span>
+                <span style="text-transform: uppercase; font-size: 0.8rem;">{cat}</span>
+                {sor_badge}
+            </td>
+            <td style="text-align: right; font-weight: 600;">{count}</td>
+        </tr>
+        """
+    
+    # Reconciliation check rows
+    def check_row(label, expected, actual, match):
+        icon = "&#10003;" if match else "&#10007;"
+        color = "var(--green-400)" if match else "var(--red-400)"
+        bg = "rgba(34, 197, 94, 0.08)" if match else "rgba(248, 113, 113, 0.08)"
+        return f"""
+        <tr style="background: {bg};">
+            <td style="font-weight: 500;">{label}</td>
+            <td style="text-align: center;">{expected}</td>
+            <td style="text-align: center;">{actual}</td>
+            <td style="text-align: center; color: {color}; font-size: 1.1rem;">{icon}</td>
+        </tr>
+        """
+    
+    checks_html = check_row("Candidates / Pipes", aod_sent["candidates_accepted"], aam["candidates"], recon["candidates_match"])
+    
+    discrepancy_html = ""
+    if recon["discrepancy"] != 0:
+        disc = recon["discrepancy"]
+        direction = "more" if disc > 0 else "fewer"
+        discrepancy_html = f"""
+        <div style="background: rgba(248, 113, 113, 0.1); border: 1px solid rgba(248, 113, 113, 0.3); border-radius: 8px; padding: 12px 16px; margin-top: 16px; color: var(--red-400);">
+            <strong>Discrepancy:</strong> AOD accepted {abs(disc)} {direction} candidate(s) than AAM stored.
+        </div>
+        """
+    
+    return HTMLResponse(content=f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Reconcile: {snapshot or aod_run_id} - AAM</title>
+    {NAV_STYLE}
+    {UI_STYLE}
+    <style>
+        .recon-header {{
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 24px;
+        }}
+        .recon-status {{
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 1rem;
+        }}
+        .recon-meta {{
+            display: flex;
+            gap: 24px;
+            flex-wrap: wrap;
+            color: var(--slate-400);
+            font-size: 0.85rem;
+            margin-bottom: 24px;
+        }}
+        .recon-meta strong {{
+            color: #cbd5e1;
+        }}
+    </style>
+</head>
+<body>
+    {ui_nav()}
+    <div class="container">
+        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 8px;">
+            <h1 style="margin-bottom: 0;">Reconciliation Report</h1>
+            <div class="recon-status" style="background: {'rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.3);' if all_match else 'rgba(248, 113, 113, 0.1); border: 1px solid rgba(248, 113, 113, 0.3);'}; color: {status_color};">
+                <span style="font-size: 1.2rem;">{status_icon}</span>
+                {status_text}
+            </div>
+        </div>
+        
+        <div class="recon-meta">
+            {'<div><strong>Snapshot:</strong> <span style="color: #f0abfc;">' + snapshot + '</span></div>' if snapshot else ''}
+            <div><strong>Run ID:</strong> <span style="font-family: monospace;">{aod_run_id}</span></div>
+            <div><strong>Timestamp:</strong> {timestamp}</div>
+        </div>
+
+        <!-- KPI Stats -->
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-value">{aod_sent["candidates_accepted"]}</div>
+                <div class="stat-label">AOD Sent</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" style="color: var(--green-400);">{aam["candidates"]}</div>
+                <div class="stat-label">AAM Stored</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" style="color: var(--purple-400);">{aam["fabric_planes"]}</div>
+                <div class="stat-label">Fabric Planes</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" style="color: var(--blue-400);">{aam["sors"]}</div>
+                <div class="stat-label">SOR Candidates</div>
+            </div>
+        </div>
+
+        <!-- Reconciliation Check -->
+        <div class="section">
+            <div class="panel">
+                <div class="panel-title">Data Integrity Check</div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Check</th>
+                            <th style="text-align: center;">AOD Accepted</th>
+                            <th style="text-align: center;">AAM Stored</th>
+                            <th style="text-align: center;">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {checks_html}
+                    </tbody>
+                </table>
+                {discrepancy_html}
+            </div>
+        </div>
+
+        <div class="grid-2">
+            <!-- Fabric Planes -->
+            <div class="panel">
+                <div class="panel-title">Fabric Planes by Type</div>
+                {fabric_bars_html if fabric_bars_html else '<div style="color: var(--slate-500); font-size: 0.85rem;">No fabric planes found for this run.</div>'}
+            </div>
+
+            <!-- Category Breakdown -->
+            <div class="panel">
+                <div class="panel-title">Candidates by Category</div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Category</th>
+                            <th style="text-align: right;">Count</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {category_rows_html if category_rows_html else '<tr><td colspan="2" style="color: var(--slate-500);">No categories found.</td></tr>'}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Top Vendors -->
+        <div class="section">
+            <div class="panel">
+                <div class="panel-title">Top Vendors</div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Vendor</th>
+                            <th>Category</th>
+                            <th style="text-align: right;">Candidates</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {vendor_rows_html if vendor_rows_html else '<tr><td colspan="3" style="color: var(--slate-500);">No vendors found.</td></tr>'}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div style="text-align: center; margin-top: 16px; padding-bottom: 32px;">
+            <a href="/ui/pipes" class="btn" data-testid="link-back-pipes" style="margin-right: 8px;">Back to Pipes</a>
+            <a href="/api/handoff/aod/run/{aod_run_id}/reconciliation" target="_blank" class="btn btn-sm" data-testid="link-raw-json" style="color: var(--slate-400); border-color: var(--slate-600);">View Raw JSON</a>
+        </div>
+    </div>
+</body>
+</html>
+""")
 
 
 @app.get("/api/aam/collectors", tags=["Collectors"])
