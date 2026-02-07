@@ -3052,6 +3052,264 @@ async def ui_reconcile(aod_run_id: str):
         </div>
         """
     
+    # ===== DEEP CHECKS HTML =====
+    deep = data.get("deep_checks", {})
+    total_issues = deep.get("total_issues", 0)
+    
+    def check_header(title, has_issues, issue_count=0, description=""):
+        icon = "&#10007;" if has_issues else "&#10003;"
+        color = "var(--red-400)" if has_issues else "var(--green-400)"
+        bg = "rgba(248, 113, 113, 0.1)" if has_issues else "rgba(34, 197, 94, 0.1)"
+        border = "rgba(248, 113, 113, 0.3)" if has_issues else "rgba(34, 197, 94, 0.3)"
+        count_badge = f'<span style="background: {bg}; color: {color}; padding: 2px 10px; border-radius: 4px; font-size: 0.8rem; font-weight: 600; margin-left: 8px;">{issue_count} issue{"s" if issue_count != 1 else ""}</span>' if has_issues else '<span style="background: rgba(34, 197, 94, 0.1); color: var(--green-400); padding: 2px 10px; border-radius: 4px; font-size: 0.8rem; font-weight: 600; margin-left: 8px;">Pass</span>'
+        desc_html = f'<div style="color: var(--slate-400); font-size: 0.8rem; margin-top: 2px;">{description}</div>' if description else ''
+        return f"""
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid var(--slate-700);">
+            <div>
+                <span style="color: {color}; font-size: 1.1rem; margin-right: 8px;">{icon}</span>
+                <span style="font-size: 1rem; font-weight: 600; color: #e2e8f0;">{title}</span>
+                {count_badge}
+                {desc_html}
+            </div>
+        </div>
+        """
+    
+    # --- Deep Check 1: Vendor Matching ---
+    vm = deep.get("vendor_matching", {})
+    vm_issues = vm.get("case_duplicates", [])
+    
+    vm_content = ""
+    if vm_issues:
+        vm_rows = ""
+        for dup in vm_issues:
+            variants_str = ", ".join([f'"{v["name"]}" ({v["count"]})' for v in dup["variants"]])
+            vm_rows += f"""
+            <tr>
+                <td style="font-weight: 500;">{dup["canonical"]}</td>
+                <td style="font-size: 0.85rem;">{variants_str}</td>
+                <td style="text-align: right; font-weight: 600;">{dup["total"]}</td>
+            </tr>
+            """
+        vm_content = f"""
+        <div style="color: var(--orange-400); font-size: 0.85rem; margin-bottom: 12px;">
+            The following vendor names appear with different capitalization, which may cause duplicate entries.
+        </div>
+        <table>
+            <thead><tr><th>Canonical Name</th><th>Variants Found</th><th style="text-align: right;">Total</th></tr></thead>
+            <tbody>{vm_rows}</tbody>
+        </table>
+        """
+    else:
+        vm_content = f'<div style="color: var(--slate-400); font-size: 0.85rem;">{vm.get("total_vendors", 0)} unique vendors stored. No case-sensitivity duplicates found.</div>'
+    
+    # --- Deep Check 2: Candidate Row Check ---
+    cr = deep.get("candidate_rows", {})
+    cr_unconnected = cr.get("unconnected", [])
+    cr_blocked = cr.get("blocked", [])
+    cr_issue_count = cr.get("unconnected_count", 0) + cr.get("blocked_count", 0)
+    
+    cr_content = ""
+    if cr_unconnected:
+        cr_rows = ""
+        for c in cr_unconnected[:15]:
+            cr_rows += f"""
+            <tr>
+                <td style="font-family: monospace; font-size: 0.75rem;">{c["candidate_id"][:12]}...</td>
+                <td>{c["vendor"]}</td>
+                <td>{c["display_name"]}</td>
+                <td><span class="badge badge-{'new' if c['status'].lower() not in ('new','triaged','connected','deferred','open','acknowledged','suppressed','resolved') else c['status'].lower()}">{c["status"]}</span></td>
+            </tr>
+            """
+        more_text = f'<div style="color: var(--slate-400); font-size: 0.8rem; margin-top: 8px;">...and {cr.get("unconnected_count", 0) - 15} more</div>' if cr.get("unconnected_count", 0) > 15 else ""
+        cr_content += f"""
+        <div style="margin-bottom: 16px;">
+            <div style="font-size: 0.85rem; font-weight: 500; color: var(--orange-400); margin-bottom: 8px;">Unconnected Candidates ({cr.get("unconnected_count", 0)})</div>
+            <table>
+                <thead><tr><th>ID</th><th>Vendor</th><th>Name</th><th>Status</th></tr></thead>
+                <tbody>{cr_rows}</tbody>
+            </table>
+            {more_text}
+        </div>
+        """
+    
+    if cr_blocked:
+        bl_rows = ""
+        for c in cr_blocked[:10]:
+            bl_rows += f"""
+            <tr>
+                <td style="font-family: monospace; font-size: 0.75rem;">{c["candidate_id"][:12]}...</td>
+                <td>{c["vendor"]}</td>
+                <td>{c["display_name"]}</td>
+                <td><span class="badge badge-critical">Blocked</span></td>
+            </tr>
+            """
+        cr_content += f"""
+        <div>
+            <div style="font-size: 0.85rem; font-weight: 500; color: var(--red-400); margin-bottom: 8px;">Execution-Blocked Candidates ({cr.get("blocked_count", 0)})</div>
+            <table>
+                <thead><tr><th>ID</th><th>Vendor</th><th>Name</th><th>Status</th></tr></thead>
+                <tbody>{bl_rows}</tbody>
+            </table>
+        </div>
+        """
+    
+    if not cr_content:
+        cr_content = f'<div style="color: var(--slate-400); font-size: 0.85rem;">All {cr.get("total", 0)} candidates are connected and execution-allowed.</div>'
+    
+    # --- Deep Check 3: Fabric Plane Coverage ---
+    fc = deep.get("fabric_coverage", {})
+    fc_missing = fc.get("sors_missing_planes", [])
+    fc_covered = fc.get("sors_with_planes", [])
+    fc_pct = fc.get("coverage_pct", 0)
+    
+    fc_bar_color = "var(--green-400)" if fc_pct >= 80 else ("var(--orange-400)" if fc_pct >= 50 else "var(--red-400)")
+    
+    fc_content = f"""
+    <div style="margin-bottom: 16px;">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+            <span style="font-size: 0.85rem; color: #cbd5e1;">SOR Fabric Coverage</span>
+            <span style="font-size: 0.85rem; font-weight: 600; color: {fc_bar_color};">{fc_pct}%</span>
+        </div>
+        <div style="height: 8px; background: var(--slate-800); border-radius: 4px; overflow: hidden;">
+            <div style="height: 100%; width: {fc_pct}%; background: {fc_bar_color}; border-radius: 4px;"></div>
+        </div>
+    </div>
+    """
+    
+    if fc_missing:
+        fm_rows = ""
+        for s in fc_missing:
+            fm_rows += f"""
+            <tr>
+                <td style="font-weight: 500;">{s["vendor"]}</td>
+                <td><span style="text-transform: uppercase; font-size: 0.8rem;">{s["category"]}</span></td>
+                <td style="text-align: right;">{s["count"]}</td>
+                <td style="text-align: center; color: var(--red-400);">&#10007;</td>
+            </tr>
+            """
+        fc_content += f"""
+        <div style="font-size: 0.85rem; font-weight: 500; color: var(--orange-400); margin-bottom: 8px;">SOR Vendors Without Fabric Planes</div>
+        <table>
+            <thead><tr><th>Vendor</th><th>Category</th><th style="text-align: right;">Candidates</th><th style="text-align: center;">Plane</th></tr></thead>
+            <tbody>{fm_rows}</tbody>
+        </table>
+        """
+    
+    if fc_covered:
+        fc_rows = ""
+        for s in fc_covered:
+            fc_rows += f"""
+            <tr>
+                <td style="font-weight: 500;">{s["vendor"]}</td>
+                <td><span style="text-transform: uppercase; font-size: 0.8rem;">{s["category"]}</span></td>
+                <td style="text-align: right;">{s["count"]}</td>
+                <td style="text-align: center; color: var(--green-400);">&#10003;</td>
+            </tr>
+            """
+        fc_content += f"""
+        <div style="font-size: 0.85rem; font-weight: 500; color: var(--green-400); margin: {'16px' if fc_missing else '0'} 0 8px 0;">SOR Vendors With Fabric Planes ({len(fc_covered)})</div>
+        <table>
+            <thead><tr><th>Vendor</th><th>Category</th><th style="text-align: right;">Candidates</th><th style="text-align: center;">Plane</th></tr></thead>
+            <tbody>{fc_rows}</tbody>
+        </table>
+        """
+    
+    # --- Deep Check 4: Schema Completeness ---
+    sc = deep.get("schema_completeness", {})
+    sc_score = sc.get("completeness_score", 100)
+    sc_field_counts = sc.get("field_missing_counts", {})
+    sc_incomplete = sc.get("incomplete_candidates", [])
+    sc_total = sc.get("total_candidates", 0)
+    
+    sc_bar_color = "var(--green-400)" if sc_score >= 80 else ("var(--orange-400)" if sc_score >= 50 else "var(--red-400)")
+    
+    sc_content = f"""
+    <div style="margin-bottom: 16px;">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+            <span style="font-size: 0.85rem; color: #cbd5e1;">Data Completeness</span>
+            <span style="font-size: 0.85rem; font-weight: 600; color: {sc_bar_color};">{sc_score}%</span>
+        </div>
+        <div style="height: 8px; background: var(--slate-800); border-radius: 4px; overflow: hidden;">
+            <div style="height: 100%; width: {sc_score}%; background: {sc_bar_color}; border-radius: 4px;"></div>
+        </div>
+        <div style="font-size: 0.8rem; color: var(--slate-400); margin-top: 4px;">{sc.get("incomplete_count", 0)} of {sc_total} candidates have missing fields</div>
+    </div>
+    """
+    
+    if sc_field_counts:
+        field_labels = {
+            "vendor_name": "Vendor Name",
+            "display_name": "Display Name",
+            "category": "Category",
+            "known_endpoints": "Endpoints",
+            "preferred_modality": "Modality",
+            "connected_via_plane": "Fabric Plane"
+        }
+        max_field = max(sc_field_counts.values()) if sc_field_counts else 1
+        for field, count in sorted(sc_field_counts.items(), key=lambda x: -x[1]):
+            if count == 0:
+                continue
+            pct = int((count / max(max_field, 1)) * 100)
+            label = field_labels.get(field, field)
+            sc_content += f"""
+            <div style="margin-bottom: 6px;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
+                    <span style="font-size: 0.8rem; color: #cbd5e1;">{label}</span>
+                    <span style="font-size: 0.8rem; color: var(--orange-400);">{count} missing</span>
+                </div>
+                <div style="height: 4px; background: var(--slate-800); border-radius: 2px; overflow: hidden;">
+                    <div style="height: 100%; width: {pct}%; background: var(--orange-400); border-radius: 2px;"></div>
+                </div>
+            </div>
+            """
+    
+    # --- Deep Check 5: Duplicate Detection ---
+    dd = deep.get("duplicates", {})
+    dd_groups = dd.get("duplicate_groups", [])
+    dd_total = dd.get("total_duplicate_rows", 0)
+    
+    dd_content = ""
+    if dd_groups:
+        dd_rows = ""
+        for g in dd_groups[:15]:
+            dd_rows += f"""
+            <tr>
+                <td style="font-weight: 500;">{g["vendor"]}</td>
+                <td>{g["display_name"]}</td>
+                <td><span style="text-transform: uppercase; font-size: 0.8rem;">{g["category"]}</span></td>
+                <td style="text-align: right; font-weight: 600; color: var(--orange-400);">{g["count"]}</td>
+            </tr>
+            """
+        more_text = f'<div style="color: var(--slate-400); font-size: 0.8rem; margin-top: 8px;">...and {dd.get("total_groups", 0) - 15} more groups</div>' if dd.get("total_groups", 0) > 15 else ""
+        dd_content = f"""
+        <div style="color: var(--orange-400); font-size: 0.85rem; margin-bottom: 12px;">
+            {dd_total} candidate rows across {dd.get("total_groups", 0)} groups share the same vendor + display name combination.
+        </div>
+        <table>
+            <thead><tr><th>Vendor</th><th>Display Name</th><th>Category</th><th style="text-align: right;">Copies</th></tr></thead>
+            <tbody>{dd_rows}</tbody>
+        </table>
+        {more_text}
+        """
+    else:
+        dd_content = '<div style="color: var(--slate-400); font-size: 0.85rem;">No duplicate candidates detected.</div>'
+    
+    # Overall status: factor in deep checks
+    has_deep_issues = total_issues > 0
+    overall_match = all_match and not has_deep_issues
+    overall_color = "var(--green-400)" if overall_match else ("var(--orange-400)" if all_match else "var(--red-400)")
+    overall_icon = "&#10003;" if overall_match else "&#9888;" if all_match else "&#10007;"
+    overall_text = "All Clear" if overall_match else (f"{total_issues} Issue{'s' if total_issues != 1 else ''} Found" if all_match else "Discrepancy + Issues")
+    if overall_match:
+        overall_bg_color = "rgba(34, 197, 94, 0.1)"
+        overall_border = "1px solid rgba(34, 197, 94, 0.3)"
+    elif all_match:
+        overall_bg_color = "rgba(251, 146, 60, 0.1)"
+        overall_border = "1px solid rgba(251, 146, 60, 0.3)"
+    else:
+        overall_bg_color = "rgba(248, 113, 113, 0.1)"
+        overall_border = "1px solid rgba(248, 113, 113, 0.3)"
+    
     return HTMLResponse(content=f"""
 <!DOCTYPE html>
 <html>
@@ -3060,12 +3318,6 @@ async def ui_reconcile(aod_run_id: str):
     {NAV_STYLE}
     {UI_STYLE}
     <style>
-        .recon-header {{
-            display: flex;
-            align-items: center;
-            gap: 16px;
-            margin-bottom: 24px;
-        }}
         .recon-status {{
             display: flex;
             align-items: center;
@@ -3086,6 +3338,9 @@ async def ui_reconcile(aod_run_id: str):
         .recon-meta strong {{
             color: #cbd5e1;
         }}
+        .deep-check {{
+            margin-bottom: 24px;
+        }}
     </style>
 </head>
 <body>
@@ -3093,9 +3348,9 @@ async def ui_reconcile(aod_run_id: str):
     <div class="container">
         <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 8px;">
             <h1 style="margin-bottom: 0;">Reconciliation Report</h1>
-            <div class="recon-status" style="background: {'rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.3);' if all_match else 'rgba(248, 113, 113, 0.1); border: 1px solid rgba(248, 113, 113, 0.3);'}; color: {status_color};">
-                <span style="font-size: 1.2rem;">{status_icon}</span>
-                {status_text}
+            <div class="recon-status" style="background: {overall_bg_color}; border: {overall_border}; color: {overall_color};">
+                <span style="font-size: 1.2rem;">{overall_icon}</span>
+                {overall_text}
             </div>
         </div>
         
@@ -3125,7 +3380,7 @@ async def ui_reconcile(aod_run_id: str):
             </div>
         </div>
 
-        <!-- Reconciliation Check -->
+        <!-- Data Integrity Check -->
         <div class="section">
             <div class="panel">
                 <div class="panel-title">Data Integrity Check</div>
@@ -3147,22 +3402,14 @@ async def ui_reconcile(aod_run_id: str):
         </div>
 
         <div class="grid-2">
-            <!-- Fabric Planes -->
             <div class="panel">
                 <div class="panel-title">Fabric Planes by Type</div>
                 {fabric_bars_html if fabric_bars_html else '<div style="color: var(--slate-500); font-size: 0.85rem;">No fabric planes found for this run.</div>'}
             </div>
-
-            <!-- Category Breakdown -->
             <div class="panel">
                 <div class="panel-title">Candidates by Category</div>
                 <table>
-                    <thead>
-                        <tr>
-                            <th>Category</th>
-                            <th style="text-align: right;">Count</th>
-                        </tr>
-                    </thead>
+                    <thead><tr><th>Category</th><th style="text-align: right;">Count</th></tr></thead>
                     <tbody>
                         {category_rows_html if category_rows_html else '<tr><td colspan="2" style="color: var(--slate-500);">No categories found.</td></tr>'}
                     </tbody>
@@ -3170,18 +3417,11 @@ async def ui_reconcile(aod_run_id: str):
             </div>
         </div>
 
-        <!-- Top Vendors -->
         <div class="section">
             <div class="panel">
                 <div class="panel-title">Top Vendors</div>
                 <table>
-                    <thead>
-                        <tr>
-                            <th>Vendor</th>
-                            <th>Category</th>
-                            <th style="text-align: right;">Candidates</th>
-                        </tr>
-                    </thead>
+                    <thead><tr><th>Vendor</th><th>Category</th><th style="text-align: right;">Candidates</th></tr></thead>
                     <tbody>
                         {vendor_rows_html if vendor_rows_html else '<tr><td colspan="3" style="color: var(--slate-500);">No vendors found.</td></tr>'}
                     </tbody>
@@ -3189,7 +3429,51 @@ async def ui_reconcile(aod_run_id: str):
             </div>
         </div>
 
-        <div style="text-align: center; margin-top: 16px; padding-bottom: 32px;">
+        <!-- Deep Checks Section -->
+        <h2 style="margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--slate-700);">Deep Reconciliation Checks</h2>
+        <p class="page-subtitle" style="margin-top: -8px;">Detailed data quality analysis across 5 dimensions</p>
+
+        <!-- Check 1: Vendor Matching -->
+        <div class="deep-check">
+            <div class="panel" data-testid="check-vendor-matching">
+                {check_header("Vendor Name Consistency", vm.get("has_issues", False), len(vm_issues), "Detects case-sensitivity duplicates across vendor names")}
+                {vm_content}
+            </div>
+        </div>
+
+        <!-- Check 2: Candidate Row Check -->
+        <div class="deep-check">
+            <div class="panel" data-testid="check-candidate-rows">
+                {check_header("Candidate Row Integrity", cr.get("has_issues", False), cr_issue_count, "Flags candidates not connected or blocked from execution")}
+                {cr_content}
+            </div>
+        </div>
+
+        <!-- Check 3: Fabric Plane Coverage -->
+        <div class="deep-check">
+            <div class="panel" data-testid="check-fabric-coverage">
+                {check_header("SOR Fabric Plane Coverage", fc.get("has_issues", False), len(fc_missing), "Checks if every SOR vendor has an assigned fabric plane")}
+                {fc_content}
+            </div>
+        </div>
+
+        <!-- Check 4: Schema Completeness -->
+        <div class="deep-check">
+            <div class="panel" data-testid="check-schema-completeness">
+                {check_header("Schema Completeness", sc.get("has_issues", False), sc.get("incomplete_count", 0), "Identifies candidates with missing key data fields")}
+                {sc_content}
+            </div>
+        </div>
+
+        <!-- Check 5: Duplicate Detection -->
+        <div class="deep-check">
+            <div class="panel" data-testid="check-duplicates">
+                {check_header("Duplicate Detection", dd.get("has_issues", False), dd.get("total_groups", 0), "Finds candidates with identical vendor + display name combinations")}
+                {dd_content}
+            </div>
+        </div>
+
+        <div style="text-align: center; margin-top: 24px; padding-bottom: 32px;">
             <a href="/ui/pipes" class="btn" data-testid="link-back-pipes" style="margin-right: 8px;">Back to Pipes</a>
             <a href="/api/handoff/aod/run/{aod_run_id}/reconciliation" target="_blank" class="btn btn-sm" data-testid="link-raw-json" style="color: var(--slate-400); border-color: var(--slate-600);">View Raw JSON</a>
         </div>

@@ -2232,10 +2232,204 @@ def get_aod_reconciliation(aod_run_id: str) -> dict:
     snap_row = cursor.fetchone()
     snapshot_name = snap_row[0] if snap_row else None
     
+    # ===== DEEP CHECK 1: Per-Vendor Matching =====
+    # All unique vendors that AOD sent for this run
+    cursor.execute("""
+        SELECT LOWER(COALESCE(vendor_name, 'unknown')) as vendor, COUNT(*) as count
+        FROM connection_candidates
+        WHERE aod_run_id = ?
+        GROUP BY vendor
+        ORDER BY count DESC
+    """, (aod_run_id,))
+    vendors_stored = {row[0]: row[1] for row in cursor.fetchall()}
+    
+    # Check for case-sensitive duplicates (e.g. "Salesforce" vs "salesforce")
+    cursor.execute("""
+        SELECT vendor_name, COUNT(*) as count
+        FROM connection_candidates
+        WHERE aod_run_id = ?
+        GROUP BY vendor_name
+        ORDER BY count DESC
+    """, (aod_run_id,))
+    vendors_raw = {row[0]: row[1] for row in cursor.fetchall()}
+    
+    # Find case duplicates: group raw vendor names by lowercase
+    vendor_case_groups = {}
+    for raw_name, cnt in vendors_raw.items():
+        key = (raw_name or "unknown").lower()
+        if key not in vendor_case_groups:
+            vendor_case_groups[key] = []
+        vendor_case_groups[key].append({"name": raw_name, "count": cnt})
+    
+    vendor_case_duplicates = []
+    for key, variants in vendor_case_groups.items():
+        if len(variants) > 1:
+            vendor_case_duplicates.append({
+                "canonical": key,
+                "variants": variants,
+                "total": sum(v["count"] for v in variants)
+            })
+    
+    # ===== DEEP CHECK 2: Per-Candidate Row Check =====
+    # Find candidates from this run that might have issues
+    cursor.execute("""
+        SELECT candidate_id, vendor_name, display_name, category, status, 
+               connected_via_plane, execution_allowed
+        FROM connection_candidates
+        WHERE aod_run_id = ?
+    """, (aod_run_id,))
+    all_candidates = cursor.fetchall()
+    
+    # Check for candidates not connected
+    unconnected_candidates = []
+    blocked_candidates = []
+    for row in all_candidates:
+        cid, vendor, display, cat, status, plane, exec_allowed = row
+        if status and status.lower() not in ('connected', 'triaged'):
+            unconnected_candidates.append({
+                "candidate_id": cid,
+                "vendor": vendor,
+                "display_name": display,
+                "category": cat,
+                "status": status
+            })
+        if exec_allowed is not None and not exec_allowed:
+            blocked_candidates.append({
+                "candidate_id": cid,
+                "vendor": vendor,
+                "display_name": display,
+                "category": cat,
+                "status": status
+            })
+    
+    # ===== DEEP CHECK 3: Fabric Plane Coverage =====
+    # Which SOR vendors DON'T have a fabric plane assigned?
+    cursor.execute("""
+        SELECT LOWER(COALESCE(vendor_name, 'unknown')) as vendor,
+               LOWER(COALESCE(category, 'unknown')) as cat,
+               connected_via_plane
+        FROM connection_candidates
+        WHERE aod_run_id = ? AND LOWER(category) IN ({placeholders})
+    """.format(placeholders=placeholders), (aod_run_id, *sor_categories))
+    sor_rows = cursor.fetchall()
+    
+    # Get existing fabric planes for this run
+    cursor.execute("""
+        SELECT LOWER(vendor) as vendor, plane_type
+        FROM fabric_planes
+        WHERE aod_run_id = ?
+    """, (aod_run_id,))
+    fabric_vendors = {}
+    for row in cursor.fetchall():
+        fabric_vendors[row[0]] = row[1]
+    
+    # Find SOR vendors missing fabric planes
+    sor_vendor_cats = {}
+    for vendor, cat, plane in sor_rows:
+        if vendor not in sor_vendor_cats:
+            sor_vendor_cats[vendor] = {"category": cat, "count": 0, "has_plane": plane is not None and plane != "", "plane_name": plane}
+        sor_vendor_cats[vendor]["count"] += 1
+        if vendor in fabric_vendors:
+            sor_vendor_cats[vendor]["has_plane"] = True
+            sor_vendor_cats[vendor]["plane_name"] = fabric_vendors[vendor]
+    
+    sors_missing_planes = []
+    sors_with_planes = []
+    for vendor, info in sorted(sor_vendor_cats.items(), key=lambda x: -x[1]["count"]):
+        entry = {"vendor": vendor, "category": info["category"], "count": info["count"], "plane": info.get("plane_name")}
+        if info["has_plane"]:
+            sors_with_planes.append(entry)
+        else:
+            sors_missing_planes.append(entry)
+    
+    # ===== DEEP CHECK 4: Schema Completeness =====
+    # Find candidates missing key fields
+    cursor.execute("""
+        SELECT candidate_id, vendor_name, display_name, category, 
+               known_endpoints, preferred_modality, priority_score,
+               connected_via_plane
+        FROM connection_candidates
+        WHERE aod_run_id = ?
+    """, (aod_run_id,))
+    completeness_issues = []
+    field_missing_counts = {"vendor_name": 0, "display_name": 0, "category": 0, "known_endpoints": 0, "preferred_modality": 0, "connected_via_plane": 0}
+    total_for_completeness = 0
+    
+    for row in cursor.fetchall():
+        cid, vendor, display, cat, endpoints, modality, score, plane = row
+        total_for_completeness += 1
+        missing = []
+        if not vendor or vendor.lower() in ('unknown', ''):
+            missing.append("vendor_name")
+            field_missing_counts["vendor_name"] += 1
+        if not display or display.lower() in ('unknown', ''):
+            missing.append("display_name")
+            field_missing_counts["display_name"] += 1
+        if not cat or cat.lower() in ('unknown', ''):
+            missing.append("category")
+            field_missing_counts["category"] += 1
+        if not endpoints or endpoints in ('[]', '', 'null'):
+            missing.append("known_endpoints")
+            field_missing_counts["known_endpoints"] += 1
+        if not modality or modality.lower() in ('unknown', ''):
+            missing.append("preferred_modality")
+            field_missing_counts["preferred_modality"] += 1
+        if not plane or plane == '':
+            missing.append("connected_via_plane")
+            field_missing_counts["connected_via_plane"] += 1
+        if missing:
+            completeness_issues.append({
+                "candidate_id": cid,
+                "vendor": vendor,
+                "display_name": display,
+                "missing_fields": missing
+            })
+    
+    completeness_score = round(
+        (1 - len(completeness_issues) / max(total_for_completeness, 1)) * 100, 1
+    )
+    
+    # ===== DEEP CHECK 5: Duplicate Detection =====
+    # Find candidates that share the same vendor + endpoint combination
+    cursor.execute("""
+        SELECT LOWER(COALESCE(vendor_name, 'unknown')) as vendor,
+               LOWER(COALESCE(display_name, '')) as display,
+               LOWER(COALESCE(category, 'unknown')) as cat,
+               COUNT(*) as count,
+               GROUP_CONCAT(candidate_id, '|') as ids
+        FROM connection_candidates
+        WHERE aod_run_id = ?
+        GROUP BY vendor, display
+        HAVING count > 1
+        ORDER BY count DESC
+    """, (aod_run_id,))
+    
+    duplicates = []
+    total_duplicate_rows = 0
+    for row in cursor.fetchall():
+        vendor, display, cat, count, ids = row
+        duplicates.append({
+            "vendor": vendor,
+            "display_name": display,
+            "category": cat,
+            "count": count,
+            "candidate_ids": ids.split("|") if ids else []
+        })
+        total_duplicate_rows += count
+    
     conn.close()
     
     # Canonical definition: Candidates = Pipes
     pipes_count = candidates_stored
+    
+    # Overall health scoring
+    issues_count = (
+        len(vendor_case_duplicates) +
+        len(unconnected_candidates) +
+        len(sors_missing_planes) +
+        len(completeness_issues) +
+        len(duplicates)
+    )
     
     return {
         "aod_run_id": aod_run_id,
@@ -2258,6 +2452,43 @@ def get_aod_reconciliation(aod_run_id: str) -> dict:
             "candidates_match": handoff_row[1] == candidates_stored if handoff_row else False,
             "pipes_match": handoff_row[1] == pipes_count if handoff_row else False,
             "discrepancy": (handoff_row[1] - candidates_stored) if handoff_row else 0
+        },
+        "deep_checks": {
+            "vendor_matching": {
+                "total_vendors": len(vendors_stored),
+                "vendors_by_count": vendors_stored,
+                "case_duplicates": vendor_case_duplicates,
+                "has_issues": len(vendor_case_duplicates) > 0
+            },
+            "candidate_rows": {
+                "total": len(all_candidates),
+                "unconnected": unconnected_candidates[:25],
+                "unconnected_count": len(unconnected_candidates),
+                "blocked": blocked_candidates[:25],
+                "blocked_count": len(blocked_candidates),
+                "has_issues": len(unconnected_candidates) > 0 or len(blocked_candidates) > 0
+            },
+            "fabric_coverage": {
+                "sors_with_planes": sors_with_planes,
+                "sors_missing_planes": sors_missing_planes,
+                "coverage_pct": round(len(sors_with_planes) / max(len(sors_with_planes) + len(sors_missing_planes), 1) * 100, 1),
+                "has_issues": len(sors_missing_planes) > 0
+            },
+            "schema_completeness": {
+                "total_candidates": total_for_completeness,
+                "incomplete_count": len(completeness_issues),
+                "incomplete_candidates": completeness_issues[:25],
+                "field_missing_counts": field_missing_counts,
+                "completeness_score": completeness_score,
+                "has_issues": len(completeness_issues) > 0
+            },
+            "duplicates": {
+                "duplicate_groups": duplicates[:25],
+                "total_groups": len(duplicates),
+                "total_duplicate_rows": total_duplicate_rows,
+                "has_issues": len(duplicates) > 0
+            },
+            "total_issues": issues_count
         }
     }
 
