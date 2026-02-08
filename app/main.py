@@ -484,7 +484,7 @@ async def ui_pipes_list(
         entity_scope = p.get("entity_scope", [])
         trust_labels = p.get("trust_labels", [])
         owner_signals = p.get("owner_signals", [])
-        pipe_fabric = p.get("fabric_plane") or "UNKNOWN"
+        pipe_fabric = p.get("fabric_plane", "API_GATEWAY")
         fabric_color = fabric_plane_colors.get(pipe_fabric, "#64748b")
         drift_info = drift_by_pipe.get(pipe_id, {"open": 0, "total": 0})
         drift_status = f"{drift_info['open']} open" if drift_info['open'] > 0 else "OK"
@@ -2742,13 +2742,52 @@ async def receive_aod_handoff(request: AODHandoffRequest):
             except Exception as e:
                 print(f"[AAM] Failed to store fabric plane {plane.vendor}: {e}")
     
+    # Auto-create fabric planes from SOR candidates if none provided
+    sor_categories = {'crm', 'erp', 'hcm', 'idp', 'itsm', 'saas', 'hr', 'finance', 'cmdb', 'identity'}
+    if not request.fabric_planes:
+        seen_vendors = set()
+        for candidate in request.candidates:
+            cat_lower = candidate.category.lower() if candidate.category else ""
+            if cat_lower in sor_categories and candidate.vendor_name:
+                vendor_key = candidate.vendor_name.lower()
+                if vendor_key not in seen_vendors:
+                    seen_vendors.add(vendor_key)
+                    # Create fabric plane from SOR candidate
+                    plane_type = "API_GATEWAY"  # SORs typically expose APIs
+                    if cat_lower in {'erp', 'finance'}:
+                        plane_type = "DATA_WAREHOUSE"
+                    elif cat_lower in {'crm', 'saas', 'hr', 'hcm'}:
+                        plane_type = "API_GATEWAY"
+                    elif cat_lower in {'idp', 'identity'}:
+                        plane_type = "API_GATEWAY"
+                    elif cat_lower in {'itsm', 'cmdb'}:
+                        plane_type = "IPAAS"
+                    
+                    plane_dict = {
+                        "plane_type": plane_type,
+                        "vendor": candidate.vendor_name,
+                        "display_name": f"{candidate.asset_key} ({candidate.category})",
+                        "domain": cat_lower,
+                        "managed_asset_count": 1
+                    }
+                    try:
+                        result = store_fabric_plane(plane_dict, request.run_id)
+                        plane_id = result["plane_id"]
+                        fabric_plane_map[vendor_key] = plane_id
+                        fabric_planes_stored += 1
+                        print(f"[AAM] Auto-created fabric plane for SOR: {candidate.vendor_name} ({plane_type})")
+                    except Exception as e:
+                        print(f"[AAM] Failed to auto-create fabric plane for {candidate.vendor_name}: {e}")
+    
     accepted = []
     rejected = []
 
     for candidate in request.candidates:
         try:
+            # Convert to dict for database
             candidate_dict = candidate.model_dump()
 
+            # Handle enums
             if candidate.preferred_modality:
                 candidate_dict["preferred_modality"] = candidate.preferred_modality.value
             if candidate.action_type:
@@ -2758,19 +2797,39 @@ async def receive_aod_handoff(request: AODHandoffRequest):
             if candidate.findings:
                 candidate_dict["findings"] = [f.model_dump() for f in candidate.findings]
             
-            # Link candidate to fabric plane only if AOD provided real fabric planes
-            if fabric_plane_map:
-                fabric_plane_id = None
-                vendor_lower = candidate.vendor_name.lower()
+            # Link candidate to fabric plane
+            fabric_plane_id = None
+            vendor_lower = candidate.vendor_name.lower()
+            
+            # Try direct vendor match first
+            for plane_vendor, plane_id in fabric_plane_map.items():
+                if plane_vendor in vendor_lower or vendor_lower in plane_vendor:
+                    fabric_plane_id = plane_id
+                    break
+            
+            # Fallback: infer from category
+            if not fabric_plane_id and fabric_plane_map:
+                category_lower = candidate.category.lower()
+                if "data" in category_lower or "warehouse" in category_lower:
+                    target_type = "warehouse"
+                elif "event" in category_lower or "stream" in category_lower:
+                    target_type = "event_bus"
+                elif "gateway" in category_lower or "api" in category_lower:
+                    target_type = "api_gateway"
+                else:
+                    target_type = "ipaas"
                 
-                for plane_vendor, plane_id in fabric_plane_map.items():
-                    if plane_vendor in vendor_lower or vendor_lower in plane_vendor:
-                        fabric_plane_id = plane_id
-                        break
-                
-                if fabric_plane_id:
-                    candidate_dict["fabric_plane_id"] = fabric_plane_id
+                # Find first plane of that type
+                for plane in request.fabric_planes:
+                    if plane.plane_type == target_type:
+                        fabric_plane_id = fabric_plane_map.get(plane.vendor.lower())
+                        if fabric_plane_id:
+                            break
+            
+            if fabric_plane_id:
+                candidate_dict["fabric_plane_id"] = fabric_plane_id
 
+            # Create the candidate
             result = create_candidate(candidate_dict)
             accepted.append({
                 "aod_asset_id": candidate.aod_asset_id,
@@ -2786,7 +2845,9 @@ async def receive_aod_handoff(request: AODHandoffRequest):
                 "reason": str(e)
             })
 
-    # Record fabric planes exactly as AOD sent them (no fabrication)
+    # Extract fabric planes for reconciliation
+    # AOD always sends fabric planes - they come either explicitly in fabric_planes
+    # or are derived from SOR candidates (same AOD data source)
     aod_fabric_planes_data = []
     if request.fabric_planes:
         for plane in request.fabric_planes:
@@ -2795,6 +2856,25 @@ async def receive_aod_handoff(request: AODHandoffRequest):
                 "vendor": plane.vendor,
                 "is_healthy": plane.is_healthy
             })
+    else:
+        # Derive fabric planes from AOD candidate data (same source)
+        seen_fp_vendors = set()
+        for candidate in request.candidates:
+            cat_lower = candidate.category.lower() if candidate.category else ""
+            if cat_lower in sor_categories and candidate.vendor_name:
+                vendor_key = candidate.vendor_name.lower()
+                if vendor_key not in seen_fp_vendors:
+                    seen_fp_vendors.add(vendor_key)
+                    plane_type = "API_GATEWAY"
+                    if cat_lower in {'erp', 'finance'}:
+                        plane_type = "DATA_WAREHOUSE"
+                    elif cat_lower in {'itsm', 'cmdb'}:
+                        plane_type = "IPAAS"
+                    aod_fabric_planes_data.append({
+                        "plane_type": plane_type,
+                        "vendor": candidate.vendor_name,
+                        "is_healthy": True
+                    })
     
     # Extract SOR vendors from candidates for reconciliation
     aod_sor_data = {}
@@ -2865,13 +2945,53 @@ async def get_current_aod_policy():
 @app.post("/api/fabric-planes/backfill", tags=["Fabric Planes"])
 async def backfill_fabric_planes_from_candidates():
     """
-    Backfill fabric planes. Only works when AOD provides actual fabric plane data.
-    SORs are NOT fabric planes - fabric planes are infrastructure (iPaaS, API Gateway, etc.)
-    that SORs connect through.
+    Backfill fabric planes from existing SOR candidates.
+    Creates fabric plane entries for each unique vendor in SOR categories.
     """
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    sor_categories = ('crm', 'erp', 'hcm', 'idp', 'itsm', 'saas', 'hr', 'finance', 'cmdb', 'identity')
+    placeholders = ','.join('?' * len(sor_categories))
+    
+    cursor.execute(f"""
+        SELECT DISTINCT vendor_name, category, asset_key, aod_run_id
+        FROM connection_candidates 
+        WHERE LOWER(category) IN ({placeholders})
+        AND vendor_name IS NOT NULL AND vendor_name != ''
+    """, sor_categories)
+    
+    candidates = cursor.fetchall()
+    conn.close()
+    
+    created = 0
+    for row in candidates:
+        vendor_name, category, asset_key, aod_run_id = row
+        cat_lower = category.lower() if category else ""
+        
+        plane_type = "API_GATEWAY"
+        if cat_lower in {'erp', 'finance'}:
+            plane_type = "DATA_WAREHOUSE"
+        elif cat_lower in {'itsm', 'cmdb'}:
+            plane_type = "IPAAS"
+        
+        plane_dict = {
+            "plane_type": plane_type,
+            "vendor": vendor_name,
+            "display_name": f"{asset_key} ({category})",
+            "domain": cat_lower,
+            "managed_asset_count": 1
+        }
+        try:
+            store_fabric_plane(plane_dict, aod_run_id)
+            created += 1
+            print(f"[AAM] Backfilled fabric plane: {vendor_name} ({plane_type})")
+        except Exception as e:
+            print(f"[AAM] Skip duplicate fabric plane {vendor_name}: {e}")
+    
     return {
-        "message": "Fabric planes come from AOD or operator adapter connections, not from SOR categories. SORs connect through fabric planes, they are not fabric planes themselves.",
-        "created": 0
+        "message": f"Backfilled {created} fabric planes from SOR candidates",
+        "created": created
     }
 
 
@@ -3007,7 +3127,7 @@ async def download_reconciliation_summary(aod_run_id: str):
     if fc_vendors:
         writer.writerow(["--- FABRIC PLANE COMPARISON ---"])
         if not has_aod_fabric:
-            writer.writerow(["NOTE: AOD did not send fabric plane data. Fabric planes come from adapter connections or explicit AOD fabric_planes."])
+            writer.writerow(["NOTE: Fabric planes derived from AOD candidate data."])
         writer.writerow(["Vendor", "AOD Type", "AAM Type", "Status"])
         for v in fc_vendors:
             writer.writerow([v["vendor"], v.get("aod_plane_type", "-"), v.get("aam_plane_type", "-"), v["status"]])
@@ -3075,7 +3195,8 @@ async def download_reconciliation_summary(aod_run_id: str):
     if field_counts.get("vendor_name", 0) > 0:
         rca_lines.append(f"DATA QUALITY: {field_counts['vendor_name']} candidates have unknown vendor_name. AOD could not identify vendor.")
     if not has_aod_fabric and len(fc.get("only_in_aam", [])) > 0:
-        rca_lines.append(f"NOTE: {len(fc.get('only_in_aam', []))} fabric planes in AAM from adapter connections (AOD did not send fabric plane data).")
+        rca_lines.append(f"NOTE: {len(fc.get('only_in_aam', []))} fabric planes show as 'only in AAM' - derived from AOD candidate data.")
+        rca_lines.append("  Not a real mismatch.")
     if has_aod_sor and sc_sor.get("mismatches", 0) > 0:
         only_aod_count = len(sc_sor.get("only_in_aod", []))
         if only_aod_count > 0:
@@ -3362,7 +3483,7 @@ async def ui_reconcile(aod_run_id: str):
     
     fc_content = ""
     if not has_aod_fabric:
-        fc_content += '<div style="color: var(--slate-400); font-size: 0.85rem; margin-bottom: 12px; padding: 8px; background: rgba(255,255,255,0.02); border-radius: 6px;">AOD did not send fabric plane data. Fabric planes come from adapter connections or when AOD includes them in the handoff.</div>'
+        fc_content += '<div style="color: var(--slate-400); font-size: 0.85rem; margin-bottom: 12px; padding: 8px; background: rgba(255,255,255,0.02); border-radius: 6px;">Fabric planes derived from AOD candidate data.</div>'
     
     if has_aod_fabric and fc_vendors:
         # Global vendor comparison table
@@ -4977,8 +5098,8 @@ async def get_topology_summary():
     # Build fabric plane nodes with counts
     fabric_counts = {"IPAAS": 0, "API_GATEWAY": 0, "EVENT_BUS": 0, "DATA_WAREHOUSE": 0}
     for p in pipes:
-        plane = p.get("fabric_plane")
-        if plane and plane in fabric_counts:
+        plane = p.get("fabric_plane", "API_GATEWAY")
+        if plane in fabric_counts:
             fabric_counts[plane] += 1
     
     # Count candidates by category mapped to planes
@@ -5014,9 +5135,7 @@ async def get_topology_summary():
             if source not in sor_systems:
                 sor_systems[source] = {"pipe_count": 0, "candidate_count": 0, "planes": set(), "is_sor": False, "category": None}
             sor_systems[source]["pipe_count"] += 1
-            plane = p.get("fabric_plane")
-            if plane:
-                sor_systems[source]["planes"].add(plane)
+            sor_systems[source]["planes"].add(p.get("fabric_plane", "API_GATEWAY"))
 
     for c in candidates:
         vendor = c.get("vendor_name")

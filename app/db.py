@@ -487,7 +487,7 @@ def create_pipe(pipe_data: dict) -> dict:
     """, (
         pipe_id,
         pipe_data["display_name"],
-        pipe_data.get("fabric_plane"),
+        pipe_data.get("fabric_plane", "API_GATEWAY"),
         pipe_data["modality"],
         pipe_data["source_system"],
         pipe_data["transport_kind"],
@@ -690,8 +690,8 @@ def _candidate_to_pipe(row) -> dict:
     """
     keys = row.keys()
     
-    # Extract fabric plane type (from JOIN) - None if not known
-    fabric_plane = row["fabric_plane"].upper() if "fabric_plane" in keys and row["fabric_plane"] else None
+    # Extract fabric plane type (from JOIN)
+    fabric_plane = row["fabric_plane"].upper() if "fabric_plane" in keys and row["fabric_plane"] else "API_GATEWAY"
     
     # Map category to modality (inferred)
     category_lower = row["category"].lower() if row["category"] else ""
@@ -737,9 +737,9 @@ def _row_to_pipe(row) -> dict:
     schema_info = json.loads(row["schema_info"]) if row["schema_info"] else None
     access_info = json.loads(row["access_info"]) if row["access_info"] else None
     
-    # Handle fabric_plane - None if not known
+    # Handle fabric_plane with fallback for older records
     keys = row.keys()
-    fabric_plane = row["fabric_plane"] if "fabric_plane" in keys and row["fabric_plane"] else None
+    fabric_plane = row["fabric_plane"] if "fabric_plane" in keys and row["fabric_plane"] else "API_GATEWAY"
     
     return {
         "pipe_id": row["pipe_id"],
@@ -1373,7 +1373,7 @@ def get_pipe_stats() -> dict:
 
     cursor.execute("SELECT fabric_plane, COUNT(*) FROM declared_pipes GROUP BY fabric_plane")
     for row in cursor.fetchall():
-        plane = row[0] or "UNKNOWN"
+        plane = row[0] or "API_GATEWAY"
         stats["by_fabric_plane"][plane] = row[1]
 
     cursor.execute("SELECT modality, COUNT(*) FROM declared_pipes GROUP BY modality")
@@ -1417,13 +1417,13 @@ def get_topology_data() -> dict:
 
     for pipe in pipes:
         pipe_id = pipe["pipe_id"]
-        fabric_plane = pipe["fabric_plane"]
+        fabric_plane = pipe["fabric_plane"] or "API_GATEWAY"
         source_system = pipe["source_system"]
 
-        if fabric_plane:
-            fabric_planes.add(fabric_plane)
+        fabric_planes.add(fabric_plane)
         source_systems.add(source_system)
 
+        # Add pipe node
         entity_scope = json.loads(pipe["entity_scope"]) if pipe["entity_scope"] else []
         trust_labels = json.loads(pipe["trust_labels"]) if pipe["trust_labels"] else []
 
@@ -1443,14 +1443,14 @@ def get_topology_data() -> dict:
             }
         })
 
-        if fabric_plane:
-            edges.append({
-                "id": f"edge:pipe_plane:{pipe_id}",
-                "source": f"pipe:{pipe_id}",
-                "target": f"plane:{fabric_plane}",
-                "type": "pipe_in_plane",
-                "metadata": {}
-            })
+        # Add edge: pipe -> fabric_plane
+        edges.append({
+            "id": f"edge:pipe_plane:{pipe_id}",
+            "source": f"pipe:{pipe_id}",
+            "target": f"plane:{fabric_plane}",
+            "type": "pipe_in_plane",
+            "metadata": {}
+        })
 
         # Add edge: pipe -> source_system
         edges.append({
@@ -1569,15 +1569,6 @@ def get_topology_data() -> dict:
     total_candidates = candidate_stats[0] or 0
     connected_candidates = candidate_stats[1] or 0
 
-    # Get SOR count (candidates with SOR categories)
-    sor_categories = ['crm', 'erp', 'hcm', 'idp', 'itsm', 'saas', 'hr', 'finance', 'cmdb', 'identity']
-    placeholders = ','.join('?' * len(sor_categories))
-    cursor.execute(f"""
-        SELECT COUNT(*) FROM connection_candidates
-        WHERE LOWER(category) IN ({placeholders})
-    """, sor_categories)
-    sors_count = cursor.fetchone()[0]
-
     conn.close()
 
     # Compute stats
@@ -1590,6 +1581,15 @@ def get_topology_data() -> dict:
     for edge in edges:
         edge_type = edge["type"]
         edges_by_type[edge_type] = edges_by_type.get(edge_type, 0) + 1
+
+    # Get SOR count (candidates with SOR categories)
+    sor_categories = ['crm', 'erp', 'hcm', 'idp', 'itsm', 'saas', 'hr', 'finance', 'cmdb', 'identity']
+    placeholders = ','.join('?' * len(sor_categories))
+    cursor.execute(f"""
+        SELECT COUNT(*) FROM connection_candidates
+        WHERE LOWER(category) IN ({placeholders})
+    """, sor_categories)
+    sors_count = cursor.fetchone()[0]
     
     # Canonical labels: SORs, Fabrics, Pipes (not "nodes")
     stats = {
@@ -1637,7 +1637,7 @@ def get_topology_for_pipe(pipe_id: str) -> dict:
         conn.close()
         return {"nodes": [], "edges": [], "stats": {}}
 
-    fabric_plane = pipe["fabric_plane"]
+    fabric_plane = pipe["fabric_plane"] or "API_GATEWAY"
     source_system = pipe["source_system"]
     entity_scope = json.loads(pipe["entity_scope"]) if pipe["entity_scope"] else []
     trust_labels = json.loads(pipe["trust_labels"]) if pipe["trust_labels"] else []
@@ -1660,22 +1660,22 @@ def get_topology_for_pipe(pipe_id: str) -> dict:
         }
     })
 
+    # Add fabric plane node
     plane_colors = {
         "IPAAS": "#22d3ee",
         "API_GATEWAY": "#a78bfa",
         "EVENT_BUS": "#f97316",
         "DATA_WAREHOUSE": "#10b981"
     }
-    if fabric_plane:
-        nodes.append({
-            "id": f"plane:{fabric_plane}",
-            "type": "fabric_plane",
-            "label": fabric_plane.replace("_", " ").title(),
-            "metadata": {
-                "plane_type": fabric_plane,
-                "color": plane_colors.get(fabric_plane, "#64748b")
-            }
-        })
+    nodes.append({
+        "id": f"plane:{fabric_plane}",
+        "type": "fabric_plane",
+        "label": fabric_plane.replace("_", " ").title(),
+        "metadata": {
+            "plane_type": fabric_plane,
+            "color": plane_colors.get(fabric_plane, "#64748b")
+        }
+    })
 
     # Add source system node
     nodes.append({
@@ -1686,14 +1686,13 @@ def get_topology_for_pipe(pipe_id: str) -> dict:
     })
 
     # Add edges
-    if fabric_plane:
-        edges.append({
-            "id": f"edge:pipe_plane:{pipe_id}",
-            "source": f"pipe:{pipe_id}",
-            "target": f"plane:{fabric_plane}",
-            "type": "pipe_in_plane",
-            "metadata": {}
-        })
+    edges.append({
+        "id": f"edge:pipe_plane:{pipe_id}",
+        "source": f"pipe:{pipe_id}",
+        "target": f"plane:{fabric_plane}",
+        "type": "pipe_in_plane",
+        "metadata": {}
+    })
     edges.append({
         "id": f"edge:pipe_source:{pipe_id}",
         "source": f"pipe:{pipe_id}",
