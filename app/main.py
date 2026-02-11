@@ -122,6 +122,12 @@ NAV_STYLE = """
         background-clip: text;
         text-decoration: none;
     }
+    .nav-separator {
+        width: 1px;
+        height: 24px;
+        background: rgba(148, 163, 184, 0.25);
+        flex-shrink: 0;
+    }
     .nav-links { display: flex; gap: 8px; }
     .nav-link {
         color: #ffffff;
@@ -150,6 +156,8 @@ NAV_STYLE = """
 
 NAV_HTML = """
 <nav class="nav">
+    <a href="/ui/topology" class="nav-brand">AAM</a>
+    <div class="nav-separator"></div>
     <div class="nav-links">
         <a href="/ui/pipes" class="nav-link{pipes_active}">Pipes</a>
         <a href="/ui/candidates" class="nav-link{candidates_active}">Candidates</a>
@@ -360,6 +368,8 @@ def ui_nav(active: str = "") -> str:
         return " active" if page == active else ""
     return f"""
 <nav class="nav">
+    <a href="/ui/topology" class="nav-brand" data-testid="nav-brand">AAM</a>
+    <div class="nav-separator"></div>
     <div class="nav-links">
         <a href="/ui/topology" class="nav-link{active_class('topology')}" data-testid="nav-topology">Topology</a>
         <a href="/ui/pipes" class="nav-link{active_class('pipes')}" data-testid="nav-pipes">Pipes</a>
