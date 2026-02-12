@@ -331,6 +331,7 @@ async def ui_pipes_list(
         </div>
         
         <div class="controls">
+            <button class="btn" id="btn-run-inference" data-testid="btn-run-inference">Run Inference</button>
             <button class="btn" id="btn-run-collector" data-testid="btn-run-collector">Run Mock Collector</button>
             <button class="btn" id="btn-export-dcl" data-testid="btn-export-dcl">Export to DCL</button>
             <select id="filter" data-testid="filter" onchange="applyFilter()">{filter_options}</select>
@@ -484,6 +485,25 @@ async def ui_pipes_list(
         // Initialize toggle state from localStorage on page load
         setDataSource(currentDataSource, false);
         
+        document.getElementById('btn-run-inference').addEventListener('click', async function() {{
+            this.disabled = true;
+            this.textContent = 'Running...';
+            try {{
+                const res = await fetch('/api/aam/infer', {{ method: 'POST' }});
+                const data = await res.json();
+                if (res.ok) {{
+                    showToast('Inference complete: ' + data.pipes_created + ' pipes created', 'success');
+                    setTimeout(() => location.reload(), 1500);
+                }} else {{
+                    showToast('Error: ' + (data.detail || 'Failed'), 'error');
+                }}
+            }} catch (e) {{
+                showToast('Error: ' + e.message, 'error');
+            }}
+            this.disabled = false;
+            this.textContent = 'Run Inference';
+        }});
+
         document.getElementById('btn-run-collector').addEventListener('click', async function() {{
             this.disabled = true;
             this.textContent = 'Running...';
