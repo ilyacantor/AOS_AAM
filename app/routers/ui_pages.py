@@ -1863,6 +1863,10 @@ async def ui_topology():
                 <div class="legend-shape"><svg viewBox="0 0 12 12"><polygon points="6,1 11,11 1,11" fill="#c084fc"/></svg></div>
                 <span>Candidate</span>
             </div>
+            <div class="legend-item">
+                <div class="legend-shape"><svg viewBox="0 0 12 12"><rect x="1" y="1" width="10" height="10" fill="#f59e0b" stroke="#fbbf24" stroke-width="2"/></svg></div>
+                <span>SOR (Farm)</span>
+            </div>
         </div>
 
         <div id="node-details" class="node-details">
