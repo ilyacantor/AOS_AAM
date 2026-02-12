@@ -1593,7 +1593,7 @@ async def ui_topology():
             <button class="btn btn-success" onclick="refreshData()">Refresh Data</button>
         </div>
 
-        <div style="padding-bottom: 80px;">
+        <div style="padding-right: 80px;">
         <div id="topology-container"></div>
         </div>
 
