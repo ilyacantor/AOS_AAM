@@ -171,8 +171,9 @@ def get_aod_reconciliation(aod_run_id: str) -> dict:
                 "status": status
             })
     
-    # ===== DEEP CHECK 3: Fabric Plane Comparison (AOD vs AAM) =====
-    # AOD side: what AOD told us about fabric planes (from handoff log)
+    # ===== DEEP CHECK 3: Fabric Plane Comparison (AOD-explicit vs AAM-stored) =====
+    # AOD side: what AOD *explicitly* told us about fabric planes (from handoff log)
+    # These are ONLY planes AOD sent in the fabric_planes field, NOT AAM-inferred ones
     cursor.execute("""
         SELECT aod_fabric_planes, aod_sor_vendors
         FROM aod_handoff_log
@@ -194,75 +195,85 @@ def get_aod_reconciliation(aod_run_id: str) -> dict:
         except (json.JSONDecodeError, TypeError):
             pass
     
-    # Build AOD vendor list (global, vendor -> plane_type mapping)
-    aod_vendor_map = {}  # vendor_lower -> {vendor, plane_type, is_healthy}
+    # Build AOD vendor list — only explicit planes AOD sent
+    aod_vendor_map = {}
     for p in aod_fabric_planes_raw:
         v = p.get("vendor", "unknown")
         aod_vendor_map[v.lower()] = {
             "vendor": v,
             "plane_type": p.get("plane_type", "").upper(),
-            "is_healthy": p.get("is_healthy", True)
+            "is_healthy": p.get("is_healthy", True),
+            "source": p.get("source", "aod_explicit"),
         }
     
-    # AAM side: ALL fabric planes currently in AAM (AAM's actual state, not filtered by run)
+    # AAM side: ALL fabric planes currently stored (for this run)
     cursor.execute("""
-        SELECT plane_type, vendor, display_name
+        SELECT plane_type, vendor, display_name, aod_run_id
         FROM fabric_planes
+        WHERE aod_run_id = ?
         ORDER BY plane_type, vendor
-    """)
+    """, (aod_run_id,))
     aam_fabric_rows = cursor.fetchall()
     
-    # Build AAM vendor list (global), normalizing plane_type to uppercase
-    aam_vendor_map = {}  # vendor_lower -> {vendor, plane_type, display_name}
+    aam_vendor_map = {}
     for row in aam_fabric_rows:
         v = row[1]
         aam_vendor_map[v.lower()] = {
             "vendor": v,
             "plane_type": (row[0] or "").upper(),
-            "display_name": row[2]
+            "display_name": row[2],
         }
     
-    # Global vendor comparison
+    has_aod_fabric_data = len(aod_fabric_planes_raw) > 0
+    
+    # Comparison: AOD-explicit planes vs AAM-stored planes
     aod_vendor_keys = set(aod_vendor_map.keys())
     aam_vendor_keys = set(aam_vendor_map.keys())
-    only_in_aod_global = aod_vendor_keys - aam_vendor_keys
-    only_in_aam_global = aam_vendor_keys - aod_vendor_keys
-    in_both_global = aod_vendor_keys & aam_vendor_keys
     
-    # Build fabric comparison result
+    if has_aod_fabric_data:
+        only_in_aod_global = aod_vendor_keys - aam_vendor_keys
+        only_in_aam_global = aam_vendor_keys - aod_vendor_keys
+        in_both_global = aod_vendor_keys & aam_vendor_keys
+    else:
+        only_in_aod_global = set()
+        only_in_aam_global = set()
+        in_both_global = set()
+    
     fabric_vendors = []
-    for vk in sorted(aod_vendor_keys | aam_vendor_keys):
+    all_keys = sorted(aod_vendor_keys | aam_vendor_keys) if has_aod_fabric_data else sorted(aam_vendor_keys)
+    for vk in all_keys:
         aod_info = aod_vendor_map.get(vk)
         aam_info = aam_vendor_map.get(vk)
         vendor_display = (aod_info or aam_info)["vendor"]
         
-        if vk in in_both_global:
-            status = "match"
-            aod_type = aod_info["plane_type"] if aod_info else None
-            aam_type = aam_info["plane_type"] if aam_info else None
-            if aod_type and aam_type and aod_type != aam_type:
-                status = "type_mismatch"
-        elif vk in only_in_aod_global:
-            status = "only_aod"
+        if has_aod_fabric_data:
+            if vk in in_both_global:
+                status = "match"
+                aod_type = aod_info["plane_type"] if aod_info else None
+                aam_type = aam_info["plane_type"] if aam_info else None
+                if aod_type and aam_type and aod_type != aam_type:
+                    status = "type_mismatch"
+            elif vk in only_in_aod_global:
+                status = "only_aod"
+            else:
+                status = "only_aam"
         else:
-            status = "only_aam"
+            status = "aam_inferred"
         
         fabric_vendors.append({
             "vendor": vendor_display,
             "aod_plane_type": aod_info["plane_type"] if aod_info else None,
             "aam_plane_type": aam_info["plane_type"] if aam_info else None,
-            "status": status
+            "status": status,
         })
     
-    fabric_mismatches = len(only_in_aod_global) + len(only_in_aam_global)
-    # Also count type mismatches
-    for v in fabric_vendors:
-        if v["status"] == "type_mismatch":
-            fabric_mismatches += 1
+    fabric_mismatches = 0
+    if has_aod_fabric_data:
+        fabric_mismatches = len(only_in_aod_global) + len(only_in_aam_global)
+        for v in fabric_vendors:
+            if v["status"] == "type_mismatch":
+                fabric_mismatches += 1
     
-    has_aod_fabric_data = len(aod_fabric_planes_raw) > 0
-    
-    # Also build per-type breakdown for detail
     all_plane_types = ["IPAAS", "API_GATEWAY", "EVENT_BUS", "DATA_WAREHOUSE"]
     aod_by_type = {}
     for vk, info in aod_vendor_map.items():

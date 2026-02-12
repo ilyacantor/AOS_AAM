@@ -22,6 +22,7 @@ from ..db import (
     create_handoff_log,
     get_handoff_log,
     list_handoff_logs,
+    reset_aod_state,
 )
 from ..models import AODHandoffRequest, AODHandoffResponse, SORDeclaration
 
@@ -180,7 +181,12 @@ def link_candidate_to_plane(
 
 
 def _build_reconciliation_data(request: AODHandoffRequest) -> tuple[list, list]:
-    """Extract fabric-plane and SOR data for reconciliation logging."""
+    """Extract fabric-plane and SOR data for reconciliation logging.
+    
+    IMPORTANT: Only records what AOD *explicitly* sent.
+    AAM-inferred fabric planes are NOT recorded as "AOD sent" — that would
+    make reconciliation compare AAM to itself (always a false match).
+    """
     aod_fabric_planes_data = []
     if request.fabric_planes:
         for plane in request.fabric_planes:
@@ -188,38 +194,8 @@ def _build_reconciliation_data(request: AODHandoffRequest) -> tuple[list, list]:
                 "plane_type": plane.plane_type,
                 "vendor": plane.vendor,
                 "is_healthy": plane.is_healthy,
+                "source": "aod_explicit",
             })
-    else:
-        seen_fp_vendors: set[str] = set()
-        seen_plane_types: set[str] = set()
-
-        for candidate in request.candidates:
-            if not candidate.vendor_name:
-                continue
-            display = (candidate.display_name or "").lower()
-            for hint, plane_type in DISPLAY_NAME_PLANE_HINTS.items():
-                if hint in display and plane_type not in seen_plane_types:
-                    vendor_key = candidate.vendor_name.lower()
-                    seen_fp_vendors.add(vendor_key)
-                    seen_plane_types.add(plane_type)
-                    aod_fabric_planes_data.append({
-                        "plane_type": plane_type,
-                        "vendor": candidate.vendor_name,
-                        "is_healthy": True,
-                    })
-
-        for candidate in request.candidates:
-            cat_lower = candidate.category.lower() if candidate.category else ""
-            if cat_lower in SOR_CATEGORIES and candidate.vendor_name:
-                vendor_key = candidate.vendor_name.lower()
-                if vendor_key not in seen_fp_vendors:
-                    seen_fp_vendors.add(vendor_key)
-                    plane_type = infer_plane_type_from_category(cat_lower)
-                    aod_fabric_planes_data.append({
-                        "plane_type": plane_type,
-                        "vendor": candidate.vendor_name,
-                        "is_healthy": True,
-                    })
 
     aod_sor_data: dict = {}
 
@@ -306,6 +282,10 @@ def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
         "AOD handoff received: run_id=%s, snapshot=%s, candidates=%d",
         request.run_id, request.snapshot_name, len(request.candidates),
     )
+
+    # 0b. Clear stale state from previous runs
+    _log.info("Clearing previous run state before processing new handoff")
+    reset_aod_state()
 
     # 1a. Store authoritative SOR declarations from Farm (if provided)
     sors_stored = 0

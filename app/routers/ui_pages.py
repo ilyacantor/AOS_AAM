@@ -2466,7 +2466,7 @@ async def ui_reconcile(aod_run_id: str):
     
     fc_content = ""
     if not has_aod_fabric:
-        fc_content += '<div style="color: var(--slate-400); font-size: 0.85rem; margin-bottom: 12px; padding: 8px; background: rgba(255,255,255,0.02); border-radius: 6px;">Fabric planes derived from AOD candidate data.</div>'
+        fc_content += '<div style="color: #fcd34d; font-size: 0.85rem; margin-bottom: 12px; padding: 8px; background: rgba(251,191,36,0.05); border: 1px solid rgba(251,191,36,0.2); border-radius: 6px;">AOD did not send explicit fabric planes. The planes below were auto-inferred by AAM from candidate data. This comparison cannot be validated without AOD-declared planes.</div>'
     
     if has_aod_fabric and fc_vendors:
         # Global vendor comparison table
@@ -2874,7 +2874,7 @@ async def ui_reconcile(aod_run_id: str):
         <!-- Check 3: Fabric Plane Comparison -->
         <div class="deep-check">
             <div class="panel" data-testid="check-fabric-comparison">
-                {check_header("Fabric Plane Comparison", fc.get("has_issues", False), fc_mismatches, "Compares AOD-declared fabric vendors vs AAM current state")}
+                {check_header("Fabric Plane Comparison", fc.get("has_issues", False), fc_mismatches, "Compares AOD-explicit fabric planes vs AAM-stored planes for this run")}
                 {fc_content}
             </div>
         </div>
