@@ -427,6 +427,26 @@ def get_aod_reconciliation(aod_run_id: str) -> dict:
 
     all_ok = total_sors > 0 and sor_mismatches == 0
     ingestion_accuracy = round((sor_matched / total_sors) * 100, 1) if total_sors > 0 else 0
+
+    # Load operator dispositions and merge into line items
+    from .sor_dispositions import get_sor_dispositions
+    dispositions = get_sor_dispositions(aod_run_id)
+    undispositioned_issues = 0
+    for item in sor_line_items:
+        vk = item["vendor"].lower().strip()
+        disp = dispositions.get(vk)
+        if disp:
+            item["disposition"] = disp["status"]
+            item["disposition_reason"] = disp.get("reason")
+            item["disposition_notes"] = disp.get("operator_notes")
+            item["disposition_updated"] = disp.get("updated_at")
+        else:
+            item["disposition"] = None
+            item["disposition_reason"] = None
+            item["disposition_notes"] = None
+            item["disposition_updated"] = None
+        if item["verdict"] != "ok" and not disp:
+            undispositioned_issues += 1
     
     # ===== DEEP CHECK 4: Schema Completeness =====
     # Find candidates missing key fields
@@ -577,6 +597,7 @@ def get_aod_reconciliation(aod_run_id: str) -> dict:
                 "category_mismatches": sor_category_mismatches,
                 "missing": sor_missing,
                 "mismatches": sor_mismatches,
+                "undispositioned": undispositioned_issues,
                 "ingestion_accuracy": ingestion_accuracy,
                 "all_ok": all_ok,
                 "has_aod_data": has_aod_sor_data,

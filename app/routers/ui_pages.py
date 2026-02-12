@@ -2285,6 +2285,8 @@ async def ui_reconcile(aod_run_id: str):
         "saas": "SaaS", "hr": "HR", "finance": "Finance", "cmdb": "CMDB", "identity": "Identity",
     }
     
+    sor_undispositioned = sc_sor.get("undispositioned", 0)
+    
     sor_content = ""
     
     if not has_aod_sor:
@@ -2292,20 +2294,26 @@ async def ui_reconcile(aod_run_id: str):
     else:
         # Accuracy bar
         acc_color = "var(--green-400)" if sor_accuracy >= 80 else ("var(--orange-400)" if sor_accuracy >= 50 else "var(--red-400)")
-        verdict_text = "All SORs ingested and classified correctly" if sor_all_ok else f"{sor_matched_count} of {sor_total} SORs verified"
-        verdict_color = "var(--green-400)" if sor_all_ok else "var(--orange-400)"
+        if sor_all_ok:
+            verdict_text = "All SORs ingested and classified correctly"
+        elif sor_undispositioned == 0 and sor_mismatches > 0:
+            verdict_text = f"{sor_matched_count} of {sor_total} SORs verified &mdash; all issues dispositioned"
+        else:
+            verdict_text = f"{sor_matched_count} of {sor_total} SORs verified"
+        verdict_color = "var(--green-400)" if (sor_all_ok or sor_undispositioned == 0) else "var(--orange-400)"
         
         sor_content += f"""
-        <div style="margin-bottom: 16px; padding: 12px; background: {'rgba(34,197,94,0.06)' if sor_all_ok else 'rgba(251,191,36,0.06)'}; border: 1px solid {'rgba(34,197,94,0.2)' if sor_all_ok else 'rgba(251,191,36,0.2)'}; border-radius: 8px;">
+        <div style="margin-bottom: 16px; padding: 12px; background: {'rgba(34,197,94,0.06)' if (sor_all_ok or sor_undispositioned == 0) else 'rgba(251,191,36,0.06)'}; border: 1px solid {'rgba(34,197,94,0.2)' if (sor_all_ok or sor_undispositioned == 0) else 'rgba(251,191,36,0.2)'}; border-radius: 8px;">
             <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;">
                 <div>
-                    <span style="color: {verdict_color}; font-size: 1.1rem; margin-right: 6px;">{'&#10003;' if sor_all_ok else '&#9888;'}</span>
+                    <span style="color: {verdict_color}; font-size: 1.1rem; margin-right: 6px;">{'&#10003;' if (sor_all_ok or sor_undispositioned == 0) else '&#9888;'}</span>
                     <span style="font-weight: 600; color: {verdict_color};">{verdict_text}</span>
                 </div>
                 <div style="display: flex; gap: 16px; font-size: 0.8rem;">
                     <span style="color: var(--green-400);">{sor_matched_count} OK</span>
                     {'<span style="color: var(--orange-400);">' + str(sor_cat_mismatches) + ' Category Mismatch</span>' if sor_cat_mismatches > 0 else ''}
                     {'<span style="color: var(--red-400);">' + str(sor_missing_count) + ' Not Ingested</span>' if sor_missing_count > 0 else ''}
+                    {'<span style="color: var(--slate-400);">' + str(sor_undispositioned) + ' need disposition</span>' if sor_undispositioned > 0 else ''}
                 </div>
             </div>
             <div style="margin-top: 8px;">
@@ -2316,6 +2324,13 @@ async def ui_reconcile(aod_run_id: str):
             </div>
         </div>
         """
+        
+        disp_labels = {
+            "acknowledged": ("Acknowledged", "#a5b4fc", "rgba(99,102,241,0.15)"),
+            "expected": ("Expected", "#86efac", "rgba(34,197,94,0.15)"),
+            "follow_up": ("Follow Up", "#fcd34d", "rgba(251,191,36,0.15)"),
+            "resolved": ("Resolved", "#86efac", "rgba(34,197,94,0.15)"),
+        }
         
         # Line-item table
         sor_content += """
@@ -2329,6 +2344,7 @@ async def ui_reconcile(aod_run_id: str):
                     <th style="text-align: center; padding: 8px; color: #86efac; font-weight: 500;">AAM Found</th>
                     <th style="text-align: center; padding: 8px; color: var(--slate-400); font-weight: 500;">Candidates</th>
                     <th style="text-align: center; padding: 8px; color: var(--slate-400); font-weight: 500;">Verdict</th>
+                    <th style="text-align: center; padding: 8px; color: var(--slate-400); font-weight: 500;">Disposition</th>
                 </tr>
             </thead>
             <tbody>
@@ -2336,12 +2352,15 @@ async def ui_reconcile(aod_run_id: str):
         
         for item in sor_line_items:
             vendor_name = item["vendor"]
+            vendor_enc = vendor_name.replace("'", "\\'").replace('"', '&quot;')
             domain = item.get("domain", "") or ""
             expected = cat_labels_sor.get(item["expected_category"], item["expected_category"].upper() if item["expected_category"] else "-")
             aam_cat = cat_labels_sor.get(item.get("aam_category", ""), (item.get("aam_category") or "-").upper())
             aam_count = item.get("aam_count", 0)
             verdict = item["verdict"]
             source = item.get("source", "")
+            disposition = item.get("disposition")
+            disp_notes = item.get("disposition_notes") or ""
             
             source_badge = ""
             if source == "farm":
@@ -2365,6 +2384,24 @@ async def ui_reconcile(aod_run_id: str):
             expected_html = f'<span style="color: #a5b4fc;">{expected}</span>'
             count_html = f'<span style="color: #86efac;">{aam_count}</span>' if aam_count > 0 else '<span style="color: var(--slate-600);">0</span>'
             
+            # Disposition cell
+            disp_cell = ""
+            if verdict == "ok":
+                disp_cell = '<span style="color: var(--slate-600); font-size: 0.75rem;">-</span>'
+            elif disposition:
+                dl = disp_labels.get(disposition, (disposition, "#94a3b8", "rgba(148,163,184,0.15)"))
+                title_attr = f' title="{disp_notes}"' if disp_notes else ''
+                disp_cell = f'<span data-testid="disp-badge-{vendor_name}" style="background: {dl[2]}; color: {dl[1]}; padding: 2px 8px; border-radius: 3px; font-size: 0.7rem; font-weight: 500; cursor: default;"{title_attr}>{dl[0]}</span>'
+                disp_cell += f' <button data-testid="disp-clear-{vendor_name}" onclick="setSorDisp(\'{vendor_enc}\', \'open\', \'\')" style="background: none; border: none; color: var(--slate-500); cursor: pointer; font-size: 0.7rem; padding: 2px;" title="Clear disposition">&#10005;</button>'
+            else:
+                disp_cell = f"""<select data-testid="disp-select-{vendor_name}" onchange="setSorDisp('{vendor_enc}', this.value, '')" style="background: var(--slate-800); color: #e2e8f0; border: 1px solid var(--slate-600); border-radius: 4px; padding: 2px 4px; font-size: 0.7rem; cursor: pointer;">
+                    <option value="">Action...</option>
+                    <option value="acknowledged">Acknowledged</option>
+                    <option value="expected">Expected</option>
+                    <option value="follow_up">Follow Up</option>
+                    <option value="resolved">Resolved</option>
+                </select>"""
+            
             sor_content += f"""
                 <tr style="border-bottom: 1px solid rgba(255,255,255,0.05); background: {row_bg};">
                     <td style="padding: 8px;">{source_badge}</td>
@@ -2374,6 +2411,7 @@ async def ui_reconcile(aod_run_id: str):
                     <td style="padding: 8px; text-align: center;">{aam_cat_html}</td>
                     <td style="padding: 8px; text-align: center;">{count_html}</td>
                     <td style="padding: 8px; text-align: center; font-size: 0.8rem;">{verdict_html}</td>
+                    <td style="padding: 8px; text-align: center;">{disp_cell}</td>
                 </tr>
             """
         
@@ -2664,6 +2702,18 @@ async def ui_reconcile(aod_run_id: str):
             <a href="/api/handoff/aod/run/{aod_run_id}/reconciliation" target="_blank" class="btn btn-sm" data-testid="link-raw-json" style="color: var(--slate-400); border-color: var(--slate-600);">View Raw JSON</a>
         </div>
     </div>
+    <script>
+    function setSorDisp(vendor, status, notes) {{
+        fetch('/api/handoff/aod/run/{aod_run_id}/sor/' + encodeURIComponent(vendor) + '/disposition', {{
+            method: 'POST',
+            headers: {{'Content-Type': 'application/json'}},
+            body: JSON.stringify({{status: status, operator_notes: notes || ''}})
+        }})
+        .then(r => r.json())
+        .then(() => location.reload())
+        .catch(e => alert('Error setting disposition: ' + e));
+    }}
+    </script>
 </body>
 </html>
 """)

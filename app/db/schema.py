@@ -110,6 +110,21 @@ def init_db():
         )
     """)
 
+    # SOR Dispositions (operator actions on SOR reconciliation line items)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS sor_dispositions (
+            disposition_id TEXT PRIMARY KEY,
+            sor_vendor TEXT NOT NULL,
+            aod_run_id TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'open',
+            reason TEXT,
+            operator_notes TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(sor_vendor, aod_run_id)
+        )
+    """)
+
     # Collectors
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS collectors (

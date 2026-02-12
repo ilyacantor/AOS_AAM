@@ -21,6 +21,8 @@ from ..db import (
     get_aod_reconciliation,
     store_fabric_plane,
     reset_aod_state,
+    set_sor_disposition,
+    get_sor_dispositions,
 )
 from ..models import AODHandoffRequest, AODHandoffResponse, AODPolicyManifest
 from ..services.handoff_service import process_handoff, load_aod_payload
@@ -273,6 +275,32 @@ async def get_aod_run_reconciliation(aod_run_id: str):
     """Reconcile AOD handoff data with AAM storage."""
     reconciliation = get_aod_reconciliation(aod_run_id)
     return reconciliation
+
+
+@router.post("/run/{aod_run_id}/sor/{vendor}/disposition")
+async def disposition_sor(aod_run_id: str, vendor: str, request: Request):
+    """Set operator disposition on a SOR reconciliation line item."""
+    body = await request.json()
+    status = body.get("status")
+    if not status or status not in ("acknowledged", "expected", "follow_up", "resolved", "open"):
+        raise HTTPException(
+            status_code=400,
+            detail="status must be one of: acknowledged, expected, follow_up, resolved, open",
+        )
+    result = set_sor_disposition(
+        vendor=vendor,
+        aod_run_id=aod_run_id,
+        status=status,
+        reason=body.get("reason"),
+        operator_notes=body.get("operator_notes"),
+    )
+    return result
+
+
+@router.get("/run/{aod_run_id}/sor/dispositions")
+async def list_sor_dispositions(aod_run_id: str):
+    """Get all SOR dispositions for a run."""
+    return get_sor_dispositions(aod_run_id)
 
 
 @router.get("/run/{aod_run_id}/reconciliation/download")
