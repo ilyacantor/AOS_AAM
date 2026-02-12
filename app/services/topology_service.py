@@ -88,14 +88,17 @@ def build_topology_summary() -> dict:
 
         return "UNMAPPED"
 
-    # Count candidates (= pipes) per vendor-plane
+    # Count candidates per vendor-plane, split by match status
+    # "connected" = has matched_pipe_id (inference ran and matched)
+    # "total" = all candidates routed to this plane
     vendor_plane_counts: dict[str, dict] = {}
     for c in candidates:
         pid = _resolve_plane_id(c)
         if pid:
-            counts = vendor_plane_counts.setdefault(pid, {"pipe_count": 0, "cand_count": 0})
-            counts["pipe_count"] += 1
-            counts["cand_count"] += 1
+            counts = vendor_plane_counts.setdefault(pid, {"connected": 0, "total": 0})
+            counts["total"] += 1
+            if c.get("matched_pipe_id"):
+                counts["connected"] += 1
 
     # Load authoritative SOR declarations from Farm (if any)
     auth_sors = get_sor_declarations()
@@ -114,8 +117,8 @@ def build_topology_summary() -> dict:
     for vendor_lower, decl in auth_sor_vendors.items():
         display_names[vendor_lower] = decl["vendor"]
         sor_systems[vendor_lower] = {
-            "pipe_count": 0,
-            "candidate_count": 0,
+            "connected": 0,
+            "total": 0,
             "planes": set(),
             "is_sor": True,
             "is_authoritative": True,
@@ -131,12 +134,13 @@ def build_topology_summary() -> dict:
         key = vendor.lower()
         if key not in sor_systems:
             sor_systems[key] = {
-                "pipe_count": 0, "candidate_count": 0,
+                "connected": 0, "total": 0,
                 "planes": set(), "is_candidate": True, "is_sor": False, "category": None,
             }
             display_names[key] = vendor
-        sor_systems[key]["pipe_count"] += 1
-        sor_systems[key]["candidate_count"] = sor_systems[key].get("candidate_count", 0) + 1
+        sor_systems[key]["total"] = sor_systems[key].get("total", 0) + 1
+        if c.get("matched_pipe_id"):
+            sor_systems[key]["connected"] = sor_systems[key].get("connected", 0) + 1
         if "is_candidate" not in sor_systems[key]:
             sor_systems[key]["is_candidate"] = True
         category = c.get("category", "").lower()
@@ -153,20 +157,23 @@ def build_topology_summary() -> dict:
     edges = []
 
     # Vendor-specific fabric plane nodes
+    # Label format: "Vendor, Type\n(X connected / Y total)"
+    # Before inference: "0 connected / 654 total"
+    # After inference:  "654 connected / 654 total"
     created_plane_ids: set[str] = set()
     for plane_id, info in plane_info.items():
-        counts = vendor_plane_counts.get(plane_id, {"pipe_count": 0, "cand_count": 0})
+        counts = vendor_plane_counts.get(plane_id, {"connected": 0, "total": 0})
         vendor_display = info["vendor"].title()
         type_label = PLANE_LABELS.get(info["plane_type"], info["plane_type"].replace("_", " ").title())
         nodes.append({
             "id": f"plane:{plane_id}",
-            "label": f"{vendor_display}, {type_label}\n({counts['pipe_count']}/{counts['cand_count']})",
+            "label": f"{vendor_display}, {type_label}\n({counts['connected']} connected / {counts['total']} total)",
             "type": "fabric_plane",
             "metadata": {
                 "plane_type": info["plane_type"],
                 "vendor": info["vendor"],
-                "pipe_count": counts["pipe_count"],
-                "candidate_count": counts["cand_count"],
+                "connected": counts["connected"],
+                "total": counts["total"],
             },
         })
         created_plane_ids.add(plane_id)
@@ -177,24 +184,24 @@ def build_topology_summary() -> dict:
             if pid not in created_plane_ids:
                 plane_type = pid.split(":", 1)[0] if ":" in pid else pid
                 type_label = PLANE_LABELS.get(plane_type, plane_type.replace("_", " ").title())
-                counts = vendor_plane_counts.get(pid, {"pipe_count": 0, "cand_count": 0})
+                counts = vendor_plane_counts.get(pid, {"connected": 0, "total": 0})
                 nodes.append({
                     "id": f"plane:{pid}",
-                    "label": f"{type_label}\n({counts['pipe_count']}/{counts['cand_count']})",
+                    "label": f"{type_label}\n({counts['connected']} connected / {counts['total']} total)",
                     "type": "fabric_plane",
-                    "metadata": {"plane_type": plane_type, "pipe_count": counts["pipe_count"], "candidate_count": counts["cand_count"]},
+                    "metadata": {"plane_type": plane_type, "connected": counts["connected"], "total": counts["total"]},
                 })
                 created_plane_ids.add(pid)
 
     # Prioritize true SORs, then fill with top others (up to 20)
     true_sors = sorted(
         [(k, d) for k, d in sor_systems.items() if d.get("is_sor")],
-        key=lambda x: x[1]["pipe_count"] + x[1].get("candidate_count", 0),
+        key=lambda x: x[1]["total"],
         reverse=True,
     )
     other_systems = sorted(
         [(k, d) for k, d in sor_systems.items() if not d.get("is_sor")],
-        key=lambda x: x[1]["pipe_count"] + x[1].get("candidate_count", 0),
+        key=lambda x: x[1]["total"],
         reverse=True,
     )
     remaining_slots = max(0, 20 - len(true_sors))
@@ -202,14 +209,12 @@ def build_topology_summary() -> dict:
 
     for sor_key, sor_data in sorted_sors:
         sor_name = display_names.get(sor_key, sor_key)
-        pc = sor_data["pipe_count"]
-        cc = sor_data.get("candidate_count", 0)
-        if pc > 0 and cc > 0:
-            label = f"{sor_name}\n({pc} pipes, {cc} candidates)"
-        elif cc > 0:
-            label = f"{sor_name}\n({cc} candidates)"
+        connected = sor_data.get("connected", 0)
+        total = sor_data.get("total", 0)
+        if total > 0:
+            label = f"{sor_name}\n({connected}/{total} connected)"
         else:
-            label = f"{sor_name}\n({pc} pipes)"
+            label = f"{sor_name}\n(0 candidates)"
 
         nodes.append({
             "id": f"sor:{sor_name}",
@@ -217,8 +222,8 @@ def build_topology_summary() -> dict:
             "type": "source_system",
             "metadata": {
                 "name": sor_name,
-                "pipe_count": pc,
-                "candidate_count": cc,
+                "connected": connected,
+                "total": total,
                 "is_candidate_source": sor_data.get("is_candidate", False),
                 "is_sor": sor_data.get("is_sor", False),
                 "is_authoritative": sor_data.get("is_authoritative", False),

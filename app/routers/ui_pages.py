@@ -1753,19 +1753,25 @@ async def ui_topology():
         }}
 
         function buildTooltip(node) {{
-            let html = `<div style="background:#1e293b;padding:8px;border-radius:4px;color:#fff;">`;
-            html += `<strong>${{node.label}}</strong><br/>`;
-            html += `Type: ${{node.type}}<br/>`;
-            if (node.metadata.is_authoritative) html += `<span style="color:#fbbf24;font-weight:600;">Farm-Authoritative SOR</span><br/>`;
-            else if (node.metadata.is_sor) html += `<span style="color:#22d3ee;">SOR (candidate-derived)</span><br/>`;
-            if (node.metadata.domain) html += `Domain: ${{node.metadata.domain}}<br/>`;
-            if (node.metadata.confidence) html += `Confidence: ${{node.metadata.confidence}}<br/>`;
-            if (node.metadata.fabric_plane) html += `Plane: ${{node.metadata.fabric_plane}}<br/>`;
-            if (node.metadata.source_system) html += `Source: ${{node.metadata.source_system}}<br/>`;
-            if (node.metadata.modality) html += `Modality: ${{node.metadata.modality}}<br/>`;
-            if (node.metadata.status) html += `Status: ${{node.metadata.status}}<br/>`;
-            html += `</div>`;
-            return html;
+            let lines = [node.label.replace('\\n', ' — ')];
+            if (node.type === 'fabric_plane') {{
+                if (node.metadata.vendor) lines.push('Vendor: ' + node.metadata.vendor);
+                lines.push('Type: ' + (node.metadata.plane_type || 'unknown'));
+                if (node.metadata.connected !== undefined) lines.push('Connected: ' + node.metadata.connected + ' / ' + node.metadata.total);
+            }} else if (node.type === 'source_system') {{
+                if (node.metadata.is_authoritative) lines.push('Farm-Authoritative SOR');
+                else if (node.metadata.is_sor) lines.push('SOR (candidate-derived)');
+                if (node.metadata.domain) lines.push('Domain: ' + node.metadata.domain);
+                if (node.metadata.confidence) lines.push('Confidence: ' + node.metadata.confidence);
+                if (node.metadata.category) lines.push('Category: ' + node.metadata.category);
+                if (node.metadata.connected !== undefined) lines.push('Connected: ' + node.metadata.connected + ' / ' + node.metadata.total);
+            }} else {{
+                if (node.metadata.fabric_plane) lines.push('Plane: ' + node.metadata.fabric_plane);
+                if (node.metadata.source_system) lines.push('Source: ' + node.metadata.source_system);
+                if (node.metadata.category) lines.push('Category: ' + node.metadata.category);
+                if (node.metadata.status) lines.push('Status: ' + node.metadata.status);
+            }}
+            return lines.join('\\n');
         }}
 
         function renderNetwork() {{
