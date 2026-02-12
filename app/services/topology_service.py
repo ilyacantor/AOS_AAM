@@ -9,6 +9,7 @@ from datetime import datetime
 from ..logger import get_logger
 from ..constants import SOR_CATEGORIES
 from ..db import list_pipes, list_candidates, get_canonical_stats
+from ..db.fabric_planes import get_fabric_planes
 from ..db.sor_declarations import get_sor_declarations
 
 _log = get_logger("services.topology")
@@ -36,25 +37,41 @@ def build_topology_summary() -> dict:
 
     Optimised for large datasets — shows aggregate counts instead of
     individual assets, suitable for 600+ asset inventories.
+
+    Fabric plane nodes are vendor-specific (e.g. "Workato, iPaaS (5/5)")
+    rather than generic type-only nodes.
     """
-    pipes = list_pipes()
     candidates = list_candidates()
+    db_planes = get_fabric_planes()
 
-    # Fabric-plane pipe counts
-    fabric_counts = {"IPAAS": 0, "API_GATEWAY": 0, "EVENT_BUS": 0, "DATA_WAREHOUSE": 0}
-    for p in pipes:
-        plane = p.get("fabric_plane", "API_GATEWAY")
-        if plane in fabric_counts:
-            fabric_counts[plane] += 1
+    # Build plane info lookup by plane_id (e.g. "IPAAS:workato")
+    plane_info = {p["plane_id"]: p for p in db_planes}
 
-    # Candidate counts by plane
-    candidate_counts = {"IPAAS": 0, "API_GATEWAY": 0, "EVENT_BUS": 0, "DATA_WAREHOUSE": 0, "OTHER": 0}
+    # Build type-to-first-plane fallback for candidates without fabric_plane_id
+    type_to_plane: dict[str, str] = {}
+    for p in db_planes:
+        if p["plane_type"] not in type_to_plane:
+            type_to_plane[p["plane_type"]] = p["plane_id"]
+
+    def _resolve_plane_id(candidate: dict) -> str:
+        """Resolve a candidate to its vendor-specific fabric plane_id."""
+        fpid = candidate.get("fabric_plane_id", "")
+        if fpid and fpid in plane_info:
+            return fpid
+        plane_type = _extract_plane_type(
+            candidate.get("fabric_plane_id", ""),
+            candidate.get("connected_via_plane", ""),
+        )
+        return type_to_plane.get(plane_type, plane_type)
+
+    # Count candidates (= pipes) per vendor-plane
+    vendor_plane_counts: dict[str, dict] = {}
     for c in candidates:
-        plane = _extract_plane_type(c.get("fabric_plane_id", ""), c.get("connected_via_plane", ""))
-        if plane in candidate_counts:
-            candidate_counts[plane] += 1
-        else:
-            candidate_counts["OTHER"] += 1
+        pid = _resolve_plane_id(c)
+        if pid:
+            counts = vendor_plane_counts.setdefault(pid, {"pipe_count": 0, "cand_count": 0})
+            counts["pipe_count"] += 1
+            counts["cand_count"] += 1
 
     # Load authoritative SOR declarations from Farm (if any)
     auth_sors = get_sor_declarations()
@@ -64,11 +81,10 @@ def build_topology_summary() -> dict:
         auth_sor_vendors[vendor_key.lower()] = s
         _log.debug("Authoritative SOR: %s (domain=%s, category=%s)", vendor_key, s["domain"], s["category"])
 
-    # Build SOR systems from pipes + candidates + authoritative SORs.
-    # Use case-insensitive keys internally to merge entries, but
-    # prefer the authoritative vendor name for display.
-    sor_systems: dict = {}        # lowercase key -> data
-    display_names: dict = {}      # lowercase key -> display name
+    # Build SOR systems from candidates + authoritative SORs.
+    # planes set now stores vendor-specific plane_ids (e.g. "IPAAS:workato")
+    sor_systems: dict = {}
+    display_names: dict = {}
 
     # Seed with authoritative SOR declarations first
     for vendor_lower, decl in auth_sor_vendors.items():
@@ -84,48 +100,67 @@ def build_topology_summary() -> dict:
             "confidence": decl.get("confidence", "high"),
         }
 
-    for p in pipes:
-        source = p.get("source_system")
-        if source:
-            key = source.lower()
-            if key not in sor_systems:
-                sor_systems[key] = {"pipe_count": 0, "candidate_count": 0, "planes": set(), "is_sor": False, "category": None}
-                display_names[key] = source
-            sor_systems[key]["pipe_count"] += 1
-            sor_systems[key]["planes"].add(p.get("fabric_plane", "API_GATEWAY"))
-
     for c in candidates:
         vendor = c.get("vendor_name")
-        if vendor:
-            key = vendor.lower()
-            if key not in sor_systems:
-                sor_systems[key] = {"pipe_count": 0, "candidate_count": 0, "planes": set(), "is_candidate": True, "is_sor": False, "category": None}
-                display_names[key] = vendor
-            sor_systems[key]["candidate_count"] = sor_systems[key].get("candidate_count", 0) + 1
-            if "is_candidate" not in sor_systems[key]:
-                sor_systems[key]["is_candidate"] = True
-            category = c.get("category", "").lower()
-            if category in SOR_CATEGORIES:
-                sor_systems[key]["is_sor"] = True
-                if not sor_systems[key].get("category"):
-                    sor_systems[key]["category"] = category
-            plane_type = _extract_plane_type(c.get("fabric_plane_id", ""), c.get("connected_via_plane", ""))
-            if plane_type != "OTHER":
-                sor_systems[key]["planes"].add(plane_type)
+        if not vendor:
+            continue
+        key = vendor.lower()
+        if key not in sor_systems:
+            sor_systems[key] = {
+                "pipe_count": 0, "candidate_count": 0,
+                "planes": set(), "is_candidate": True, "is_sor": False, "category": None,
+            }
+            display_names[key] = vendor
+        sor_systems[key]["pipe_count"] += 1
+        sor_systems[key]["candidate_count"] = sor_systems[key].get("candidate_count", 0) + 1
+        if "is_candidate" not in sor_systems[key]:
+            sor_systems[key]["is_candidate"] = True
+        category = c.get("category", "").lower()
+        if category in SOR_CATEGORIES:
+            sor_systems[key]["is_sor"] = True
+            if not sor_systems[key].get("category"):
+                sor_systems[key]["category"] = category
+        pid = _resolve_plane_id(c)
+        if pid and pid != "OTHER":
+            sor_systems[key]["planes"].add(pid)
 
     # Create nodes + edges
     nodes = []
     edges = []
 
-    for plane, label in PLANE_LABELS.items():
-        pipe_count = fabric_counts.get(plane, 0)
-        cand_count = candidate_counts.get(plane, 0)
+    # Vendor-specific fabric plane nodes
+    created_plane_ids: set[str] = set()
+    for plane_id, info in plane_info.items():
+        counts = vendor_plane_counts.get(plane_id, {"pipe_count": 0, "cand_count": 0})
+        vendor_display = info["vendor"].title()
+        type_label = PLANE_LABELS.get(info["plane_type"], info["plane_type"].replace("_", " ").title())
         nodes.append({
-            "id": f"plane:{plane}",
-            "label": f"{label}\n({pipe_count} pipes, {cand_count} candidates)",
+            "id": f"plane:{plane_id}",
+            "label": f"{vendor_display}, {type_label}\n({counts['pipe_count']}/{counts['cand_count']})",
             "type": "fabric_plane",
-            "metadata": {"plane_type": plane, "pipe_count": pipe_count, "candidate_count": cand_count},
+            "metadata": {
+                "plane_type": info["plane_type"],
+                "vendor": info["vendor"],
+                "pipe_count": counts["pipe_count"],
+                "candidate_count": counts["cand_count"],
+            },
         })
+        created_plane_ids.add(plane_id)
+
+    # Fallback: create type-based nodes for any planes referenced but not in DB
+    for sor_data in sor_systems.values():
+        for pid in sor_data.get("planes", []):
+            if pid not in created_plane_ids:
+                plane_type = pid.split(":", 1)[0] if ":" in pid else pid
+                type_label = PLANE_LABELS.get(plane_type, plane_type.replace("_", " ").title())
+                counts = vendor_plane_counts.get(pid, {"pipe_count": 0, "cand_count": 0})
+                nodes.append({
+                    "id": f"plane:{pid}",
+                    "label": f"{type_label}\n({counts['pipe_count']}/{counts['cand_count']})",
+                    "type": "fabric_plane",
+                    "metadata": {"plane_type": plane_type, "pipe_count": counts["pipe_count"], "candidate_count": counts["cand_count"]},
+                })
+                created_plane_ids.add(pid)
 
     # Prioritize true SORs, then fill with top others (up to 20)
     true_sors = sorted(
@@ -168,13 +203,14 @@ def build_topology_summary() -> dict:
                 "confidence": sor_data.get("confidence"),
             },
         })
-        for plane in sor_data.get("planes", []):
-            edges.append({
-                "id": f"sor_to_plane:{sor_name}:{plane}",
-                "source": f"sor:{sor_name}",
-                "target": f"plane:{plane}",
-                "type": "sor_in_plane",
-            })
+        for plane_id in sor_data.get("planes", []):
+            if plane_id in created_plane_ids:
+                edges.append({
+                    "id": f"sor_to_plane:{sor_name}:{plane_id}",
+                    "source": f"sor:{sor_name}",
+                    "target": f"plane:{plane_id}",
+                    "type": "sor_in_plane",
+                })
 
     canonical_stats = get_canonical_stats()
 

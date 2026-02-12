@@ -13,6 +13,14 @@ from .connection import get_connection
 # TOPOLOGY / GRAPH OPERATIONS
 # ============================================================================
 
+_PLANE_LABELS = {
+    "IPAAS": "iPaaS",
+    "API_GATEWAY": "API Gateway",
+    "EVENT_BUS": "Event Bus",
+    "DATA_WAREHOUSE": "Data Warehouse",
+}
+
+
 def get_topology_data() -> dict:
     """
     Get all data needed for topology visualization.
@@ -24,9 +32,32 @@ def get_topology_data() -> dict:
     nodes = []
     edges = []
 
+    # Load vendor-specific fabric planes from DB
+    cursor.execute("SELECT * FROM fabric_planes ORDER BY updated_at DESC")
+    db_planes = {row["plane_id"]: dict(row) for row in cursor.fetchall()}
+
+    # Build candidate-to-plane lookup
+    cursor.execute(
+        "SELECT candidate_id, fabric_plane_id FROM connection_candidates WHERE fabric_plane_id IS NOT NULL"
+    )
+    candidate_plane_map = {row[0]: row[1] for row in cursor.fetchall()}
+
+    # Build type-to-first-plane fallback
+    type_to_plane: dict[str, str] = {}
+    for pid, info in db_planes.items():
+        if info["plane_type"] not in type_to_plane:
+            type_to_plane[info["plane_type"]] = pid
+
     # Track unique fabric planes and source systems
-    fabric_planes = set()
+    fabric_planes_found: set[str] = set()  # vendor-specific plane_ids
     source_systems = set()
+
+    plane_colors = {
+        "IPAAS": "#22d3ee",
+        "API_GATEWAY": "#a78bfa",
+        "EVENT_BUS": "#f97316",
+        "DATA_WAREHOUSE": "#10b981"
+    }
 
     # Get all pipes
     cursor.execute("""
@@ -38,10 +69,15 @@ def get_topology_data() -> dict:
 
     for pipe in pipes:
         pipe_id = pipe["pipe_id"]
-        fabric_plane = pipe["fabric_plane"] or "API_GATEWAY"
+        fabric_plane_type = pipe["fabric_plane"] or "API_GATEWAY"
         source_system = pipe["source_system"]
 
-        fabric_planes.add(fabric_plane)
+        # Resolve vendor-specific plane
+        plane_id = candidate_plane_map.get(pipe_id, "")
+        if not plane_id or plane_id not in db_planes:
+            plane_id = type_to_plane.get(fabric_plane_type, fabric_plane_type)
+
+        fabric_planes_found.add(plane_id)
         source_systems.add(source_system)
 
         # Add pipe node
@@ -54,7 +90,7 @@ def get_topology_data() -> dict:
             "label": pipe["display_name"],
             "metadata": {
                 "pipe_id": pipe_id,
-                "fabric_plane": fabric_plane,
+                "fabric_plane": fabric_plane_type,
                 "source_system": source_system,
                 "modality": pipe["modality"],
                 "transport_kind": pipe["transport_kind"],
@@ -64,11 +100,11 @@ def get_topology_data() -> dict:
             }
         })
 
-        # Add edge: pipe -> fabric_plane
+        # Add edge: pipe -> fabric_plane (vendor-specific)
         edges.append({
             "id": f"edge:pipe_plane:{pipe_id}",
             "source": f"pipe:{pipe_id}",
-            "target": f"plane:{fabric_plane}",
+            "target": f"plane:{plane_id}",
             "type": "pipe_in_plane",
             "metadata": {}
         })
@@ -82,21 +118,26 @@ def get_topology_data() -> dict:
             "metadata": {}
         })
 
-    # Add fabric plane nodes
-    plane_colors = {
-        "IPAAS": "#22d3ee",
-        "API_GATEWAY": "#a78bfa",
-        "EVENT_BUS": "#f97316",
-        "DATA_WAREHOUSE": "#10b981"
-    }
-    for plane in fabric_planes:
+    # Add fabric plane nodes (vendor-specific)
+    for plane_id in fabric_planes_found:
+        if plane_id in db_planes:
+            info = db_planes[plane_id]
+            vendor_display = info["vendor"].title()
+            plane_type = info["plane_type"]
+            type_label = _PLANE_LABELS.get(plane_type, plane_type.replace("_", " ").title())
+            label = f"{vendor_display}, {type_label}"
+        else:
+            plane_type = plane_id
+            label = _PLANE_LABELS.get(plane_id, plane_id.replace("_", " ").title())
+
         nodes.append({
-            "id": f"plane:{plane}",
+            "id": f"plane:{plane_id}",
             "type": "fabric_plane",
-            "label": plane.replace("_", " ").title(),
+            "label": label,
             "metadata": {
-                "plane_type": plane,
-                "color": plane_colors.get(plane, "#64748b")
+                "plane_type": plane_type,
+                "vendor": db_planes[plane_id]["vendor"] if plane_id in db_planes else None,
+                "color": plane_colors.get(plane_type, "#64748b")
             }
         })
 
@@ -190,6 +231,16 @@ def get_topology_data() -> dict:
     total_candidates = candidate_stats[0] or 0
     connected_candidates = candidate_stats[1] or 0
 
+    # Get SOR count (candidates with SOR categories) — must run before conn.close()
+    from ..constants import SOR_CATEGORIES
+    sor_categories = list(SOR_CATEGORIES)
+    placeholders = ','.join('?' * len(sor_categories))
+    cursor.execute(f"""
+        SELECT COUNT(*) FROM connection_candidates
+        WHERE LOWER(category) IN ({placeholders})
+    """, sor_categories)
+    sors_count = cursor.fetchone()[0]
+
     conn.close()
 
     # Compute stats
@@ -203,23 +254,13 @@ def get_topology_data() -> dict:
         edge_type = edge["type"]
         edges_by_type[edge_type] = edges_by_type.get(edge_type, 0) + 1
 
-    # Get SOR count (candidates with SOR categories)
-    from ..constants import SOR_CATEGORIES
-    sor_categories = list(SOR_CATEGORIES)
-    placeholders = ','.join('?' * len(sor_categories))
-    cursor.execute(f"""
-        SELECT COUNT(*) FROM connection_candidates
-        WHERE LOWER(category) IN ({placeholders})
-    """, sor_categories)
-    sors_count = cursor.fetchone()[0]
-    
     # Canonical labels: SORs, Fabrics, Pipes (not "nodes")
     stats = {
-        "total_pipes": len(pipes),  # Canonical: pipes = candidates from declared_pipes (legacy)
-        "total_candidates": total_candidates,  # All candidates (which ARE pipes)
+        "total_pipes": len(pipes),
+        "total_candidates": total_candidates,
         "sors": sors_count,
-        "fabrics": len(fabric_planes),
-        "pipes": len(pipes),  # For UI display
+        "fabrics": len(fabric_planes_found),
+        "pipes": len(pipes),
         "connected_candidates": connected_candidates,
         "unconnected_candidates": total_candidates - connected_candidates,
         "pipes_with_drift": len(pipes_with_open_drift),
@@ -228,7 +269,7 @@ def get_topology_data() -> dict:
         "total_edges": len(edges),
         "nodes_by_type": nodes_by_type,
         "edges_by_type": edges_by_type,
-        "fabric_planes": sorted(list(fabric_planes)),
+        "fabric_planes": sorted(list(fabric_planes_found)),
         "source_systems": sorted(list(source_systems))
     }
 
@@ -259,10 +300,31 @@ def get_topology_for_pipe(pipe_id: str) -> dict:
         conn.close()
         return {"nodes": [], "edges": [], "stats": {}}
 
-    fabric_plane = pipe["fabric_plane"] or "API_GATEWAY"
+    fabric_plane_type = pipe["fabric_plane"] or "API_GATEWAY"
     source_system = pipe["source_system"]
     entity_scope = json.loads(pipe["entity_scope"]) if pipe["entity_scope"] else []
     trust_labels = json.loads(pipe["trust_labels"]) if pipe["trust_labels"] else []
+
+    # Resolve vendor-specific plane
+    cursor.execute(
+        "SELECT fabric_plane_id FROM connection_candidates WHERE candidate_id = ?",
+        (pipe_id,),
+    )
+    fp_row = cursor.fetchone()
+    candidate_plane_id = fp_row[0] if fp_row and fp_row[0] else None
+
+    cursor.execute("SELECT * FROM fabric_planes ORDER BY updated_at DESC")
+    db_planes_rows = cursor.fetchall()
+    db_planes_local = {row["plane_id"]: dict(row) for row in db_planes_rows}
+
+    plane_id = candidate_plane_id or ""
+    if not plane_id or plane_id not in db_planes_local:
+        for pid, info in db_planes_local.items():
+            if info["plane_type"] == fabric_plane_type:
+                plane_id = pid
+                break
+    if not plane_id:
+        plane_id = fabric_plane_type
 
     # Add pipe node (central)
     nodes.append({
@@ -271,7 +333,7 @@ def get_topology_for_pipe(pipe_id: str) -> dict:
         "label": pipe["display_name"],
         "metadata": {
             "pipe_id": pipe_id,
-            "fabric_plane": fabric_plane,
+            "fabric_plane": fabric_plane_type,
             "source_system": source_system,
             "modality": pipe["modality"],
             "transport_kind": pipe["transport_kind"],
@@ -282,20 +344,31 @@ def get_topology_for_pipe(pipe_id: str) -> dict:
         }
     })
 
-    # Add fabric plane node
+    # Add fabric plane node (vendor-specific)
     plane_colors = {
         "IPAAS": "#22d3ee",
         "API_GATEWAY": "#a78bfa",
         "EVENT_BUS": "#f97316",
         "DATA_WAREHOUSE": "#10b981"
     }
+    if plane_id in db_planes_local:
+        info = db_planes_local[plane_id]
+        vendor_display = info["vendor"].title()
+        plane_type_for_color = info["plane_type"]
+        type_label = _PLANE_LABELS.get(plane_type_for_color, plane_type_for_color.replace("_", " ").title())
+        plane_label = f"{vendor_display}, {type_label}"
+    else:
+        plane_type_for_color = plane_id
+        plane_label = _PLANE_LABELS.get(plane_id, plane_id.replace("_", " ").title())
+
     nodes.append({
-        "id": f"plane:{fabric_plane}",
+        "id": f"plane:{plane_id}",
         "type": "fabric_plane",
-        "label": fabric_plane.replace("_", " ").title(),
+        "label": plane_label,
         "metadata": {
-            "plane_type": fabric_plane,
-            "color": plane_colors.get(fabric_plane, "#64748b")
+            "plane_type": plane_type_for_color,
+            "vendor": db_planes_local[plane_id]["vendor"] if plane_id in db_planes_local else None,
+            "color": plane_colors.get(plane_type_for_color, "#64748b")
         }
     })
 
@@ -311,7 +384,7 @@ def get_topology_for_pipe(pipe_id: str) -> dict:
     edges.append({
         "id": f"edge:pipe_plane:{pipe_id}",
         "source": f"pipe:{pipe_id}",
-        "target": f"plane:{fabric_plane}",
+        "target": f"plane:{plane_id}",
         "type": "pipe_in_plane",
         "metadata": {}
     })
@@ -383,30 +456,66 @@ def get_topology_for_pipe(pipe_id: str) -> dict:
 
 
 def get_topology_for_fabric_plane(fabric_plane: str) -> dict:
-    """Get topology for a specific fabric plane"""
+    """Get topology for a specific fabric plane type (may include multiple vendors)"""
     conn = get_connection()
     cursor = conn.cursor()
 
     nodes = []
     edges = []
 
-    # Add fabric plane node
     plane_colors = {
         "IPAAS": "#22d3ee",
         "API_GATEWAY": "#a78bfa",
         "EVENT_BUS": "#f97316",
         "DATA_WAREHOUSE": "#10b981"
     }
-    nodes.append({
-        "id": f"plane:{fabric_plane}",
-        "type": "fabric_plane",
-        "label": fabric_plane.replace("_", " ").title(),
-        "metadata": {
-            "plane_type": fabric_plane,
-            "color": plane_colors.get(fabric_plane, "#64748b"),
-            "central": True
-        }
-    })
+
+    # Load vendor-specific planes for this type
+    cursor.execute("SELECT * FROM fabric_planes WHERE plane_type = ?", (fabric_plane,))
+    vendor_planes = {row["plane_id"]: dict(row) for row in cursor.fetchall()}
+
+    # Build candidate-to-plane lookup for this type
+    plane_ids = list(vendor_planes.keys())
+    candidate_plane_map: dict[str, str] = {}
+    if plane_ids:
+        placeholders = ','.join('?' * len(plane_ids))
+        cursor.execute(
+            f"SELECT candidate_id, fabric_plane_id FROM connection_candidates WHERE fabric_plane_id IN ({placeholders})",
+            plane_ids,
+        )
+        candidate_plane_map = {row[0]: row[1] for row in cursor.fetchall()}
+
+    # Default plane_id for this type (first vendor-plane, or type itself)
+    default_plane_id = plane_ids[0] if plane_ids else fabric_plane
+
+    # Add vendor-specific fabric plane nodes
+    if vendor_planes:
+        for pid, info in vendor_planes.items():
+            vendor_display = info["vendor"].title()
+            type_label = _PLANE_LABELS.get(fabric_plane, fabric_plane.replace("_", " ").title())
+            nodes.append({
+                "id": f"plane:{pid}",
+                "type": "fabric_plane",
+                "label": f"{vendor_display}, {type_label}",
+                "metadata": {
+                    "plane_type": fabric_plane,
+                    "vendor": info["vendor"],
+                    "color": plane_colors.get(fabric_plane, "#64748b"),
+                    "central": True
+                }
+            })
+    else:
+        # Fallback: generic type node
+        nodes.append({
+            "id": f"plane:{fabric_plane}",
+            "type": "fabric_plane",
+            "label": _PLANE_LABELS.get(fabric_plane, fabric_plane.replace("_", " ").title()),
+            "metadata": {
+                "plane_type": fabric_plane,
+                "color": plane_colors.get(fabric_plane, "#64748b"),
+                "central": True
+            }
+        })
 
     # Get all pipes in this plane
     cursor.execute("""
@@ -422,6 +531,9 @@ def get_topology_for_fabric_plane(fabric_plane: str) -> dict:
         pipe_id = pipe["pipe_id"]
         source_system = pipe["source_system"]
         source_systems.add(source_system)
+
+        # Resolve vendor-specific plane
+        resolved_plane = candidate_plane_map.get(pipe_id, default_plane_id)
 
         entity_scope = json.loads(pipe["entity_scope"]) if pipe["entity_scope"] else []
         trust_labels = json.loads(pipe["trust_labels"]) if pipe["trust_labels"] else []
@@ -445,7 +557,7 @@ def get_topology_for_fabric_plane(fabric_plane: str) -> dict:
         edges.append({
             "id": f"edge:pipe_plane:{pipe_id}",
             "source": f"pipe:{pipe_id}",
-            "target": f"plane:{fabric_plane}",
+            "target": f"plane:{resolved_plane}",
             "type": "pipe_in_plane",
             "metadata": {}
         })
