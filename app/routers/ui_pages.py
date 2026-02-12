@@ -214,10 +214,6 @@ async def ui_pipes_list(
         
         {aod_run_banner()}
         
-        <div class="stats-bar" id="stats-bar" data-testid="stats-bar">
-            <div class="stat-item"><div class="stat-value" id="stat-total">{len(pipes)}</div><div class="stat-label">Total Pipes</div></div>
-        </div>
-        
         <div class="controls">
             <button class="btn" id="btn-run-inference" data-testid="btn-run-inference">Run Inference</button>
             <button class="btn" id="btn-export-dcl" data-testid="btn-export-dcl">Export to DCL</button>
