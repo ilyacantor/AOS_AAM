@@ -2518,25 +2518,47 @@ async def ui_reconcile(aod_run_id: str):
     {NAV_STYLE}
     {UI_STYLE}
     <style>
-        .recon-status {{
+        .recon-header {{
             display: flex;
+            align-items: baseline;
+            gap: 16px;
+            flex-wrap: wrap;
+            margin-bottom: 8px;
+        }}
+        .recon-header h1 {{
+            margin: 0;
+        }}
+        .recon-status {{
+            display: inline-flex;
             align-items: center;
-            gap: 10px;
-            padding: 10px 20px;
-            border-radius: 8px;
+            gap: 6px;
+            padding: 4px 12px;
+            border-radius: 6px;
             font-weight: 600;
-            font-size: 1rem;
+            font-size: 0.85rem;
         }}
         .recon-meta {{
             display: flex;
-            gap: 24px;
+            gap: 16px;
             flex-wrap: wrap;
+            align-items: center;
             color: var(--slate-400);
-            font-size: 0.85rem;
-            margin-bottom: 24px;
+            font-size: 0.8rem;
+            margin-bottom: 20px;
         }}
         .recon-meta strong {{
             color: #cbd5e1;
+        }}
+        .recon-meta .inline-kpi {{
+            display: flex;
+            gap: 12px;
+            margin-left: auto;
+        }}
+        .recon-meta .inline-kpi .kpi {{
+            color: var(--slate-400);
+        }}
+        .recon-meta .inline-kpi .kpi span {{
+            font-weight: 600;
         }}
         .deep-check {{
             margin-bottom: 24px;
@@ -2546,37 +2568,23 @@ async def ui_reconcile(aod_run_id: str):
 <body>
     {ui_nav('reconcile')}
     <div class="container">
-        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 8px;">
-            <h1 style="margin-bottom: 0;">Reconciliation Report</h1>
+        <div class="recon-header">
+            <h1>Reconciliation</h1>
             <div class="recon-status" style="background: {overall_bg_color}; border: {overall_border}; color: {overall_color};">
-                <span style="font-size: 1.2rem;">{overall_icon}</span>
+                <span>{overall_icon}</span>
                 {overall_text}
             </div>
         </div>
         
         <div class="recon-meta">
             {'<div><strong>Snapshot:</strong> <span style="color: #f0abfc;">' + snapshot + '</span></div>' if snapshot else ''}
-            <div><strong>Run ID:</strong> <span style="font-family: monospace;">{aod_run_id}</span></div>
-            <div><strong>Timestamp:</strong> {timestamp}</div>
-        </div>
-
-        <!-- KPI Stats -->
-        <div class="stats">
-            <div class="stat-card">
-                <div class="stat-value">{aod_sent["candidates_accepted"]}</div>
-                <div class="stat-label">AOD Sent</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value" style="color: var(--green-400);">{aam["candidates"]}</div>
-                <div class="stat-label">AAM Stored</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value" style="color: var(--purple-400);">{aam["fabric_planes"]}</div>
-                <div class="stat-label">Fabric Planes</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value" style="color: var(--blue-400);">{aam["sors"]}</div>
-                <div class="stat-label">SOR Candidates</div>
+            <div><strong>Run:</strong> <span style="font-family: monospace;">{aod_run_id[:12]}</span></div>
+            <div><strong>At:</strong> {timestamp}</div>
+            <div class="inline-kpi">
+                <div class="kpi"><span style="color: var(--cyan-400);">{aod_sent["candidates_accepted"]}</span> sent</div>
+                <div class="kpi"><span style="color: var(--green-400);">{aam["candidates"]}</span> stored</div>
+                <div class="kpi"><span style="color: var(--purple-400);">{aam["fabric_planes"]}</span> fabrics</div>
+                <div class="kpi"><span style="color: var(--blue-400);">{aam["sors"]}</span> SORs</div>
             </div>
         </div>
 
