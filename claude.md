@@ -23,24 +23,63 @@ AAM does **not** move data. It observes existing connections, catalogs them as `
 
 ```
 app/
-├── main.py            # 5,444 lines — FastAPI app, all routes, embedded UI
-├── db.py              # 2,831 lines — SQLite schema + 60+ CRUD functions
-├── models.py          #   459 lines — Pydantic models & enums
-├── inference.py        #   577 lines — Observation → DeclaredPipe heuristics
-├── fabric_drift.py     #   306 lines — Connectivity drift detection
-├── preset_config.py    #   229 lines — Enterprise maturity presets (6/8/9/11)
-├── pii_redaction.py    #   229 lines — Regex-based PII masking
-├── dcl_export.py       #   194 lines — DeclaredPipe export for DCL
-├── dcl_export_old.py   #   171 lines — Dead code (legacy export)
+├── main.py              # ~256 lines — App factory, globals, legacy endpoints
+├── config.py            # Settings from environment variables
+├── constants.py         # SOR_CATEGORIES, infer_plane_type_from_category
+├── logger.py            # Structured logging (aam.* namespace)
+├── models.py            # Pydantic models & enums
+├── inference.py         # Observation → DeclaredPipe heuristics
+├── fabric_drift.py      # Connectivity drift detection
+├── preset_config.py     # Enterprise maturity presets (6/8/9/11)
+├── pii_redaction.py     # Regex-based PII masking
+├── dcl_export.py        # DeclaredPipe export for DCL
+├── services/            # Business logic (extracted from main.py)
+│   ├── handoff_service.py    # AOD→AAM handoff orchestration (idempotent)
+│   ├── matching_service.py   # 4-strategy candidate auto-matching
+│   ├── topology_service.py   # Topology summary builder
+│   ├── collector_service.py  # Collector run orchestration
+│   ├── tee_service.py        # TEE workflow enforcement
+│   └── export_service.py     # CSV reconciliation export
+├── routers/             # FastAPI route handlers (extracted from main.py)
+│   ├── handoff.py       # AOD handoff + fabric-plane endpoints
+│   ├── candidates.py    # Candidate match/defer
+│   ├── pipes.py         # Pipe CRUD
+│   ├── collectors.py    # Collector execution
+│   ├── drift.py         # Schema + fabric drift
+│   ├── tee.py           # TEE request management
+│   ├── adapters.py      # Fabric plane adapters
+│   ├── presets.py       # Preset configuration + seed data
+│   ├── topology.py      # Topology graph endpoints
+│   ├── export.py        # DCL export + stats
+│   ├── admin.py         # Admin/debug endpoints
+│   └── ui_pages.py      # Operator UI HTML pages
+├── ui/                  # UI styling constants
+│   └── styles.py        # NAV_STYLE, UI_STYLE, ui_nav(), aod_run_banner()
+├── db/                  # Database package (was single 2,831-line file)
+│   ├── connection.py    # get_db(), get_connection(), DATABASE
+│   ├── schema.py        # init_db() + migrations
+│   ├── candidates.py    # Candidate CRUD
+│   ├── pipes.py         # Pipe CRUD
+│   ├── drift.py         # Drift event operations
+│   ├── observations.py  # Observation operations
+│   ├── collectors.py    # Collector operations
+│   ├── tee.py           # TEE request operations
+│   ├── handoff.py       # Handoff log operations
+│   ├── policy.py        # Policy manifest operations
+│   ├── fabric_planes.py # Fabric plane operations
+│   ├── topology.py      # Topology graph queries
+│   ├── reconciliation.py # AOD reconciliation deep checks
+│   ├── stats.py         # Canonical KPI stats
+│   └── admin.py         # Clear/reset operations
 ├── adapters/
-│   ├── base.py         # Abstract FabricAdapter interface
-│   ├── factory.py      # get_adapter_for_plane() factory
-│   ├── ipaas.py        # Workato, MuleSoft, Boomi, Tray, Zapier
-│   ├── gateway.py      # Kong, Apigee, AWS APIGW, Azure APIM
-│   ├── eventbus.py     # Kafka, EventBridge, Pulsar
-│   └── warehouse.py    # Snowflake, BigQuery, Redshift
+│   ├── base.py          # Abstract FabricAdapter interface
+│   ├── factory.py       # get_adapter_for_plane() factory
+│   ├── ipaas.py         # Workato, MuleSoft, Boomi, Tray, Zapier
+│   ├── gateway.py       # Kong, Apigee, AWS APIGW, Azure APIM
+│   ├── eventbus.py      # Kafka, EventBridge, Pulsar
+│   └── warehouse.py     # Snowflake, BigQuery, Redshift
 └── collectors/
-    └── mock.py         # Mock collector for testing
+    └── mock.py          # Mock collector for testing
 ```
 
 ### Data Flow

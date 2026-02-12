@@ -15,9 +15,9 @@ def _use_temp_db(monkeypatch, tmp_path):
     from app.config import Settings
     s = Settings()
     monkeypatch.setattr("app.config.settings", s)
-    # Patch the module-level DATABASE in db module
-    import app.db as db_mod
-    monkeypatch.setattr(db_mod, "DATABASE", db_path)
+    # Patch the module-level DATABASE in db.connection (the canonical location)
+    import app.db.connection as db_conn
+    monkeypatch.setattr(db_conn, "DATABASE", db_path)
 
 
 @pytest.fixture
