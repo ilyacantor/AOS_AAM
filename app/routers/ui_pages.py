@@ -570,28 +570,34 @@ async def ui_candidates_list(
     """Candidates Screen"""
     all_candidates = list_candidates()
     
-    # Define category groups
     from ..constants import SOR_CATEGORIES as sor_categories
-    fabric_type_map = {
-        "ipaas": {"ipaas"},
-        "warehouse": {"data warehouse", "warehouse", "data"},
-        "gateway": {"api gateway", "gateway"},
-        "eventbus": {"event bus", "eventbus", "stream"}
+
+    # Resolve a candidate's fabric plane TYPE from its linkage or routing hint
+    _plane_view_map = {
+        "ipaas": "IPAAS", "warehouse": "DATA_WAREHOUSE",
+        "gateway": "API_GATEWAY", "eventbus": "EVENT_BUS",
     }
-    all_fabric_categories = set().union(*fabric_type_map.values())
-    
+
+    def _plane_type(c: dict):
+        fpid = c.get("fabric_plane_id") or ""
+        if fpid and ":" in fpid:
+            return fpid.split(":")[0].upper()
+        cvp = c.get("connected_via_plane") or ""
+        return cvp.upper() if cvp else None
+
     # Filter based on view mode
     if view == "all":
         candidates = all_candidates
     elif view == "sors":
         candidates = [c for c in all_candidates if c.get("category", "").lower() in sor_categories]
     elif view == "fabrics":
-        candidates = [c for c in all_candidates if c.get("category", "").lower() in all_fabric_categories]
+        candidates = [c for c in all_candidates if _plane_type(c) is not None]
     elif view == "sors_fabrics":
-        combined = sor_categories | all_fabric_categories
-        candidates = [c for c in all_candidates if c.get("category", "").lower() in combined]
-    elif view in fabric_type_map:
-        candidates = [c for c in all_candidates if c.get("category", "").lower() in fabric_type_map[view]]
+        candidates = [c for c in all_candidates
+                      if c.get("category", "").lower() in sor_categories or _plane_type(c) is not None]
+    elif view in _plane_view_map:
+        target = _plane_view_map[view]
+        candidates = [c for c in all_candidates if _plane_type(c) == target]
     else:
         candidates = all_candidates
     

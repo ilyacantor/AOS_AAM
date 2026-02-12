@@ -109,11 +109,9 @@ def list_pipes(source_system: Optional[str] = None, fabric_plane: Optional[str] 
         params.append(source_system)
     
     if fabric_plane:
-        # Match via JOIN (fabric_plane_id linked) OR via candidate's own connected_via_plane
-        conditions.append(
-            "(UPPER(fp.plane_type) = ? OR (c.fabric_plane_id IS NULL AND UPPER(c.connected_via_plane) = ?))"
-        )
-        params.extend([fabric_plane.upper(), fabric_plane.upper()])
+        # Filter by fabric plane type via the fabric_plane_id JOIN
+        conditions.append("UPPER(fp.plane_type) = ?")
+        params.append(fabric_plane.upper())
     
     where_clause = " WHERE " + " AND ".join(conditions) if conditions else ""
     query = f"""

@@ -188,13 +188,10 @@ def link_candidate_to_plane(
 
     Resolution order:
       1. connected_via_plane (AOD routing hint) → match by plane TYPE
-      2. INFRA_VENDOR_PLANE (vendor IS the infrastructure) → match by plane TYPE
-      3. Direct vendor-name match (plane vendor == candidate vendor)
+      2. Direct vendor-name match (plane vendor == candidate vendor)
 
     Returns the plane_id or None.
     """
-    from ..constants import INFRA_VENDOR_PLANE
-
     # Build type → plane_id lookup from the stored planes
     type_to_plane_id: dict[str, str] = {}
     for _vendor_key, plane_id in fabric_plane_map.items():
@@ -208,15 +205,12 @@ def link_candidate_to_plane(
         if plane_type in type_to_plane_id:
             return type_to_plane_id[plane_type]
 
-    # 2. Check if vendor is a known infrastructure product
+    # 2. Direct vendor-name match (normalize underscores/spaces for comparison)
     vendor_lower = candidate.vendor_name.lower()
-    infra_type = INFRA_VENDOR_PLANE.get(vendor_lower)
-    if infra_type and infra_type in type_to_plane_id:
-        return type_to_plane_id[infra_type]
-
-    # 3. Direct vendor-name substring match
+    vendor_norm = vendor_lower.replace("_", " ")
     for plane_vendor, plane_id in fabric_plane_map.items():
-        if plane_vendor in vendor_lower or vendor_lower in plane_vendor:
+        plane_norm = plane_vendor.replace("_", " ")
+        if plane_norm in vendor_norm or vendor_norm in plane_norm:
             return plane_id
 
     return None
