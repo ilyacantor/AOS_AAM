@@ -109,9 +109,11 @@ def list_pipes(source_system: Optional[str] = None, fabric_plane: Optional[str] 
         params.append(source_system)
     
     if fabric_plane:
-        # Join with fabric_planes to filter by fabric type
-        conditions.append("fp.plane_type = ?")
-        params.append(fabric_plane.lower())
+        # Match via JOIN (fabric_plane_id linked) OR via candidate's own connected_via_plane
+        conditions.append(
+            "(UPPER(fp.plane_type) = ? OR (c.fabric_plane_id IS NULL AND UPPER(c.connected_via_plane) = ?))"
+        )
+        params.extend([fabric_plane.upper(), fabric_plane.upper()])
     
     where_clause = " WHERE " + " AND ".join(conditions) if conditions else ""
     query = f"""
@@ -222,8 +224,14 @@ def _candidate_to_pipe(row) -> dict:
     """
     keys = row.keys()
     
-    # Extract fabric plane type (from JOIN)
-    fabric_plane = row["fabric_plane"].upper() if "fabric_plane" in keys and row["fabric_plane"] else "API_GATEWAY"
+    # Extract fabric plane type: JOIN result → connected_via_plane → fallback
+    fabric_plane = None
+    if "fabric_plane" in keys and row["fabric_plane"]:
+        fabric_plane = row["fabric_plane"].upper()
+    if not fabric_plane and "connected_via_plane" in keys and row["connected_via_plane"]:
+        fabric_plane = row["connected_via_plane"].upper()
+    if not fabric_plane:
+        fabric_plane = "API_GATEWAY"
     
     # Map category to modality — iPaaS uses control plane, everything else is declared interface
     category_lower = row["category"].lower() if row["category"] else ""
