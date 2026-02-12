@@ -28,7 +28,28 @@ from ..services.export_service import build_reconciliation_csv
 
 _log = get_logger("routers.handoff")
 
+RAW_AOD_BODY_FILE = "aod_raw_body.json"
+
 router = APIRouter(prefix="/api/handoff/aod", tags=["AOD Handoff"])
+
+
+def _save_raw_aod_body(body: dict):
+    """Save the exact raw JSON body AOD sent, before any normalization."""
+    try:
+        summary = {
+            "run_id": body.get("run_id"),
+            "snapshot_name": body.get("snapshot_name"),
+            "top_level_keys": list(body.keys()),
+            "candidates_count": len(body.get("candidates", [])),
+            "fabric_planes_raw": body.get("fabric_planes", []),
+            "sors_raw": body.get("sors", []),
+            "systems_of_record_raw": body.get("systems_of_record", []),
+        }
+        with open(RAW_AOD_BODY_FILE, "w") as f:
+            json.dump(summary, f, indent=2, default=str)
+        _log.info("Saved raw AOD body summary to %s", RAW_AOD_BODY_FILE)
+    except Exception as e:
+        _log.error("Failed to save raw AOD body: %s", e)
 
 
 def _normalize_fabric_planes(raw_planes: list[dict]) -> list[dict]:
@@ -109,25 +130,31 @@ async def receive_aod_handoff(raw_request: Request):
     """
     body = await raw_request.json()
 
+    # Save raw body for diagnostics BEFORE any normalization
+    _save_raw_aod_body(body)
+
     raw_planes = body.get("fabric_planes", [])
+    _log.info("AOD raw fabric_planes field: count=%d, value=%s",
+              len(raw_planes), json.dumps(raw_planes)[:500])
+
     if raw_planes:
-        _log.info("Raw fabric_planes from AOD (%d):", len(raw_planes))
-        for rp in raw_planes:
-            _log.info("  raw: %s", json.dumps(rp))
         body["fabric_planes"] = _normalize_fabric_planes(raw_planes)
         _log.info("Normalized fabric_planes (%d):", len(body["fabric_planes"]))
         for np in body["fabric_planes"]:
             _log.info("  norm: %s", json.dumps(np))
+    else:
+        _log.warning("AOD sent NO fabric_planes. All top-level keys: %s", list(body.keys()))
 
     raw_sors = body.get("sors", [])
+    _log.info("AOD raw sors field: count=%d", len(raw_sors))
+
     if raw_sors:
-        _log.info("Raw sors from AOD (%d):", len(raw_sors))
-        for rs in raw_sors:
-            _log.info("  raw sor: %s", json.dumps(rs))
         body["sors"] = _normalize_sors(raw_sors)
         _log.info("Normalized sors (%d):", len(body["sors"]))
         for ns in body["sors"]:
             _log.info("  norm sor: %s", json.dumps(ns))
+    else:
+        _log.warning("AOD sent NO sors. All top-level keys: %s", list(body.keys()))
 
     request = AODHandoffRequest(**body)
     _log.info(
@@ -147,6 +174,41 @@ async def fetch_aod_data():
     request = AODHandoffRequest(**payload)
     reset_aod_state()
     return process_handoff(request)
+
+
+@router.get("/debug/last-receive")
+async def debug_last_receive():
+    """Show exactly what AOD sent in the last /receive call (raw, pre-normalization).
+
+    Use this to trace whether AOD is sending fabric_planes and sors,
+    and what field names it uses.
+    """
+    import os
+    if not os.path.exists(RAW_AOD_BODY_FILE):
+        raise HTTPException(status_code=404, detail="No raw AOD body saved yet. Trigger a /receive first.")
+    with open(RAW_AOD_BODY_FILE) as f:
+        raw = json.load(f)
+
+    saved = load_aod_payload()
+    saved_fp = saved.get("fabric_planes", []) if saved else []
+    saved_sors = saved.get("sors", []) if saved else []
+
+    return {
+        "what_aod_sent_raw": raw,
+        "what_aam_saved_after_normalization": {
+            "fabric_planes_count": len(saved_fp),
+            "fabric_planes": saved_fp,
+            "sors_count": len(saved_sors),
+            "sors": saved_sors,
+        },
+        "diagnosis": {
+            "aod_sent_fabric_planes": len(raw.get("fabric_planes_raw", [])) > 0,
+            "aod_sent_sors": len(raw.get("sors_raw", [])) > 0,
+            "aod_used_alternate_key_systems_of_record": len(raw.get("systems_of_record_raw", [])) > 0,
+            "aam_has_fabric_planes_after_parse": len(saved_fp) > 0,
+            "aam_has_sors_after_parse": len(saved_sors) > 0,
+        },
+    }
 
 
 @router.post("/policy")
