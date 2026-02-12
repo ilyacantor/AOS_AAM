@@ -212,11 +212,9 @@ async def ui_pipes_list(
         <h1>Pipes</h1>
         <p class="page-subtitle">All declared data pipes with metadata, health status, and ownership. These are your canonical integration endpoints.</p>
         
-        {aod_run_banner()}
+        {aod_run_banner(extra_buttons='<button class="btn btn-sm" style="font-size: 0.75rem;" id="btn-run-inference" data-testid="btn-run-inference">Run Inference</button><button class="btn btn-sm" style="font-size: 0.75rem;" id="btn-export-dcl" data-testid="btn-export-dcl">Export to DCL</button>')}
         
         <div class="controls">
-            <button class="btn" id="btn-run-inference" data-testid="btn-run-inference">Run Inference</button>
-            <button class="btn" id="btn-export-dcl" data-testid="btn-export-dcl">Export to DCL</button>
             <select id="filter" data-testid="filter" onchange="applyFilter()">{filter_options}</select>
         </div>
         <table data-testid="pipes-table">

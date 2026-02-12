@@ -219,7 +219,7 @@ def ui_nav(active: str = "") -> str:
 """
 
 
-def aod_run_banner() -> str:
+def aod_run_banner(extra_buttons: str = "") -> str:
     """Generate AOD run information banner with Fetch AOD Data button."""
     latest_run = get_latest_aod_run()
 
@@ -260,7 +260,10 @@ async function fetchAodData() {
     <div>
         <strong style="color: #fb923c;">No AOD Run Loaded</strong>
     </div>
-    {fetch_btn}
+    <div style="display: flex; gap: 8px; align-items: center;">
+        {fetch_btn}
+        {extra_buttons}
+    </div>
 </div>
 {fetch_script}
 """
@@ -283,6 +286,7 @@ async function fetchAodData() {
     <div style="display: flex; gap: 8px; align-items: center;">
         {fetch_btn}
         <a href="/ui/reconcile/{aod_run_id}" class="btn btn-sm" style="font-size: 0.75rem;" data-testid="link-reconcile">Reconcile</a>
+        {extra_buttons}
     </div>
 </div>
 {fetch_script}
