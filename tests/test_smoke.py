@@ -88,3 +88,20 @@ def test_list_pipes_returns_candidates_as_pipes(db):
     pipes = db.list_pipes()
     assert len(pipes) == 1
     assert pipes[0]["source_system"] == "salesforce"
+    # Strict mode: no plane linkage → UNMAPPED, not API_GATEWAY
+    assert pipes[0]["fabric_plane"] == "UNMAPPED"
+
+
+def test_strict_defaults_no_hallucination(db):
+    """Strict mode: absent AOD fields stay null/unknown, never invented."""
+    result = db.create_candidate({
+        "asset_key": "strict.test",
+        "vendor_name": "StrictCo",
+        "display_name": "StrictCo App",
+        "category": "crm",
+        # execution_allowed NOT provided — should be None, not True
+        # action_type NOT provided — should be None, not "provision"
+    })
+    candidate = db.get_candidate(result["candidate_id"])
+    assert candidate["execution_allowed"] is None, "execution_allowed must not default to True"
+    assert candidate.get("action_type") is None, "action_type must not default to provision"

@@ -85,17 +85,15 @@ def find_matching_pipe(
     if pipes:
         return pipes[0]["pipe_id"], 0.9, "Auto-matched by vendor name"
 
-    # Strategy 2: Partial vendor name match
-    all_pipes = list_pipes(limit=1000)
-    for p in all_pipes:
-        source = (p.get("source_system") or "").lower()
-        if vendor and (vendor in source or source in vendor):
-            return p["pipe_id"], 0.7, f"Auto-matched by partial vendor match ({p.get('source_system')})"
+    # Strategy 2 (partial vendor substring match) removed — substring
+    # matching creates false positives (e.g. "work" matching "workato").
+    # Unmatched candidates stay unmatched for HITL review.
 
     # Strategy 3 (category-based match) removed — app categories don't
     # determine infrastructure routing.  Only vendor identity matters.
 
     # Strategy 4: Create new pipe from candidate
+    all_pipes = list_pipes(limit=1000)
     if all_pipes:
         aod_plane_hint = candidate.get("connected_via_plane")
         candidate_category = candidate.get("category", "")

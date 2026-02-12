@@ -28,7 +28,7 @@ def _extract_plane_type(fabric_plane_id: str, connected_via: str) -> str:
         return fabric_plane_id.split(":", 1)[0].upper()
     if connected_via:
         return connected_via.upper()
-    return "OTHER"
+    return "UNMAPPED"
 
 
 def build_topology_summary() -> dict:
@@ -97,7 +97,7 @@ def build_topology_summary() -> dict:
             "is_authoritative": True,
             "category": decl.get("category") or None,
             "domain": decl.get("domain"),
-            "confidence": decl.get("confidence", "high"),
+            "confidence": decl.get("confidence", "unknown"),
         }
 
     for c in candidates:

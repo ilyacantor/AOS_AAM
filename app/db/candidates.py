@@ -22,8 +22,11 @@ def create_candidate(candidate_data: dict) -> dict:
     now = datetime.utcnow().isoformat()
 
     # Handle AOD execution_allowed (convert bool to int for SQLite)
-    execution_allowed = candidate_data.get("execution_allowed", True)
-    if isinstance(execution_allowed, bool):
+    # Default None — AOD must explicitly grant permission, not permissive-by-default
+    execution_allowed = candidate_data.get("execution_allowed")
+    if execution_allowed is None:
+        execution_allowed = None  # stored as NULL — operator must review
+    elif isinstance(execution_allowed, bool):
         execution_allowed = 1 if execution_allowed else 0
 
     # Deduplication: Delete existing candidate with same asset_key to prevent duplicates
@@ -55,7 +58,7 @@ def create_candidate(candidate_data: dict) -> dict:
         candidate_data.get("priority_score"),
         candidate_data.get("status", "new"),
         execution_allowed,
-        candidate_data.get("action_type", "provision"),
+        candidate_data.get("action_type"),
         json.dumps(candidate_data.get("blocking_findings", [])),
         candidate_data.get("connected_via_plane"),
         candidate_data.get("aod_run_id"),
@@ -71,8 +74,8 @@ def create_candidate(candidate_data: dict) -> dict:
     return {
         "candidate_id": candidate_id,
         "status": "connected",
-        "execution_allowed": bool(execution_allowed),
-        "action_type": candidate_data.get("action_type", "provision"),
+        "execution_allowed": bool(execution_allowed) if execution_allowed is not None else None,
+        "action_type": candidate_data.get("action_type"),
         "created_at": now,
         "updated_at": now
     }
@@ -163,7 +166,7 @@ def _row_to_candidate(row) -> dict:
 
     # AOD Handoff fields
     if "execution_allowed" in keys:
-        result["execution_allowed"] = bool(row["execution_allowed"])
+        result["execution_allowed"] = bool(row["execution_allowed"]) if row["execution_allowed"] is not None else None
     if "action_type" in keys:
         result["action_type"] = row["action_type"]
     if "blocking_findings" in keys:

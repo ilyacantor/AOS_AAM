@@ -59,7 +59,8 @@ async def ui_pipes_list(
         "IPAAS": "#22d3ee",
         "API_GATEWAY": "#a78bfa",
         "EVENT_BUS": "#f97316",
-        "DATA_WAREHOUSE": "#10b981"
+        "DATA_WAREHOUSE": "#10b981",
+        "UNMAPPED": "#ef4444",
     }
     
     rows_html = ""
@@ -68,7 +69,7 @@ async def ui_pipes_list(
         entity_scope = p.get("entity_scope", [])
         trust_labels = p.get("trust_labels", [])
         owner_signals = p.get("owner_signals", [])
-        pipe_fabric = p.get("fabric_plane", "API_GATEWAY")
+        pipe_fabric = p.get("fabric_plane", "UNMAPPED")
         fabric_color = fabric_plane_colors.get(pipe_fabric, "#64748b")
         drift_info = drift_by_pipe.get(pipe_id, {"open": 0, "total": 0})
         drift_status = f"{drift_info['open']} open" if drift_info['open'] > 0 else "OK"

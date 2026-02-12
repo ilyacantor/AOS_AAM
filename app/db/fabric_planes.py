@@ -38,7 +38,7 @@ def store_fabric_plane(plane_data: dict, aod_run_id: str) -> dict:
         plane_data.get("display_name", f"{plane_data['vendor']} {plane_data['plane_type']}"),
         plane_data.get("domain"),
         plane_data.get("managed_asset_count", 0),
-        1 if plane_data.get("is_healthy", True) else 0,
+        {True: 1, False: 0}.get(plane_data.get("is_healthy")),  # None if AOD didn't declare
         aod_run_id,
         now,
         now

@@ -222,14 +222,14 @@ def _candidate_to_pipe(row) -> dict:
     """
     keys = row.keys()
     
-    # Extract fabric plane type: JOIN result → connected_via_plane → fallback
+    # Extract fabric plane type: JOIN result → connected_via_plane → UNMAPPED
     fabric_plane = None
     if "fabric_plane" in keys and row["fabric_plane"]:
         fabric_plane = row["fabric_plane"].upper()
     if not fabric_plane and "connected_via_plane" in keys and row["connected_via_plane"]:
         fabric_plane = row["connected_via_plane"].upper()
     if not fabric_plane:
-        fabric_plane = "API_GATEWAY"
+        fabric_plane = "UNMAPPED"
     
     # Map category to modality — iPaaS uses control plane, everything else is declared interface
     category_lower = row["category"].lower() if row["category"] else ""

@@ -41,8 +41,7 @@ def normalize_fabric_planes(raw_planes: list[dict]) -> list[dict]:
         vendor = fp.get("vendor") or fp.get("name") or ""
         health_raw = fp.get("is_healthy")
         if health_raw is None:
-            health_str = (fp.get("health") or fp.get("status") or "healthy").lower()
-            is_healthy = health_str not in ("degraded", "unhealthy", "down", "false")
+            is_healthy = None  # AOD didn't declare — preserve uncertainty
         else:
             is_healthy = bool(health_raw)
         source = fp.get("source", "aod")
@@ -62,8 +61,8 @@ def normalize_sors(raw_sors: list[dict]) -> list[dict]:
         domain = sor.get("domain") or sor.get("type") or sor.get("business_domain") or ""
         vendor = sor.get("vendor") or sor.get("app_name") or sor.get("name") or sor.get("application") or ""
         category = sor.get("category") or sor.get("sor_type") or sor.get("asset_category") or ""
-        confidence = sor.get("confidence") or sor.get("level") or sor.get("confidence_level") or "high"
-        source = sor.get("source") or sor.get("declared_by") or "farm"
+        confidence = sor.get("confidence") or sor.get("level") or sor.get("confidence_level") or "unknown"
+        source = sor.get("source") or sor.get("declared_by") or "unknown"
         if domain and vendor:
             normalized.append({
                 "domain": domain.upper(), "vendor": vendor,
