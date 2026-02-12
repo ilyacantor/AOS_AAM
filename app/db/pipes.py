@@ -282,9 +282,8 @@ def _row_to_pipe(row) -> dict:
     schema_info = json.loads(row["schema_info"]) if row["schema_info"] else None
     access_info = json.loads(row["access_info"]) if row["access_info"] else None
     
-    # Handle fabric_plane with fallback for older records
     keys = row.keys()
-    fabric_plane = row["fabric_plane"] if "fabric_plane" in keys and row["fabric_plane"] else "API_GATEWAY"
+    fabric_plane = row["fabric_plane"] if "fabric_plane" in keys and row["fabric_plane"] else "UNKNOWN"
     
     return {
         "pipe_id": row["pipe_id"],

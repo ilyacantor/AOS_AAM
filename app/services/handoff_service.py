@@ -139,7 +139,7 @@ def link_candidate_to_plane(
     request_planes,
 ) -> Optional[str]:
     """
-    Try to link a candidate to a fabric plane by vendor match or category fallback.
+    Try to link a candidate to a fabric plane by vendor match.
     Returns the plane_id or None.
     """
     vendor_lower = candidate.vendor_name.lower()

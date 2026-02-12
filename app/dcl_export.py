@@ -116,7 +116,6 @@ def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
             # Direct linkage exists
             planes_dict[fabric_plane_id]["candidates"].append(candidate)
         else:
-            # Track unlinked for fallback
             unlinked_candidates.append(candidate)
     
     # Unlinked candidates remain unlinked — we do NOT infer fabric planes
