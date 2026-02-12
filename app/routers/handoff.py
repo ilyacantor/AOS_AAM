@@ -3,7 +3,7 @@ AOD Handoff Router — endpoints for AOD→AAM data intake.
 """
 import json
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from starlette.responses import Response
 from typing import Optional
 
@@ -31,8 +31,45 @@ _log = get_logger("routers.handoff")
 router = APIRouter(prefix="/api/handoff/aod", tags=["AOD Handoff"])
 
 
+def _normalize_fabric_planes(raw_planes: list[dict]) -> list[dict]:
+    """
+    Normalize AOD fabric plane objects to AAM's expected schema.
+
+    AOD may send planes with various field names:
+      { "plane_type": "iPaaS", "vendor": "workato", "is_healthy": true, "source": "farm" }
+    Or alternate casing/naming:
+      { "type": "ipaas", "name": "workato", "health": "Degraded" }
+    """
+    PLANE_TYPE_ALIASES = {
+        "ipaas": "IPAAS", "iPaaS": "IPAAS",
+        "api_gateway": "API_GATEWAY", "api gateway": "API_GATEWAY", "apigateway": "API_GATEWAY",
+        "event_bus": "EVENT_BUS", "event bus": "EVENT_BUS", "eventbus": "EVENT_BUS",
+        "data_warehouse": "DATA_WAREHOUSE", "data warehouse": "DATA_WAREHOUSE", "datawarehouse": "DATA_WAREHOUSE",
+    }
+    normalized = []
+    for fp in raw_planes:
+        pt = fp.get("plane_type") or fp.get("type") or fp.get("planeType") or ""
+        vendor = fp.get("vendor") or fp.get("name") or ""
+        health_raw = fp.get("is_healthy")
+        if health_raw is None:
+            health_str = (fp.get("health") or fp.get("status") or "healthy").lower()
+            is_healthy = health_str not in ("degraded", "unhealthy", "down", "false")
+        else:
+            is_healthy = bool(health_raw)
+        source = fp.get("source", "aod")
+        pt_upper = PLANE_TYPE_ALIASES.get(pt, pt.upper().replace(" ", "_") if pt else "")
+        if pt_upper and vendor:
+            normalized.append({
+                "plane_type": pt_upper,
+                "vendor": vendor,
+                "is_healthy": is_healthy,
+                "source": source,
+            })
+    return normalized
+
+
 @router.post("/receive")
-async def receive_aod_handoff(request: AODHandoffRequest):
+async def receive_aod_handoff(raw_request: Request):
     """
     Primary AOD→AAM intake endpoint.
 
@@ -42,6 +79,23 @@ async def receive_aod_handoff(request: AODHandoffRequest):
     3. Links candidates to fabric planes
     4. Logs the handoff for reconciliation
     """
+    body = await raw_request.json()
+
+    raw_planes = body.get("fabric_planes", [])
+    if raw_planes:
+        _log.info("Raw fabric_planes from AOD (%d):", len(raw_planes))
+        for rp in raw_planes:
+            _log.info("  raw: %s", json.dumps(rp))
+        body["fabric_planes"] = _normalize_fabric_planes(raw_planes)
+        _log.info("Normalized fabric_planes (%d):", len(body["fabric_planes"]))
+        for np in body["fabric_planes"]:
+            _log.info("  norm: %s", json.dumps(np))
+
+    request = AODHandoffRequest(**body)
+    _log.info(
+        "Receive endpoint: run_id=%s, candidates=%d, fabric_planes=%d",
+        request.run_id, len(request.candidates), len(request.fabric_planes),
+    )
     return process_handoff(request)
 
 
