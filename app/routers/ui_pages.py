@@ -641,17 +641,8 @@ async def ui_candidates_list(
         
         {aod_run_banner()}
         
-        <div class="stats" style="margin-bottom: 16px;">
-            <div class="stat-card">
-                <div class="stat-value">{len(candidates)}</div>
-                <div class="stat-label">Showing</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value">{len(all_candidates)}</div>
-                <div class="stat-label">Total</div>
-            </div>
-        </div>
         <div class="controls">
+            <span style="color: var(--text-secondary, #94a3b8); font-size: 0.85rem;">Showing {len(candidates)} of {len(all_candidates)}</span>
             <select id="filter-view" data-testid="filter-view" onchange="applyFilter()">
                 <option value="all"{" selected" if view == "all" else ""}>All</option>
                 <option value="sors"{" selected" if view == "sors" else ""}>SORs</option>
