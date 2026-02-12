@@ -1580,16 +1580,17 @@ async def ui_topology():
             </div>
             <div class="filter-group">
                 <label>Layout:</label>
-                <select id="layout-select" onchange="changeLayout()">
+                <select id="layout-select" onchange="handleLayoutAction(this.value)">
                     <option value="physics">Force-Directed</option>
                     <option value="hierarchical">Hierarchical</option>
                     <option value="circular">Circular</option>
+                    <option disabled>───────────</option>
+                    <option value="_fit">Fit to Screen</option>
+                    <option value="_unlock">Unlock Positions</option>
                 </select>
             </div>
             <button class="btn" onclick="resetView()">Reset View</button>
-            <button class="btn" onclick="fitToScreen()">Fit to Screen</button>
             <button class="btn btn-success" onclick="refreshData()">Refresh Data</button>
-            <button class="btn" id="physics-toggle" onclick="togglePhysics()">🔓 Unlock Positions</button>
         </div>
 
         <div style="padding-bottom: 80px;">
@@ -1904,6 +1905,23 @@ async def ui_topology():
             }}
             
             loadTopology(fabricFilter, sorFilter, detailLevel);
+        }}
+
+        var _lastLayout = 'physics';
+        function handleLayoutAction(val) {{
+            const sel = document.getElementById('layout-select');
+            if (val === '_fit') {{
+                if (network) network.fit();
+                sel.value = _lastLayout;
+                return;
+            }}
+            if (val === '_unlock') {{
+                togglePhysics();
+                sel.value = _lastLayout;
+                return;
+            }}
+            _lastLayout = val;
+            renderNetwork();
         }}
 
         function changeLayout() {{
