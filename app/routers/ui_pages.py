@@ -20,6 +20,7 @@ from ..db import (
     get_canonical_stats,
     get_aod_reconciliation,
     list_tee_requests,
+    list_handoff_logs,
 )
 
 router = APIRouter(include_in_schema=False)
@@ -2187,10 +2188,27 @@ async def ui_topology():
 
 
 
+@router.get("/ui/reconcile", response_class=HTMLResponse, include_in_schema=False)
+async def ui_reconcile_latest():
+    """Redirect to the latest reconciliation run."""
+    logs = list_handoff_logs(limit=1)
+    if not logs:
+        return HTMLResponse(content=f"""
+<!DOCTYPE html>
+<html><head><title>Reconcile - AAM</title>{NAV_STYLE}</head>
+<body>{ui_nav('reconcile')}
+<div style="max-width:800px;margin:40px auto;padding:24px;text-align:center;color:#94a3b8;">
+<h2>No Handoff Runs Found</h2>
+<p style="margin-top:16px;">No AOD handoff data has been received yet. Send data from AOD first.</p>
+<a href="/ui/handoff" class="btn" style="margin-top:24px;display:inline-block;padding:8px 20px;background:rgba(34,211,238,0.15);border:1px solid rgba(34,211,238,0.3);border-radius:6px;color:var(--cyan-400);text-decoration:none;">Go to Handoff</a>
+</div></body></html>""", status_code=200)
+    from starlette.responses import RedirectResponse
+    return RedirectResponse(url=f"/ui/reconcile/{logs[0]['aod_run_id']}", status_code=302)
+
+
 @router.get("/ui/reconcile/{aod_run_id}", response_class=HTMLResponse, include_in_schema=False)
 async def ui_reconcile(aod_run_id: str):
     """Reconciliation UI - human-readable view of AOD handoff reconciliation"""
-    from .db import get_aod_reconciliation
     data = get_aod_reconciliation(aod_run_id)
     
     if data.get("error"):
@@ -2760,7 +2778,7 @@ async def ui_reconcile(aod_run_id: str):
     </style>
 </head>
 <body>
-    {ui_nav()}
+    {ui_nav('reconcile')}
     <div class="container">
         <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 8px;">
             <h1 style="margin-bottom: 0;">Reconciliation Report</h1>
