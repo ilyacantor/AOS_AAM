@@ -132,3 +132,42 @@ def test_handoff_explicit_planes_linked_to_candidates(db):
     candidates = list_candidates()
     sn = [c for c in candidates if c["asset_key"] == "servicenow.com"][0]
     assert sn["fabric_plane_id"] == "IPAAS:mulesoft"
+
+
+def test_handoff_auto_detects_fabric_planes_from_display_names(db):
+    """When AOD omits fabric_planes, AAM infers them from candidate display names."""
+    from app.models import AODHandoffRequest
+    from app.services.handoff_service import process_handoff
+    from app.db import get_fabric_planes
+
+    run_id = "display-hint-run-001"
+    request = AODHandoffRequest(
+        run_id=run_id,
+        snapshot_name="hint-snap",
+        handoff_timestamp=datetime.utcnow(),
+        candidates=[
+            _candidate("mulesoft.com", "MuleSoft", "MuleSoft - Ipaas", "other", "ms1", run_id),
+            _candidate("konghq.com", "Kong", "Kong - Api Gateway", "other", "k1", run_id),
+            _candidate("amazonaws.com", "AWS Redshift", "AWS Redshift - Data Warehouse", "data", "r1", run_id),
+            _candidate("servicenow.com", "ServiceNow", "ServiceNow ITSM", "itsm", "sn1", run_id),
+        ],
+        fabric_planes=[],  # AOD omits planes
+    )
+
+    result = process_handoff(request)
+    assert result.candidates_accepted == 4
+
+    planes = get_fabric_planes()
+    plane_types = {p["plane_type"] for p in planes}
+    plane_vendors = {p["vendor"] for p in planes}
+
+    # 3 fabric infra planes detected from display names
+    assert "IPAAS" in plane_types
+    assert "API_GATEWAY" in plane_types
+    assert "DATA_WAREHOUSE" in plane_types
+    assert "MuleSoft" in plane_vendors
+    assert "Kong" in plane_vendors
+    assert "AWS Redshift" in plane_vendors
+
+    # ServiceNow auto-created from SOR category (itsm → IPAAS)
+    assert "ServiceNow" in plane_vendors

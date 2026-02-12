@@ -25,3 +25,13 @@ CATEGORY_TO_PLANE_TYPE: dict[str, str] = {
 def infer_plane_type_from_category(category: str) -> str:
     """Return the default plane type for a given SOR category."""
     return CATEGORY_TO_PLANE_TYPE.get(category.lower(), "API_GATEWAY")
+
+
+# Keywords in candidate display_name that signal a fabric-infrastructure vendor.
+# Used by resolve_fabric_planes() when AOD omits the fabric_planes array.
+DISPLAY_NAME_PLANE_HINTS: dict[str, str] = {
+    "ipaas": "IPAAS",
+    "api gateway": "API_GATEWAY",
+    "event bus": "EVENT_BUS",
+    "data warehouse": "DATA_WAREHOUSE",
+}

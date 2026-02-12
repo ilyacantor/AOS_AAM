@@ -14,7 +14,7 @@ from typing import Optional
 
 from ..config import settings
 from ..logger import get_logger
-from ..constants import SOR_CATEGORIES, infer_plane_type_from_category
+from ..constants import SOR_CATEGORIES, infer_plane_type_from_category, DISPLAY_NAME_PLANE_HINTS
 from ..db import (
     store_fabric_plane,
     create_candidate,
@@ -92,8 +92,38 @@ def resolve_fabric_planes(request: AODHandoffRequest) -> tuple[dict, int]:
             except Exception as e:
                 _log.error("Failed to store fabric plane %s: %s", plane.vendor, e)
     else:
-        # Auto-create from SOR candidate categories
+        # Auto-create from candidate metadata (display names + SOR categories)
         seen_vendors: set[str] = set()
+        seen_plane_types: set[str] = set()
+
+        # Pass 1: detect fabric-infrastructure vendors from display_name hints
+        # e.g. "MuleSoft - Ipaas" → IPAAS, "Kong - Api Gateway" → API_GATEWAY
+        for candidate in request.candidates:
+            if not candidate.vendor_name:
+                continue
+            display = (candidate.display_name or "").lower()
+            for hint, plane_type in DISPLAY_NAME_PLANE_HINTS.items():
+                if hint in display and plane_type not in seen_plane_types:
+                    vendor_key = candidate.vendor_name.lower()
+                    seen_vendors.add(vendor_key)
+                    seen_plane_types.add(plane_type)
+                    plane_dict = {
+                        "plane_type": plane_type,
+                        "vendor": candidate.vendor_name,
+                        "display_name": candidate.display_name,
+                        "domain": hint.replace(" ", "_"),
+                        "managed_asset_count": 1,
+                    }
+                    try:
+                        result = store_fabric_plane(plane_dict, request.run_id)
+                        fabric_plane_map[vendor_key] = result["plane_id"]
+                        fabric_planes_stored += 1
+                        _log.info("Auto-created fabric plane from display hint: %s (%s)", candidate.vendor_name, plane_type)
+                    except Exception as e:
+                        _log.error("Failed to auto-create fabric plane for %s: %s", candidate.vendor_name, e)
+                    break
+
+        # Pass 2: create planes for SOR-category vendors not already covered
         for candidate in request.candidates:
             cat_lower = candidate.category.lower() if candidate.category else ""
             if cat_lower in SOR_CATEGORIES and candidate.vendor_name:
@@ -110,8 +140,7 @@ def resolve_fabric_planes(request: AODHandoffRequest) -> tuple[dict, int]:
                     }
                     try:
                         result = store_fabric_plane(plane_dict, request.run_id)
-                        plane_id = result["plane_id"]
-                        fabric_plane_map[vendor_key] = plane_id
+                        fabric_plane_map[vendor_key] = result["plane_id"]
                         fabric_planes_stored += 1
                         _log.info("Auto-created fabric plane for SOR: %s (%s)", candidate.vendor_name, plane_type)
                     except Exception as e:
