@@ -2,9 +2,7 @@
 Collectors Router — collector execution and observation processing.
 """
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime
 
 from ..db import (
     list_collectors,
@@ -16,7 +14,6 @@ from ..db import (
     list_collector_runs,
     create_pipe,
 )
-from ..collectors.mock import run_mock_collector
 from ..inference import infer_pipes_from_observations
 from ..pii_redaction import redact_pii_from_observation
 from ..services.collector_service import run_adapter_collector
@@ -24,33 +21,11 @@ from ..services.collector_service import run_adapter_collector
 router = APIRouter(tags=["Collectors"])
 
 
-class MockCollectorRequest(BaseModel):
-    candidate_id: Optional[str] = None
-
-
 @router.get("/api/aam/collectors")
 async def get_collectors():
     """List all collectors."""
     collectors = list_collectors()
     return {"collectors": collectors, "count": len(collectors)}
-
-
-@router.post("/api/aam/collectors/mock/run")
-async def run_mock(request: Optional[MockCollectorRequest] = None):
-    """Run the mock collector to generate observations."""
-    candidate_id = request.candidate_id if request else None
-    observations = run_mock_collector(candidate_id=candidate_id)
-    return {
-        "message": "Mock collector executed",
-        "observations_created": len(observations),
-        "observations": observations,
-    }
-
-
-@router.post("/api/collect/mock/run")
-async def run_mock_alias(request: Optional[MockCollectorRequest] = None):
-    """Run the mock collector (alias)."""
-    return await run_mock(request)
 
 
 @router.post("/api/aam/infer")
@@ -97,38 +72,23 @@ async def infer_pipes():
     }
 
 
-@router.post("/api/collect/{collector}/run")
-async def run_collector(collector: str, request: Optional[MockCollectorRequest] = None):
-    """Run a collector and track the run."""
+@router.post("/api/collect/adapter/run")
+async def run_adapter(request=None):
+    """Run adapter collector against connected fabric planes."""
     from ..main import preset_loader, adapter_registry
 
-    collector_id = f"{collector}-collector-001" if collector in ["mock", "adapter"] else collector
+    collector_id = "adapter-collector-001"
     run_id = create_collector_run(collector_id)
 
     try:
-        if collector == "mock":
-            candidate_id = request.candidate_id if request else None
-            observations = run_mock_collector(candidate_id=candidate_id)
-            complete_collector_run(run_id, "completed", len(observations))
-            return {
-                "run_id": run_id,
-                "collector": collector,
-                "status": "completed",
-                "observations_created": len(observations),
-                "observations": observations,
-            }
-        elif collector == "adapter":
-            if not adapter_registry:
-                complete_collector_run(run_id, "failed", 0, "No adapters connected")
-                raise HTTPException(
-                    status_code=400,
-                    detail="No adapters connected. Connect adapters first via /api/adapters/{plane_type}/connect",
-                )
-            result = await run_adapter_collector(collector_id, run_id, adapter_registry, preset_loader)
-            return {"run_id": run_id, "collector": collector, **result}
-        else:
-            complete_collector_run(run_id, "failed", 0, f"Unknown collector: {collector}")
-            raise HTTPException(status_code=400, detail=f"Unknown collector: {collector}. Valid: mock, adapter")
+        if not adapter_registry:
+            complete_collector_run(run_id, "failed", 0, "No adapters connected")
+            raise HTTPException(
+                status_code=400,
+                detail="No adapters connected. Connect adapters first via /api/adapters/{plane_type}/connect",
+            )
+        result = await run_adapter_collector(collector_id, run_id, adapter_registry, preset_loader)
+        return {"run_id": run_id, "collector": "adapter", **result}
     except HTTPException:
         raise
     except Exception as e:

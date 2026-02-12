@@ -67,7 +67,6 @@ from .db import (
     get_canonical_stats,
     store_fabric_plane
 )
-from .collectors.mock import run_mock_collector
 from .inference import infer_pipes_from_observations
 from .models import (
     ConnectionCandidateCreate,
@@ -122,7 +121,7 @@ from .routers.collectors import router as collectors_router
 from .routers.drift import router as drift_router, fabric_drift_router
 from .routers.tee import router as tee_router
 from .routers.adapters import router as adapters_router
-from .routers.presets import config_router, seed_router
+from .routers.presets import config_router
 from .routers.topology import router as topology_router
 from .routers.export import router as export_router
 from .routers.admin import router as admin_router
@@ -138,7 +137,6 @@ app.include_router(fabric_drift_router)
 app.include_router(tee_router)
 app.include_router(adapters_router)
 app.include_router(config_router)
-app.include_router(seed_router)
 app.include_router(topology_router)
 app.include_router(export_router)
 app.include_router(admin_router)

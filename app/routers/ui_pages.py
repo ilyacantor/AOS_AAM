@@ -88,7 +88,7 @@ async def ui_pipes_list(
         """
     
     if not pipes:
-        rows_html = '<tr><td colspan="8" class="empty-state">No pipes found. Load a preset or run Mock Collector to generate sample data.</td></tr>'
+        rows_html = '<tr><td colspan="8" class="empty-state">No pipes found. Fetch AOD data and run inference to create pipes from candidates.</td></tr>'
     
     # Build single combined filter dropdown
     filter_options = '<option value="all"' + (' selected' if filter == "all" else '') + '>All</option>'
@@ -118,44 +118,6 @@ async def ui_pipes_list(
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }}
-        .preset-section {{
-            background: rgba(34, 211, 238, 0.1);
-            border: 1px solid rgba(34, 211, 238, 0.3);
-            border-radius: 8px;
-            padding: 16px;
-            margin-bottom: 24px;
-        }}
-        .preset-section h3 {{
-            margin: 0 0 12px 0;
-            font-size: 0.9rem;
-            color: #22d3ee;
-        }}
-        .preset-grid {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 12px;
-        }}
-        .preset-card {{
-            background: rgba(30, 41, 59, 0.8);
-            border: 1px solid #334155;
-            border-radius: 6px;
-            padding: 12px;
-            cursor: pointer;
-            transition: all 0.2s;
-        }}
-        .preset-card:hover {{
-            border-color: #22d3ee;
-            background: rgba(34, 211, 238, 0.1);
-        }}
-        .preset-card h4 {{
-            margin: 0 0 4px 0;
-            font-size: 0.85rem;
-        }}
-        .preset-card p {{
-            margin: 0;
-            font-size: 0.7rem;
-            color: #94a3b8;
-        }}
         .stats-bar {{
             display: flex;
             gap: 24px;
@@ -163,62 +125,6 @@ async def ui_pipes_list(
             padding: 12px 16px;
             background: rgba(30, 41, 59, 0.5);
             border-radius: 8px;
-        }}
-        .data-source-toggle {{
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            margin-bottom: 16px;
-            padding: 12px 16px;
-            background: rgba(30, 41, 59, 0.6);
-            border: 1px solid #334155;
-            border-radius: 8px;
-        }}
-        .toggle-label {{
-            font-size: 0.85rem;
-            color: #94a3b8;
-            font-weight: 500;
-        }}
-        .toggle-group {{
-            display: flex;
-            background: rgba(15, 23, 42, 0.8);
-            border-radius: 6px;
-            overflow: hidden;
-            border: 1px solid #334155;
-        }}
-        .toggle-btn {{
-            padding: 8px 16px;
-            font-size: 0.8rem;
-            font-weight: 500;
-            border: none;
-            background: transparent;
-            color: #94a3b8;
-            cursor: pointer;
-            transition: all 0.2s;
-        }}
-        .toggle-btn.active {{
-            background: #22d3ee;
-            color: #0f172a;
-        }}
-        .toggle-btn:hover:not(.active) {{
-            background: rgba(34, 211, 238, 0.1);
-            color: #e2e8f0;
-        }}
-        .source-indicator {{
-            font-size: 0.75rem;
-            padding: 4px 10px;
-            border-radius: 12px;
-            font-weight: 500;
-        }}
-        .source-indicator.mock {{
-            background: rgba(167, 139, 250, 0.2);
-            color: #a78bfa;
-            border: 1px solid rgba(167, 139, 250, 0.3);
-        }}
-        .source-indicator.aod {{
-            background: rgba(34, 211, 238, 0.2);
-            color: #22d3ee;
-            border: 1px solid rgba(34, 211, 238, 0.3);
         }}
         .stat-item {{
             text-align: center;
@@ -308,31 +214,12 @@ async def ui_pipes_list(
         
         {aod_run_banner()}
         
-        <div class="preset-section" data-testid="preset-section">
-            <h3>Load Enterprise Preset</h3>
-            <div class="preset-grid" id="preset-grid">Loading presets...</div>
-        </div>
-        
-        <div class="data-source-toggle" data-testid="data-source-toggle">
-            <span class="toggle-label">Generate Test Data:</span>
-            <div class="toggle-group">
-                <button class="toggle-btn active" id="toggle-mock" data-testid="toggle-mock" onclick="setDataSource('mock')">Mock Pipes</button>
-                <button class="toggle-btn" id="toggle-aod" data-testid="toggle-aod" onclick="setDataSource('aod')">AOD Candidates</button>
-            </div>
-            <span class="source-indicator mock" id="source-indicator" data-testid="source-indicator">Creates sample pipes directly</span>
-        </div>
-        <div id="aod-note" style="display:none; padding: 12px; background: rgba(34, 211, 238, 0.1); border: 1px solid rgba(34, 211, 238, 0.3); border-radius: 8px; margin-bottom: 16px; font-size: 0.85rem; color: #94a3b8;">
-            <strong style="color: #22d3ee;">Note:</strong> AOD handoffs create <strong>Candidates</strong>, not Pipes. 
-            Candidates appear in the <a href="/ui/candidates" style="color: #22d3ee;">Candidates tab</a> and can be matched to create Pipes.
-        </div>
-        
         <div class="stats-bar" id="stats-bar" data-testid="stats-bar">
             <div class="stat-item"><div class="stat-value" id="stat-total">{len(pipes)}</div><div class="stat-label">Total Pipes</div></div>
         </div>
         
         <div class="controls">
             <button class="btn" id="btn-run-inference" data-testid="btn-run-inference">Run Inference</button>
-            <button class="btn" id="btn-run-collector" data-testid="btn-run-collector">Run Mock Collector</button>
             <button class="btn" id="btn-export-dcl" data-testid="btn-export-dcl">Export to DCL</button>
             <select id="filter" data-testid="filter" onchange="applyFilter()">{filter_options}</select>
         </div>
@@ -409,82 +296,6 @@ async def ui_pipes_list(
             window.location.href = '/ui/pipes' + (params.toString() ? '?' + params.toString() : '');
         }}
         
-        async function loadPresets() {{
-            try {{
-                const res = await fetch('/api/presets');
-                const data = await res.json();
-                const grid = document.getElementById('preset-grid');
-                if (data.presets && data.presets.length > 0) {{
-                    grid.innerHTML = data.presets.map(p => `
-                        <div class="preset-card" onclick="loadPreset('${{p.preset_id}}')" data-testid="preset-${{p.preset_id}}">
-                            <h4>${{p.name}}</h4>
-                            <p>${{p.pipe_count}} pipes, ${{p.candidate_count}} candidates</p>
-                        </div>
-                    `).join('');
-                }} else {{
-                    grid.innerHTML = '<p>No presets available</p>';
-                }}
-            }} catch (e) {{
-                document.getElementById('preset-grid').innerHTML = '<p>Failed to load presets</p>';
-            }}
-        }}
-        
-        async function loadPreset(presetId) {{
-            const confirmed = await showConfirmModal(
-                'Load Preset',
-                'This will replace all existing data with the preset. Any current pipes, candidates, and drift events will be cleared.'
-            );
-            if (!confirmed) return;
-            try {{
-                const res = await fetch('/api/presets/' + presetId + '/load', {{ method: 'POST' }});
-                const data = await res.json();
-                if (res.ok) {{
-                    showToast(data.message, 'success');
-                    setTimeout(() => location.reload(), 1000);
-                }} else {{
-                    showToast('Error: ' + (data.detail || 'Failed'), 'error');
-                }}
-            }} catch (e) {{
-                showToast('Error: ' + e.message, 'error');
-            }}
-        }}
-        
-        loadPresets();
-        
-        let currentDataSource = localStorage.getItem('aam_data_source') || 'mock';
-        
-        function setDataSource(source, persist = true) {{
-            currentDataSource = source;
-            if (persist) {{
-                localStorage.setItem('aam_data_source', source);
-            }}
-            const mockBtn = document.getElementById('toggle-mock');
-            const aodBtn = document.getElementById('toggle-aod');
-            const indicator = document.getElementById('source-indicator');
-            const mockCollectorBtn = document.getElementById('btn-run-collector');
-            
-            const aodNote = document.getElementById('aod-note');
-            
-            if (source === 'mock') {{
-                mockBtn.classList.add('active');
-                aodBtn.classList.remove('active');
-                indicator.className = 'source-indicator mock';
-                indicator.textContent = 'Creates sample pipes directly';
-                mockCollectorBtn.style.display = 'inline-block';
-                aodNote.style.display = 'none';
-            }} else {{
-                aodBtn.classList.add('active');
-                mockBtn.classList.remove('active');
-                indicator.className = 'source-indicator aod';
-                indicator.textContent = 'Creates candidates for triage';
-                mockCollectorBtn.style.display = 'none';
-                aodNote.style.display = 'block';
-            }}
-        }}
-        
-        // Initialize toggle state from localStorage on page load
-        setDataSource(currentDataSource, false);
-        
         document.getElementById('btn-run-inference').addEventListener('click', async function() {{
             this.disabled = true;
             this.textContent = 'Running...';
@@ -504,28 +315,6 @@ async def ui_pipes_list(
             this.textContent = 'Run Inference';
         }});
 
-        document.getElementById('btn-run-collector').addEventListener('click', async function() {{
-            this.disabled = true;
-            this.textContent = 'Running...';
-            try {{
-                const res = await fetch('/api/collect/mock/run', {{ method: 'POST', headers: {{ 'Content-Type': 'application/json' }}, body: '{{}}' }});
-                const data = await res.json();
-                if (res.ok) {{
-                    showToast('Collector ran: ' + data.observations_created + ' observations created', 'success');
-                    const inferRes = await fetch('/api/aam/infer', {{ method: 'POST' }});
-                    const inferData = await inferRes.json();
-                    showToast('Inferred ' + inferData.pipes_created + ' pipes', 'success');
-                    setTimeout(() => location.reload(), 1500);
-                }} else {{
-                    showToast('Error: ' + (data.detail || 'Failed'), 'error');
-                }}
-            }} catch (e) {{
-                showToast('Error: ' + e.message, 'error');
-            }}
-            this.disabled = false;
-            this.textContent = 'Run Mock Collector';
-        }});
-        
         document.getElementById('btn-export-dcl').addEventListener('click', async function() {{
             try {{
                 const res = await fetch('/api/export/dcl/declared-pipes');
@@ -1365,12 +1154,9 @@ async def ui_guide():
             <h3>Actions You Can Take</h3>
             <table class="guide-table">
                 <tr><th>Button</th><th>What It Does</th></tr>
-                <tr><td>Run Mock Collector</td><td>Triggers a mock collector to simulate pipe discovery and create sample data</td></tr>
+                <tr><td>Run Inference</td><td>Converts candidates from AOD into declared pipes with metadata</td></tr>
                 <tr><td>Export to DCL</td><td>Generates a snapshot of all pipes in DCL format for downstream consumption</td></tr>
             </table>
-
-            <h3>Enterprise Presets</h3>
-            <p>At the top of the Pipes screen, you can load predefined enterprise presets that populate sample data for different integration patterns. This is useful for demos and testing.</p>
         </div>
         
         <div class="guide-section" id="pipe-detail">
@@ -1462,11 +1248,10 @@ async def ui_guide():
             </div>
 
             <div class="guide-card">
-                <div class="guide-card-title">Populating Sample Data</div>
+                <div class="guide-card-title">Creating Pipes from AOD Data</div>
                 <ol>
-                    <li>Go to <strong>Pipes</strong> screen</li>
-                    <li>Load an Enterprise Preset to populate sample data, or</li>
-                    <li>Click <strong>Run Mock Collector</strong> to simulate pipe discovery</li>
+                    <li>Fetch AOD data from the <strong>Pipes</strong> screen</li>
+                    <li>Click <strong>Run Inference</strong> to convert candidates into declared pipes</li>
                     <li>Review newly created pipes in the table</li>
                 </ol>
             </div>
@@ -1581,7 +1366,6 @@ async def ui_drift_list(status: Optional[str] = Query(None)):
         <h1>Drift & Health</h1>
         <p class="page-subtitle">Monitor schema changes and connectivity issues. Acknowledge, suppress, or take action on drift events.</p>
         <div class="controls">
-            <button class="btn" id="btn-rerun-collector" data-testid="btn-rerun-collector">Re-run Collector</button>
             <select id="filter-status" data-testid="filter-drift-status" onchange="applyFilter()">{status_options}</select>
         </div>
         
@@ -1656,24 +1440,6 @@ async def ui_drift_list(status: Optional[str] = Query(None)):
             }}
         }}
         
-        document.getElementById('btn-rerun-collector').addEventListener('click', async function() {{
-            this.disabled = true;
-            this.textContent = 'Running...';
-            try {{
-                const res = await fetch('/api/collect/mock/run', {{ method: 'POST', headers: {{ 'Content-Type': 'application/json' }}, body: '{{}}' }});
-                const data = await res.json();
-                if (res.ok) {{
-                    showToast('Collector ran: ' + data.observations_created + ' observations', 'success');
-                    setTimeout(() => location.reload(), 1500);
-                }} else {{
-                    showToast('Error: ' + (data.detail || 'Failed'), 'error');
-                }}
-            }} catch (e) {{
-                showToast('Error: ' + e.message, 'error');
-            }}
-            this.disabled = false;
-            this.textContent = 'Re-run Collector';
-        }});
     </script>
 </body>
 </html>
