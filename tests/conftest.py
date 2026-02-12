@@ -26,3 +26,13 @@ def db():
     import app.db as db_mod
     db_mod.init_db()
     return db_mod
+
+
+@pytest.fixture
+def run_id():
+    """Provide run_id for integration tests that need a running server.
+
+    These tests (test_harness.py) hit HTTP endpoints, so they only work when
+    a server is running with ingested data.  Skip automatically in unit-test runs.
+    """
+    pytest.skip("Integration test — requires a running server with ingested AOD data")

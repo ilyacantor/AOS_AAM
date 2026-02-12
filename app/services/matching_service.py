@@ -86,7 +86,7 @@ def find_matching_pipe(
         return pipes[0]["pipe_id"], 0.9, "Auto-matched by vendor name"
 
     # Strategy 2: Partial vendor name match
-    all_pipes = list_pipes(limit=200)
+    all_pipes = list_pipes(limit=1000)
     for p in all_pipes:
         source = (p.get("source_system") or "").lower()
         if vendor and (vendor in source or source in vendor):

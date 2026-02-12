@@ -21,6 +21,15 @@ PLANE_LABELS = {
 }
 
 
+def _extract_plane_type(fabric_plane_id: str, connected_via: str) -> str:
+    """Extract plane type from composite ID (e.g. 'IPAAS:workato' -> 'IPAAS')."""
+    if fabric_plane_id and ":" in fabric_plane_id:
+        return fabric_plane_id.split(":", 1)[0].upper()
+    if connected_via:
+        return connected_via.upper()
+    return "OTHER"
+
+
 def build_topology_summary() -> dict:
     """
     Build a lightweight topology showing only Fabric Planes and SORs.
@@ -41,14 +50,7 @@ def build_topology_summary() -> dict:
     # Candidate counts by plane
     candidate_counts = {"IPAAS": 0, "API_GATEWAY": 0, "EVENT_BUS": 0, "DATA_WAREHOUSE": 0, "OTHER": 0}
     for c in candidates:
-        fabric_plane_id = c.get("fabric_plane_id", "")
-        connected_via = c.get("connected_via_plane", "")
-        if fabric_plane_id and ":" in fabric_plane_id:
-            plane = fabric_plane_id.split(":")[0].upper()
-        elif connected_via:
-            plane = connected_via.upper()
-        else:
-            plane = "OTHER"
+        plane = _extract_plane_type(c.get("fabric_plane_id", ""), c.get("connected_via_plane", ""))
         if plane in candidate_counts:
             candidate_counts[plane] += 1
         else:
@@ -107,12 +109,9 @@ def build_topology_summary() -> dict:
                 sor_systems[key]["is_sor"] = True
                 if not sor_systems[key].get("category"):
                     sor_systems[key]["category"] = category
-            fabric_plane_id = c.get("fabric_plane_id", "")
-            connected_via = c.get("connected_via_plane", "")
-            if fabric_plane_id and ":" in fabric_plane_id:
-                sor_systems[key]["planes"].add(fabric_plane_id.split(":")[0].upper())
-            elif connected_via:
-                sor_systems[key]["planes"].add(connected_via.upper())
+            plane_type = _extract_plane_type(c.get("fabric_plane_id", ""), c.get("connected_via_plane", ""))
+            if plane_type != "OTHER":
+                sor_systems[key]["planes"].add(plane_type)
 
     # Create nodes + edges
     nodes = []

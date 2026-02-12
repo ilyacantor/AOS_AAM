@@ -158,14 +158,12 @@ class PresetConfigLoader:
         """Check if direct app access is allowed (only Scrappy mode)"""
         return self.current_config.direct_app_access
     
-    def get_routing_decision(self, candidate_category: str) -> FabricPlane:
+    def get_routing_decision(self) -> FabricPlane:
         """
         Return the preset's primary fabric plane.
 
-        NOTE: This no longer routes by application category (CRM, ERP, etc.).
-        The app category tells you nothing about which integration infrastructure
-        the enterprise deployed.  The preset's primary plane is returned as a
-        default when AOD doesn't provide an explicit plane hint.
+        This is a default when AOD doesn't provide an explicit plane hint.
+        App categories (CRM, ERP, etc.) don't determine infrastructure routing.
         """
         return self.current_config.primary_plane
     

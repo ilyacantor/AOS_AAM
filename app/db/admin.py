@@ -7,18 +7,20 @@ import sqlite3
 from datetime import datetime
 from typing import Optional
 
-from .connection import get_connection
+from .connection import get_connection, get_db
 
 # ============================================================================
 # PRESET / SEED DATA OPERATIONS
 # ============================================================================
 
 def reset_aod_state():
-    """Full reset of all prior run state. Called before fetching new AOD data."""
-    conn = get_connection()
-    cursor = conn.cursor()
-    
-    tables = [
+    """
+    Clear candidate/fabric/SOR data so a fresh handoff can repopulate it.
+
+    Preserves the handoff log (audit trail) and collectors (infrastructure config).
+    """
+    # Tables whose rows are repopulated on each handoff
+    repopulated_tables = [
         "drift_events",
         "pipe_versions",
         "declared_pipes",
@@ -28,26 +30,24 @@ def reset_aod_state():
         "tee_requests",
         "fabric_planes",
         "sor_declarations",
-        "aod_handoff_log",
+        "sor_dispositions",
         "aod_policy_manifest",
-        "collectors",
     ]
-    
-    counts = {}
-    for table in tables:
-        cursor.execute(f"SELECT COUNT(*) FROM {table}")
-        counts[table] = cursor.fetchone()[0]
-        cursor.execute(f"DELETE FROM {table}")
-    
-    conn.commit()
-    conn.close()
-    
+
+    with get_db() as conn:
+        cursor = conn.cursor()
+        counts = {}
+        for table in repopulated_tables:
+            cursor.execute(f"SELECT COUNT(*) FROM {table}")
+            counts[table] = cursor.fetchone()[0]
+            cursor.execute(f"DELETE FROM {table}")
+
     total_deleted = sum(counts.values())
     return {"reset": True, "tables_cleared": counts, "total_rows_deleted": total_deleted}
 
 
 def clear_all_data():
-    """Clear all data from the database (for preset loading)"""
+    """Alias for reset_aod_state — clears repopulated tables."""
     return reset_aod_state()
 
 
@@ -66,18 +66,18 @@ def get_pipe_stats() -> dict:
     cursor.execute("SELECT COUNT(*) FROM declared_pipes")
     stats["total_pipes"] = cursor.fetchone()[0]
 
-    cursor.execute("SELECT fabric_plane, COUNT(*) FROM declared_pipes GROUP BY fabric_plane")
+    cursor.execute("SELECT fabric_plane, COUNT(*) as cnt FROM declared_pipes GROUP BY fabric_plane")
     for row in cursor.fetchall():
-        plane = row[0] or "API_GATEWAY"
-        stats["by_fabric_plane"][plane] = row[1]
+        plane = row["fabric_plane"] or "API_GATEWAY"
+        stats["by_fabric_plane"][plane] = row["cnt"]
 
-    cursor.execute("SELECT modality, COUNT(*) FROM declared_pipes GROUP BY modality")
+    cursor.execute("SELECT modality, COUNT(*) as cnt FROM declared_pipes GROUP BY modality")
     for row in cursor.fetchall():
-        stats["by_modality"][row[0]] = row[1]
+        stats["by_modality"][row["modality"]] = row["cnt"]
 
-    cursor.execute("SELECT source_system, COUNT(*) FROM declared_pipes GROUP BY source_system")
+    cursor.execute("SELECT source_system, COUNT(*) as cnt FROM declared_pipes GROUP BY source_system")
     for row in cursor.fetchall():
-        stats["by_source_system"][row[0]] = row[1]
+        stats["by_source_system"][row["source_system"]] = row["cnt"]
 
     conn.close()
     return stats

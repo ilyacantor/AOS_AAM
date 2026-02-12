@@ -52,12 +52,10 @@ async def infer_pipes():
 
     created_pipes = []
     for pipe in inferred_pipes:
-        action = pipe.pop("_action", "create")
-        if action == "create":
-            result = create_pipe(pipe)
-            pipe["pipe_id"] = result["pipe_id"]
-            pipe["version"] = result["version"]
-            created_pipes.append(pipe)
+        result = create_pipe(pipe)
+        pipe["pipe_id"] = result["pipe_id"]
+        pipe["version"] = result["version"]
+        created_pipes.append(pipe)
 
     for obs in observations:
         mark_observation_processed(obs["observation_id"])

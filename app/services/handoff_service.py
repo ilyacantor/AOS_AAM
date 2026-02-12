@@ -14,7 +14,7 @@ from typing import Optional
 
 from ..config import settings
 from ..logger import get_logger
-from ..constants import SOR_CATEGORIES, DISPLAY_NAME_PLANE_HINTS
+from ..constants import SOR_CATEGORIES, DISPLAY_NAME_PLANE_HINTS, PLANE_TYPE_ALIASES
 from ..db import (
     store_fabric_plane,
     store_sor_declaration,
@@ -29,6 +29,51 @@ from ..models import AODHandoffRequest, AODHandoffResponse, SORDeclaration
 _log = get_logger("services.handoff")
 
 AOD_PAYLOAD_FILE = settings.AOD_PAYLOAD_FILE
+
+
+# ---- AOD payload normalization ----
+
+def normalize_fabric_planes(raw_planes: list[dict]) -> list[dict]:
+    """Normalize AOD fabric plane objects to AAM's expected schema."""
+    normalized = []
+    for fp in raw_planes:
+        pt = fp.get("plane_type") or fp.get("type") or fp.get("planeType") or ""
+        vendor = fp.get("vendor") or fp.get("name") or ""
+        health_raw = fp.get("is_healthy")
+        if health_raw is None:
+            health_str = (fp.get("health") or fp.get("status") or "healthy").lower()
+            is_healthy = health_str not in ("degraded", "unhealthy", "down", "false")
+        else:
+            is_healthy = bool(health_raw)
+        source = fp.get("source", "aod")
+        pt_upper = PLANE_TYPE_ALIASES.get(pt, pt.upper().replace(" ", "_") if pt else "")
+        if pt_upper and vendor:
+            normalized.append({
+                "plane_type": pt_upper, "vendor": vendor,
+                "is_healthy": is_healthy, "source": source,
+            })
+    return normalized
+
+
+def normalize_sors(raw_sors: list[dict]) -> list[dict]:
+    """Normalize AOD SOR declarations to AAM's expected schema."""
+    normalized = []
+    for sor in raw_sors:
+        domain = sor.get("domain") or sor.get("type") or sor.get("business_domain") or ""
+        vendor = sor.get("vendor") or sor.get("app_name") or sor.get("name") or sor.get("application") or ""
+        category = sor.get("category") or sor.get("sor_type") or sor.get("asset_category") or ""
+        confidence = sor.get("confidence") or sor.get("level") or sor.get("confidence_level") or "high"
+        source = sor.get("source") or sor.get("declared_by") or "farm"
+        if domain and vendor:
+            normalized.append({
+                "domain": domain.upper(), "vendor": vendor,
+                "category": category.lower() if category else "",
+                "confidence": confidence.lower(), "source": source.lower(),
+            })
+        else:
+            _log.warning("Dropped SOR during normalization — missing domain or vendor: %s",
+                         json.dumps(sor))
+    return normalized
 
 
 # ---- Typed error classification ----

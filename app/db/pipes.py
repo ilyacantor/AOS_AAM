@@ -7,61 +7,56 @@ import sqlite3
 from datetime import datetime
 from typing import Optional
 
-from .connection import get_connection
+from .connection import get_connection, get_db
 
 # ============================================================================
 # PIPE OPERATIONS
 # ============================================================================
 
 def create_pipe(pipe_data: dict) -> dict:
-    """Create a new declared pipe"""
-    conn = get_connection()
-    cursor = conn.cursor()
-    
+    """Create a new declared pipe (pipe + initial version in one transaction)."""
     pipe_id = pipe_data.get("pipe_id", str(uuid.uuid4()))
     now = datetime.utcnow().isoformat()
     schema_hash = pipe_data.get("schema_info", {}).get("schema_hash") if pipe_data.get("schema_info") else None
-    
-    cursor.execute("""
-        INSERT INTO declared_pipes (
-            pipe_id, display_name, fabric_plane, modality, source_system, transport_kind,
-            endpoint_ref, entity_scope, identity_keys, change_semantics,
-            provenance, owner_signals, trust_labels, schema_info, freshness,
-            access_info, version, schema_hash, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        pipe_id,
-        pipe_data["display_name"],
-        pipe_data.get("fabric_plane", "API_GATEWAY"),
-        pipe_data["modality"],
-        pipe_data["source_system"],
-        pipe_data["transport_kind"],
-        json.dumps(pipe_data.get("endpoint_ref", {})),
-        json.dumps(pipe_data.get("entity_scope", [])),
-        json.dumps(pipe_data.get("identity_keys", [])),
-        pipe_data.get("change_semantics", "UNKNOWN"),
-        json.dumps(pipe_data["provenance"]),
-        json.dumps(pipe_data.get("owner_signals", [])),
-        json.dumps(pipe_data.get("trust_labels", [])),
-        json.dumps(pipe_data.get("schema_info")) if pipe_data.get("schema_info") else None,
-        pipe_data.get("freshness"),
-        json.dumps(pipe_data.get("access")) if pipe_data.get("access") else None,
-        1,
-        schema_hash,
-        now,
-        now
-    ))
-    
-    # Create initial version
-    version_id = str(uuid.uuid4())
-    cursor.execute("""
-        INSERT INTO pipe_versions (version_id, pipe_id, version, schema_hash, payload, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, (version_id, pipe_id, 1, schema_hash, json.dumps(pipe_data), now))
-    
-    conn.commit()
-    conn.close()
-    
+
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO declared_pipes (
+                pipe_id, display_name, fabric_plane, modality, source_system, transport_kind,
+                endpoint_ref, entity_scope, identity_keys, change_semantics,
+                provenance, owner_signals, trust_labels, schema_info, freshness,
+                access_info, version, schema_hash, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            pipe_id,
+            pipe_data["display_name"],
+            pipe_data.get("fabric_plane", "API_GATEWAY"),
+            pipe_data["modality"],
+            pipe_data["source_system"],
+            pipe_data["transport_kind"],
+            json.dumps(pipe_data.get("endpoint_ref", {})),
+            json.dumps(pipe_data.get("entity_scope", [])),
+            json.dumps(pipe_data.get("identity_keys", [])),
+            pipe_data.get("change_semantics", "UNKNOWN"),
+            json.dumps(pipe_data["provenance"]),
+            json.dumps(pipe_data.get("owner_signals", [])),
+            json.dumps(pipe_data.get("trust_labels", [])),
+            json.dumps(pipe_data.get("schema_info")) if pipe_data.get("schema_info") else None,
+            pipe_data.get("freshness"),
+            json.dumps(pipe_data.get("access")) if pipe_data.get("access") else None,
+            1,
+            schema_hash,
+            now,
+            now
+        ))
+
+        version_id = str(uuid.uuid4())
+        cursor.execute("""
+            INSERT INTO pipe_versions (version_id, pipe_id, version, schema_hash, payload, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (version_id, pipe_id, 1, schema_hash, json.dumps(pipe_data), now))
+
     return {"pipe_id": pipe_id, "version": 1, "created_at": now, "updated_at": now}
 
 
@@ -128,8 +123,9 @@ def list_pipes(source_system: Optional[str] = None, fabric_plane: Optional[str] 
     """
     
     if limit:
-        query += f" LIMIT {limit}"
-    
+        query += " LIMIT ?"
+        params.append(limit)
+
     cursor.execute(query, params)
     
     rows = cursor.fetchall()
@@ -161,71 +157,62 @@ def get_pipe_versions(pipe_id: str) -> list[dict]:
 
 
 def update_pipe_with_version(pipe_id: str, pipe_data: dict, new_schema_hash: Optional[str] = None) -> dict:
-    """Update a pipe and create a new version"""
-    conn = get_connection()
-    cursor = conn.cursor()
-    
-    # Get current version
-    cursor.execute("SELECT version, schema_hash FROM declared_pipes WHERE pipe_id = ?", (pipe_id,))
-    row = cursor.fetchone()
-    if not row:
-        conn.close()
-        raise ValueError(f"Pipe {pipe_id} not found")
-    
-    current_version = row["version"]
-    old_schema_hash = row["schema_hash"]
-    new_version = current_version + 1
-    now = datetime.utcnow().isoformat()
-    
-    # Update pipe
-    cursor.execute("""
-        UPDATE declared_pipes SET
-            display_name = ?, modality = ?, source_system = ?, transport_kind = ?,
-            endpoint_ref = ?, entity_scope = ?, identity_keys = ?, change_semantics = ?,
-            provenance = ?, owner_signals = ?, trust_labels = ?, schema_info = ?,
-            freshness = ?, access_info = ?, version = ?, schema_hash = ?, updated_at = ?
-        WHERE pipe_id = ?
-    """, (
-        pipe_data["display_name"],
-        pipe_data["modality"],
-        pipe_data["source_system"],
-        pipe_data["transport_kind"],
-        json.dumps(pipe_data.get("endpoint_ref", {})),
-        json.dumps(pipe_data.get("entity_scope", [])),
-        json.dumps(pipe_data.get("identity_keys", [])),
-        pipe_data.get("change_semantics", "UNKNOWN"),
-        json.dumps(pipe_data["provenance"]),
-        json.dumps(pipe_data.get("owner_signals", [])),
-        json.dumps(pipe_data.get("trust_labels", [])),
-        json.dumps(pipe_data.get("schema_info")) if pipe_data.get("schema_info") else None,
-        pipe_data.get("freshness"),
-        json.dumps(pipe_data.get("access")) if pipe_data.get("access") else None,
-        new_version,
-        new_schema_hash,
-        now,
-        pipe_id
-    ))
-    
-    # Create new version record
-    version_id = str(uuid.uuid4())
-    cursor.execute("""
-        INSERT INTO pipe_versions (version_id, pipe_id, version, schema_hash, payload, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, (version_id, pipe_id, new_version, new_schema_hash, json.dumps(pipe_data), now))
-    
-    # Check for schema drift
-    drift_id = None
-    if old_schema_hash and new_schema_hash and old_schema_hash != new_schema_hash:
-        drift_id = str(uuid.uuid4())
+    """Update a pipe, version it, and detect drift — all in one transaction."""
+    with get_db() as conn:
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT version, schema_hash FROM declared_pipes WHERE pipe_id = ?", (pipe_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise ValueError(f"Pipe {pipe_id} not found")
+
+        new_version = row["version"] + 1
+        old_schema_hash = row["schema_hash"]
+        now = datetime.utcnow().isoformat()
+
         cursor.execute("""
-            INSERT INTO drift_events (drift_id, pipe_id, drift_type, old_value, new_value, detected_at)
+            UPDATE declared_pipes SET
+                display_name = ?, modality = ?, source_system = ?, transport_kind = ?,
+                endpoint_ref = ?, entity_scope = ?, identity_keys = ?, change_semantics = ?,
+                provenance = ?, owner_signals = ?, trust_labels = ?, schema_info = ?,
+                freshness = ?, access_info = ?, version = ?, schema_hash = ?, updated_at = ?
+            WHERE pipe_id = ?
+        """, (
+            pipe_data["display_name"],
+            pipe_data["modality"],
+            pipe_data["source_system"],
+            pipe_data["transport_kind"],
+            json.dumps(pipe_data.get("endpoint_ref", {})),
+            json.dumps(pipe_data.get("entity_scope", [])),
+            json.dumps(pipe_data.get("identity_keys", [])),
+            pipe_data.get("change_semantics", "UNKNOWN"),
+            json.dumps(pipe_data["provenance"]),
+            json.dumps(pipe_data.get("owner_signals", [])),
+            json.dumps(pipe_data.get("trust_labels", [])),
+            json.dumps(pipe_data.get("schema_info")) if pipe_data.get("schema_info") else None,
+            pipe_data.get("freshness"),
+            json.dumps(pipe_data.get("access")) if pipe_data.get("access") else None,
+            new_version,
+            new_schema_hash,
+            now,
+            pipe_id
+        ))
+
+        version_id = str(uuid.uuid4())
+        cursor.execute("""
+            INSERT INTO pipe_versions (version_id, pipe_id, version, schema_hash, payload, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
-        """, (drift_id, pipe_id, "schema", old_schema_hash, new_schema_hash, now))
-    
-    conn.commit()
-    conn.close()
-    
-    return {"pipe_id": pipe_id, "version": new_version, "drift_detected": drift_id is not None}
+        """, (version_id, pipe_id, new_version, new_schema_hash, json.dumps(pipe_data), now))
+
+        drift_detected = False
+        if old_schema_hash and new_schema_hash and old_schema_hash != new_schema_hash:
+            drift_detected = True
+            cursor.execute("""
+                INSERT INTO drift_events (drift_id, pipe_id, drift_type, old_value, new_value, detected_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (str(uuid.uuid4()), pipe_id, "schema", old_schema_hash, new_schema_hash, now))
+
+    return {"pipe_id": pipe_id, "version": new_version, "drift_detected": drift_detected}
 
 
 def _candidate_to_pipe(row) -> dict:
@@ -238,16 +225,9 @@ def _candidate_to_pipe(row) -> dict:
     # Extract fabric plane type (from JOIN)
     fabric_plane = row["fabric_plane"].upper() if "fabric_plane" in keys and row["fabric_plane"] else "API_GATEWAY"
     
-    # Map category to modality (inferred)
+    # Map category to modality — iPaaS uses control plane, everything else is declared interface
     category_lower = row["category"].lower() if row["category"] else ""
-    if "ipaas" in category_lower:
-        modality = "CONTROL_PLANE"
-    elif "warehouse" in category_lower or "data" in category_lower:
-        modality = "DECLARED_INTERFACE"
-    elif "gateway" in category_lower or "api" in category_lower:
-        modality = "DECLARED_INTERFACE"
-    else:
-        modality = "DECLARED_INTERFACE"
+    modality = "CONTROL_PLANE" if "ipaas" in category_lower else "DECLARED_INTERFACE"
     
     return {
         "pipe_id": row["candidate_id"],  # Candidate ID = Pipe ID

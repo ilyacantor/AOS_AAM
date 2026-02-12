@@ -24,6 +24,7 @@ from .db import (
     get_pipe,
     list_pipes
 )
+from .models import Modality, TransportKind, ChangeSemantics
 
 
 def compute_schema_hash(schema: dict) -> str:
@@ -49,15 +50,8 @@ def infer_pipes_from_observations(observations: list[dict]) -> list[dict]:
     for obs in observations:
         pipe = infer_single_pipe(obs)
         if pipe:
-            # Check if a similar pipe already exists
-            existing = find_existing_pipe(pipe)
-            if existing:
-                pipe["pipe_id"] = existing["pipe_id"]
-                pipe["_action"] = "update"
-            else:
-                pipe["_action"] = "create"
             pipes.append(pipe)
-    
+
     return pipes
 
 
@@ -176,21 +170,21 @@ def infer_modality(endpoint_info: dict, metadata: dict) -> str:
     
     # Control plane indicators
     if any(x in url for x in ["admin", "management", "config", "settings"]):
-        return "CONTROL_PLANE"
-    
+        return Modality.CONTROL_PLANE.value
+
     # iPaaS typically uses control plane
     if category == "ipaas" or vendor in ["workato", "mulesoft", "boomi"]:
-        return "CONTROL_PLANE"
-    
+        return Modality.CONTROL_PLANE.value
+
     # API endpoints are declared interfaces
     if any(x in url for x in ["api", "rest", "services", "sobjects"]):
-        return "DECLARED_INTERFACE"
-    
+        return Modality.DECLARED_INTERFACE.value
+
     # Event/webhook patterns
     if any(x in url for x in ["events", "webhook", "stream", "subscribe"]):
-        return "PASSIVE_SUBSCRIPTION"
-    
-    return "DECLARED_INTERFACE"
+        return Modality.PASSIVE_SUBSCRIPTION.value
+
+    return Modality.DECLARED_INTERFACE.value
 
 
 def infer_transport_kind(endpoint_info: dict) -> str:
@@ -199,18 +193,18 @@ def infer_transport_kind(endpoint_info: dict) -> str:
     method = endpoint_info.get("method", "GET").upper()
     
     if any(x in url for x in ["webhook", "callback", "hook"]):
-        return "WEBHOOK"
-    
+        return TransportKind.WEBHOOK.value
+
     if any(x in url for x in ["event", "stream", "subscribe", "queue"]):
-        return "EVENT_STREAM"
-    
+        return TransportKind.EVENT_STREAM.value
+
     if any(x in url for x in ["table", "query", "sql", "database"]):
-        return "TABLE"
-    
+        return TransportKind.TABLE.value
+
     if any(x in url for x in ["file", "download", "export", "csv", "xlsx"]):
-        return "FILE"
-    
-    return "API"
+        return TransportKind.FILE.value
+
+    return TransportKind.API.value
 
 
 def infer_entity_scope(entity_hints: list[str], endpoint_info: dict) -> list[str]:
@@ -311,15 +305,15 @@ def infer_change_semantics(endpoint_info: dict, schema: Optional[dict]) -> str:
 
     # CDC indicators in URL
     if any(x in url for x in ["cdc", "changes", "delta", "incremental", "replication"]):
-        return "CDC_UPSERT"
+        return ChangeSemantics.CDC_UPSERT.value
 
     # Append-only indicators (events, logs, activities)
     if any(x in url for x in ["events", "log", "audit", "history", "activities", "feed", "stream"]):
-        return "APPEND_ONLY"
+        return ChangeSemantics.APPEND_ONLY.value
 
     # Snapshot indicators
     if any(x in url for x in ["snapshot", "full", "dump", "export", "bulk", "all"]):
-        return "SNAPSHOT"
+        return ChangeSemantics.SNAPSHOT.value
 
     # Check schema for timestamp fields that suggest CDC
     if schema:
@@ -348,13 +342,13 @@ def infer_change_semantics(endpoint_info: dict, schema: Optional[dict]) -> str:
         )
 
         if has_modified and has_created:
-            return "CDC_UPSERT"
+            return ChangeSemantics.CDC_UPSERT.value
         if has_version:
-            return "CDC_UPSERT"
+            return ChangeSemantics.CDC_UPSERT.value
         if has_deleted and has_modified:
-            return "CDC_UPSERT"
+            return ChangeSemantics.CDC_UPSERT.value
         if has_created and not has_modified:
-            return "APPEND_ONLY"
+            return ChangeSemantics.APPEND_ONLY.value
 
         # Check for immutable record patterns (IDs only, no timestamps)
         id_only = all(
@@ -362,13 +356,13 @@ def infer_change_semantics(endpoint_info: dict, schema: Optional[dict]) -> str:
             for k in schema_keys_lower if k not in ["created", "modified", "updated"]
         )
         if id_only and len(schema_keys_lower) <= 3:
-            return "SNAPSHOT"
+            return ChangeSemantics.SNAPSHOT.value
 
     # POST methods often indicate append-only patterns
     if method == "POST" and any(x in url for x in ["create", "insert", "add"]):
-        return "APPEND_ONLY"
+        return ChangeSemantics.APPEND_ONLY.value
 
-    return "UNKNOWN"
+    return ChangeSemantics.UNKNOWN.value
 
 
 def build_lineage_hints(observation: dict) -> list[str]:
@@ -550,28 +544,14 @@ def process_pending_observations() -> dict:
         return {"processed": 0, "pipes_created": 0, "pipes_updated": 0}
     
     pipes = infer_pipes_from_observations(observations)
-    
-    created = 0
-    updated = 0
-    
+
     for pipe in pipes:
-        action = pipe.pop("_action", "create")
-        
-        if action == "create":
-            create_pipe(pipe)
-            created += 1
-        else:
-            # For updates, we'd use update_pipe_with_version
-            # For MVP-0, we'll just create new pipes
-            create_pipe(pipe)
-            created += 1
-    
-    # Mark observations as processed
+        create_pipe(pipe)
+
     for obs in observations:
         mark_observation_processed(obs["observation_id"])
-    
+
     return {
         "processed": len(observations),
-        "pipes_created": created,
-        "pipes_updated": updated
+        "pipes_created": len(pipes),
     }

@@ -46,32 +46,32 @@ class DCLExportResponse(BaseModel):
 
 
 def _infer_fields_from_category(category: str) -> List[str]:
-    """Infer likely schema fields from asset category"""
+    """Infer likely schema fields from asset category (not vendor name)."""
     category_lower = category.lower()
-    
-    if "crm" in category_lower or "salesforce" in category_lower:
+
+    if "crm" in category_lower:
         return [
-            "account_id", "account_name", "opportunity_id", "amount", 
+            "account_id", "account_name", "opportunity_id", "amount",
             "stage", "close_date", "owner_id", "created_at"
         ]
-    elif "erp" in category_lower or "sap" in category_lower or "netsuite" in category_lower:
+    elif "erp" in category_lower:
         return [
-            "invoice_id", "customer_id", "amount", "currency", 
+            "invoice_id", "customer_id", "amount", "currency",
             "status", "issue_date", "due_date", "gl_account"
         ]
-    elif "finance" in category_lower or "accounting" in category_lower:
+    elif "finance" in category_lower:
         return [
-            "transaction_id", "account", "debit", "credit", 
+            "transaction_id", "account", "debit", "credit",
             "date", "description", "category"
         ]
-    elif "hcm" in category_lower or "hr" in category_lower or "workday" in category_lower:
+    elif "hcm" in category_lower or "hr" in category_lower:
         return [
-            "employee_id", "name", "department", "title", 
+            "employee_id", "name", "department", "title",
             "salary", "hire_date", "manager_id", "status"
         ]
     elif "data" in category_lower or "warehouse" in category_lower:
         return [
-            "date", "customer_id", "revenue", "cost", 
+            "date", "customer_id", "revenue", "cost",
             "margin", "segment", "region"
         ]
     else:

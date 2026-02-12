@@ -8,7 +8,6 @@ from starlette.responses import Response
 from typing import Optional
 
 from ..logger import get_logger
-from ..constants import SOR_CATEGORIES
 from ..config import settings
 from ..db import (
     get_connection,
@@ -25,7 +24,10 @@ from ..db import (
     get_sor_dispositions,
 )
 from ..models import AODHandoffRequest, AODHandoffResponse, AODPolicyManifest
-from ..services.handoff_service import process_handoff, load_aod_payload
+from ..services.handoff_service import (
+    process_handoff, load_aod_payload,
+    normalize_fabric_planes, normalize_sors,
+)
 from ..services.export_service import build_reconciliation_csv
 
 _log = get_logger("routers.handoff")
@@ -54,73 +56,6 @@ def _save_raw_aod_body(body: dict):
         _log.error("Failed to save raw AOD body: %s", e)
 
 
-def _normalize_fabric_planes(raw_planes: list[dict]) -> list[dict]:
-    """
-    Normalize AOD fabric plane objects to AAM's expected schema.
-
-    AOD may send planes with various field names:
-      { "plane_type": "iPaaS", "vendor": "workato", "is_healthy": true, "source": "farm" }
-    Or alternate casing/naming:
-      { "type": "ipaas", "name": "workato", "health": "Degraded" }
-    """
-    PLANE_TYPE_ALIASES = {
-        "ipaas": "IPAAS", "iPaaS": "IPAAS",
-        "api_gateway": "API_GATEWAY", "api gateway": "API_GATEWAY", "apigateway": "API_GATEWAY",
-        "event_bus": "EVENT_BUS", "event bus": "EVENT_BUS", "eventbus": "EVENT_BUS",
-        "data_warehouse": "DATA_WAREHOUSE", "data warehouse": "DATA_WAREHOUSE", "datawarehouse": "DATA_WAREHOUSE",
-    }
-    normalized = []
-    for fp in raw_planes:
-        pt = fp.get("plane_type") or fp.get("type") or fp.get("planeType") or ""
-        vendor = fp.get("vendor") or fp.get("name") or ""
-        health_raw = fp.get("is_healthy")
-        if health_raw is None:
-            health_str = (fp.get("health") or fp.get("status") or "healthy").lower()
-            is_healthy = health_str not in ("degraded", "unhealthy", "down", "false")
-        else:
-            is_healthy = bool(health_raw)
-        source = fp.get("source", "aod")
-        pt_upper = PLANE_TYPE_ALIASES.get(pt, pt.upper().replace(" ", "_") if pt else "")
-        if pt_upper and vendor:
-            normalized.append({
-                "plane_type": pt_upper,
-                "vendor": vendor,
-                "is_healthy": is_healthy,
-                "source": source,
-            })
-    return normalized
-
-
-def _normalize_sors(raw_sors: list[dict]) -> list[dict]:
-    """
-    Normalize AOD SOR declarations to AAM's expected schema.
-
-    AOD may send SORs with various field names:
-      { "domain": "CRM", "vendor": "Microsoft Dynamics", "category": "saas", "confidence": "high", "source": "farm" }
-    Or alternate naming:
-      { "type": "CRM", "name": "Microsoft Dynamics", "level": "high" }
-    """
-    normalized = []
-    for sor in raw_sors:
-        domain = sor.get("domain") or sor.get("type") or sor.get("business_domain") or ""
-        vendor = sor.get("vendor") or sor.get("app_name") or sor.get("name") or sor.get("application") or ""
-        category = sor.get("category") or sor.get("sor_type") or sor.get("asset_category") or ""
-        confidence = sor.get("confidence") or sor.get("level") or sor.get("confidence_level") or "high"
-        source = sor.get("source") or sor.get("declared_by") or "farm"
-
-        if domain and vendor:
-            normalized.append({
-                "domain": domain.upper(),
-                "vendor": vendor,
-                "category": category.lower() if category else "",
-                "confidence": confidence.lower(),
-                "source": source.lower(),
-            })
-        else:
-            _log.warning("Dropped SOR during normalization — missing domain or vendor: %s", json.dumps(sor))
-    return normalized
-
-
 @router.post("/receive")
 async def receive_aod_handoff(raw_request: Request):
     """
@@ -142,7 +77,7 @@ async def receive_aod_handoff(raw_request: Request):
               len(raw_planes), json.dumps(raw_planes)[:500])
 
     if raw_planes:
-        body["fabric_planes"] = _normalize_fabric_planes(raw_planes)
+        body["fabric_planes"] = normalize_fabric_planes(raw_planes)
         _log.info("Normalized fabric_planes (%d):", len(body["fabric_planes"]))
         for np in body["fabric_planes"]:
             _log.info("  norm: %s", json.dumps(np))
@@ -153,7 +88,7 @@ async def receive_aod_handoff(raw_request: Request):
     _log.info("AOD raw sors field: count=%d", len(raw_sors))
 
     if raw_sors:
-        body["sors"] = _normalize_sors(raw_sors)
+        body["sors"] = normalize_sors(raw_sors)
         _log.info("Normalized sors (%d):", len(body["sors"]))
         for ns in body["sors"]:
             _log.info("  norm sor: %s", json.dumps(ns))

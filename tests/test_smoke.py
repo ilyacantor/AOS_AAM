@@ -19,6 +19,8 @@ def test_init_db_creates_all_tables(db):
         "fabric_planes",
         "observations",
         "pipe_versions",
+        "sor_declarations",
+        "sor_dispositions",
         "tee_requests",
     ])
     assert tables == expected

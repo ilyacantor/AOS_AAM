@@ -72,8 +72,8 @@ def test_handoff_idempotency(db):
     assert len(candidates) == 1
 
 
-def test_handoff_creates_fabric_planes_for_sors(db):
-    """SOR candidates auto-create fabric planes during handoff."""
+def test_handoff_does_not_infer_planes_from_categories(db):
+    """SOR candidates do NOT auto-create fabric planes — categories aren't infrastructure."""
     from app.models import AODHandoffRequest
     from app.services.handoff_service import process_handoff
 
@@ -92,13 +92,12 @@ def test_handoff_creates_fabric_planes_for_sors(db):
 
     from app.db import get_fabric_planes
     planes = get_fabric_planes()
-    assert len(planes) >= 1
-    plane_vendors = [p["vendor"] for p in planes]
-    assert "ServiceNow" in plane_vendors
+    # No planes — ServiceNow being "itsm" doesn't create infrastructure
+    assert len(planes) == 0
 
 
-def test_handoff_explicit_planes_linked_to_candidates(db):
-    """When AOD sends explicit fabric_planes, candidates are linked by category."""
+def test_handoff_explicit_planes_stored_and_vendor_linked(db):
+    """When AOD sends explicit fabric_planes, they're stored. Candidates linked by vendor match."""
     from app.models import AODHandoffRequest, FabricPlaneSummary
     from app.services.handoff_service import process_handoff
     from app.db import get_fabric_planes, list_candidates
@@ -109,33 +108,36 @@ def test_handoff_explicit_planes_linked_to_candidates(db):
         snapshot_name="planes-snap",
         handoff_timestamp=datetime.utcnow(),
         candidates=[
+            _candidate("mulesoft.com", "mulesoft", "MuleSoft iPaaS", "ipaas", "ms1", run_id),
             _candidate("servicenow.com", "ServiceNow", "ServiceNow ITSM", "itsm", "sn1", run_id),
         ],
         fabric_planes=[
             FabricPlaneSummary(plane_type="IPAAS", vendor="mulesoft", is_healthy=True),
             FabricPlaneSummary(plane_type="API_GATEWAY", vendor="kong", is_healthy=True),
-            FabricPlaneSummary(plane_type="EVENT_BUS", vendor="eventbridge", is_healthy=True),
-            FabricPlaneSummary(plane_type="DATA_WAREHOUSE", vendor="redshift", is_healthy=True),
         ],
     )
 
     result = process_handoff(request)
-    assert result.candidates_accepted == 1
+    assert result.candidates_accepted == 2
 
-    # All 4 explicit planes stored
+    # Both explicit planes stored
     planes = get_fabric_planes()
-    assert len(planes) == 4
+    assert len(planes) == 2
     plane_vendors = {p["vendor"] for p in planes}
-    assert plane_vendors == {"mulesoft", "kong", "eventbridge", "redshift"}
+    assert plane_vendors == {"mulesoft", "kong"}
 
-    # ServiceNow (itsm) should be linked to the IPAAS plane (mulesoft)
+    # MuleSoft vendor-matched to IPAAS plane
     candidates = list_candidates()
+    ms = [c for c in candidates if c["asset_key"] == "mulesoft.com"][0]
+    assert ms["fabric_plane_id"] == "IPAAS:mulesoft"
+
+    # ServiceNow has no vendor match — not linked (no category-based routing)
     sn = [c for c in candidates if c["asset_key"] == "servicenow.com"][0]
-    assert sn["fabric_plane_id"] == "IPAAS:mulesoft"
+    assert sn["fabric_plane_id"] is None
 
 
 def test_handoff_auto_detects_fabric_planes_from_display_names(db):
-    """When AOD omits fabric_planes, AAM infers them from candidate display names."""
+    """When AOD omits fabric_planes, AAM infers them from candidate display names only."""
     from app.models import AODHandoffRequest
     from app.services.handoff_service import process_handoff
     from app.db import get_fabric_planes
@@ -161,7 +163,7 @@ def test_handoff_auto_detects_fabric_planes_from_display_names(db):
     plane_types = {p["plane_type"] for p in planes}
     plane_vendors = {p["vendor"] for p in planes}
 
-    # 3 fabric infra planes detected from display names
+    # 3 fabric infra planes detected from display name hints
     assert "IPAAS" in plane_types
     assert "API_GATEWAY" in plane_types
     assert "DATA_WAREHOUSE" in plane_types
@@ -169,5 +171,6 @@ def test_handoff_auto_detects_fabric_planes_from_display_names(db):
     assert "Kong" in plane_vendors
     assert "AWS Redshift" in plane_vendors
 
-    # ServiceNow auto-created from SOR category (itsm → IPAAS)
-    assert "ServiceNow" in plane_vendors
+    # ServiceNow is NOT a fabric plane — "itsm" category doesn't imply infrastructure
+    assert "ServiceNow" not in plane_vendors
+    assert len(planes) == 3
