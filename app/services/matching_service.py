@@ -92,20 +92,8 @@ def find_matching_pipe(
         if vendor and (vendor in source or source in vendor):
             return p["pipe_id"], 0.7, f"Auto-matched by partial vendor match ({p.get('source_system')})"
 
-    # Strategy 3: Category-based match
-    category_hints = {
-        "crm": ["salesforce", "hubspot", "dynamics"],
-        "collaboration": ["slack", "teams", "notion"],
-        "payment": ["stripe", "paypal", "square"],
-        "communication": ["twilio", "sendgrid"],
-        "analytics": ["segment", "mixpanel", "amplitude"],
-    }
-    for cat, sources in category_hints.items():
-        if cat in category:
-            for p in all_pipes:
-                source = (p.get("source_system") or "").lower()
-                if any(s in source for s in sources):
-                    return p["pipe_id"], 0.5, f"Auto-matched by category ({cat} -> {p.get('source_system')})"
+    # Strategy 3 (category-based match) removed — app categories don't
+    # determine infrastructure routing.  Only vendor identity matters.
 
     # Strategy 4: Create new pipe from candidate
     if all_pipes:
@@ -117,11 +105,9 @@ def find_matching_pipe(
                 routed_plane = FabricPlane(aod_plane_hint)
                 routing_source = "aod_hint"
             except ValueError:
-                routed_plane = preset_loader.get_routing_decision(candidate_category)
-                routing_source = "preset_fallback"
+                return None, 0.0, f"Cannot create pipe: AOD plane hint '{aod_plane_hint}' is not a valid FabricPlane"
         else:
-            routed_plane = preset_loader.get_routing_decision(candidate_category)
-            routing_source = "preset"
+            return None, 0.0, "Cannot create pipe: no fabric plane hint from AOD and category-based inference is disabled"
 
         is_valid, route_reason = preset_loader.validate_candidate_routing(vendor, routed_plane)
         if not is_valid:

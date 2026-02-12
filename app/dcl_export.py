@@ -4,11 +4,14 @@ AAM → DCL Export Module
 Provides pipe definitions grouped by fabric plane for DCL consumption.
 Uses REAL fabric plane data from AOD instead of hardcoded vendors.
 """
+import logging
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
 from datetime import datetime
 
 from .db import get_candidates_by_aod_run, list_candidates, get_fabric_planes
+
+_log = logging.getLogger(__name__)
 
 
 class DCLConnectionSchema(BaseModel):
@@ -116,34 +119,12 @@ def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
             # Track unlinked for fallback
             unlinked_candidates.append(candidate)
     
-    # Fallback for unlinked candidates: infer from category
-    if unlinked_candidates and planes_dict:
-        for candidate in unlinked_candidates:
-            category = candidate.get("category", "").lower()
-            
-            # Map category to plane type
-            if "data" in category or "warehouse" in category:
-                target_type = "warehouse"
-            elif "event" in category or "stream" in category:
-                target_type = "event_bus"
-            elif "gateway" in category or "api" in category:
-                target_type = "api_gateway"
-            else:
-                target_type = "ipaas"
-            
-            # Find first plane of that type
-            matched_plane = None
-            for plane_id, data in planes_dict.items():
-                if data["plane"]["plane_type"] == target_type:
-                    matched_plane = plane_id
-                    break
-            
-            # Ultimate fallback: first available plane
-            if not matched_plane:
-                matched_plane = next(iter(planes_dict.keys()), None)
-            
-            if matched_plane:
-                planes_dict[matched_plane]["candidates"].append(candidate)
+    # Unlinked candidates remain unlinked — we do NOT infer fabric planes
+    # from application categories.  If a candidate wasn't linked to a plane
+    # by AOD or by explicit infrastructure evidence, it stays unlinked.
+    for candidate in unlinked_candidates:
+        _log.debug("Candidate %s (%s) has no fabric plane link — skipping DCL grouping",
+                   candidate.get("vendor_name"), candidate.get("category"))
     
     # Build fabric plane objects for DCL
     fabric_planes_output = []

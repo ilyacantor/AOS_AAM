@@ -3,6 +3,12 @@ AAM Shared Constants.
 
 Single source of truth for category sets and mappings used
 across handoff, topology, and reconciliation logic.
+
+DESIGN RULE: AAM never infers infrastructure (fabric planes) from
+application categories.  Knowing something is a "CRM" or "ERP" tells
+you nothing about which integration infrastructure the enterprise
+deployed.  Only AOD-discovered infrastructure evidence or explicit
+operator declarations create fabric plane records.
 """
 
 # SOR (System of Record) categories recognized by AAM
@@ -11,29 +17,37 @@ SOR_CATEGORIES: set[str] = {
     "saas", "hr", "finance", "cmdb", "identity",
 }
 
-# Mapping from SOR category to default fabric plane type.
-# Used in AOD handoff auto-inference and topology classification.
-CATEGORY_TO_PLANE_TYPE: dict[str, str] = {
-    "erp": "DATA_WAREHOUSE",
-    "finance": "DATA_WAREHOUSE",
-    "itsm": "IPAAS",
-    "cmdb": "IPAAS",
-    # Everything else defaults to API_GATEWAY
-}
-
-
-def infer_plane_type_from_category(category: str) -> str:
-    """Return the default plane type for a given SOR category."""
-    return CATEGORY_TO_PLANE_TYPE.get(category.lower(), "API_GATEWAY")
-
-
 # Keywords in candidate display_name that signal a fabric-infrastructure vendor.
-# Used by resolve_fabric_planes() when AOD omits the fabric_planes array.
-# Order matters: first match wins per plane type.
+# These are NOT category inferences — they match explicit infrastructure labels
+# that AOD attached to candidate records (e.g. "MuleSoft - iPaaS").
 DISPLAY_NAME_PLANE_HINTS: dict[str, str] = {
     "ipaas": "IPAAS",
     "api gateway": "API_GATEWAY",
     "event bus": "EVENT_BUS",
     "event hub": "EVENT_BUS",
     "data warehouse": "DATA_WAREHOUSE",
+}
+
+# Well-known infrastructure vendors whose identity alone signals a plane type.
+# This is vendor identity, NOT category inference — Kafka *is* an event bus,
+# Snowflake *is* a data warehouse.  These are infrastructure products, not
+# applications that happen to be in a category.
+INFRA_VENDOR_PLANE: dict[str, str] = {
+    "workato": "IPAAS",
+    "mulesoft": "IPAAS",
+    "boomi": "IPAAS",
+    "zapier": "IPAAS",
+    "tray": "IPAAS",
+    "celigo": "IPAAS",
+    "kong": "API_GATEWAY",
+    "apigee": "API_GATEWAY",
+    "aws api gateway": "API_GATEWAY",
+    "kafka": "EVENT_BUS",
+    "confluent": "EVENT_BUS",
+    "rabbitmq": "EVENT_BUS",
+    "eventbridge": "EVENT_BUS",
+    "snowflake": "DATA_WAREHOUSE",
+    "bigquery": "DATA_WAREHOUSE",
+    "redshift": "DATA_WAREHOUSE",
+    "databricks": "DATA_WAREHOUSE",
 }

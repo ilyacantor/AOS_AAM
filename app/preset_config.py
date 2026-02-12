@@ -160,28 +160,14 @@ class PresetConfigLoader:
     
     def get_routing_decision(self, candidate_category: str) -> FabricPlane:
         """
-        Determine which Fabric Plane to route a candidate to.
-        
-        In iPaaS-Centric: Always route to IPAAS
-        In Platform-Oriented: Prefer EVENT_BUS for high-volume
-        In Warehouse-Centric: Route to DATA_WAREHOUSE
-        In Scrappy: Use API_GATEWAY (direct access)
+        Return the preset's primary fabric plane.
+
+        NOTE: This no longer routes by application category (CRM, ERP, etc.).
+        The app category tells you nothing about which integration infrastructure
+        the enterprise deployed.  The preset's primary plane is returned as a
+        default when AOD doesn't provide an explicit plane hint.
         """
-        config = self.current_config
-        
-        if self._current_preset == EnterpriseMaturity.IPAAS_CENTRIC:
-            return FabricPlane.IPAAS
-        
-        elif self._current_preset == EnterpriseMaturity.PLATFORM_ORIENTED:
-            high_volume_categories = ["ERP", "CRM", "HRIS"]
-            if candidate_category.upper() in high_volume_categories:
-                return FabricPlane.EVENT_BUS
-            return FabricPlane.IPAAS if FabricPlane.IPAAS in config.allowed_planes else FabricPlane.EVENT_BUS
-        
-        elif self._current_preset == EnterpriseMaturity.WAREHOUSE_CENTRIC:
-            return FabricPlane.DATA_WAREHOUSE
-        
-        return config.primary_plane
+        return self.current_config.primary_plane
     
     def get_governance_policies(self) -> Dict[str, Any]:
         """Get governance policies for current preset"""

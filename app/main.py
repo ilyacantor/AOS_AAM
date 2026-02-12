@@ -14,7 +14,7 @@ from datetime import datetime
 
 from .config import settings
 from .logger import get_logger
-from .constants import SOR_CATEGORIES, infer_plane_type_from_category
+from .constants import SOR_CATEGORIES
 from .ui.styles import NAV_STYLE, NAV_HTML
 
 _log = get_logger("main")

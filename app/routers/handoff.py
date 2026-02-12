@@ -8,7 +8,7 @@ from starlette.responses import Response
 from typing import Optional
 
 from ..logger import get_logger
-from ..constants import SOR_CATEGORIES, infer_plane_type_from_category
+from ..constants import SOR_CATEGORIES
 from ..config import settings
 from ..db import (
     get_connection,
@@ -231,41 +231,14 @@ fabric_router = APIRouter(prefix="/api/fabric-planes", tags=["Fabric Planes"])
 
 @fabric_router.post("/backfill")
 async def backfill_fabric_planes_from_candidates():
-    """Backfill fabric planes from existing SOR candidates."""
-    conn = get_connection()
-    cursor = conn.cursor()
+    """Backfill is disabled — AAM does not infer fabric planes from application categories.
 
-    sor_categories = tuple(SOR_CATEGORIES)
-    placeholders = ",".join("?" * len(sor_categories))
-    cursor.execute(
-        f"""
-        SELECT DISTINCT vendor_name, category, asset_key, aod_run_id
-        FROM connection_candidates
-        WHERE LOWER(category) IN ({placeholders})
-        AND vendor_name IS NOT NULL AND vendor_name != ''
-    """,
-        sor_categories,
-    )
-    candidates = cursor.fetchall()
-    conn.close()
-
-    created = 0
-    for row in candidates:
-        vendor_name, category, asset_key, aod_run_id = row
-        cat_lower = category.lower() if category else ""
-        plane_type = infer_plane_type_from_category(cat_lower)
-        plane_dict = {
-            "plane_type": plane_type,
-            "vendor": vendor_name,
-            "display_name": f"{asset_key} ({category})",
-            "domain": cat_lower,
-            "managed_asset_count": 1,
-        }
-        try:
-            store_fabric_plane(plane_dict, aod_run_id)
-            created += 1
-            _log.info("Backfilled fabric plane: %s (%s)", vendor_name, plane_type)
-        except Exception as e:
-            _log.warning("Skip duplicate fabric plane %s: %s", vendor_name, e)
-
-    return {"message": f"Backfilled {created} fabric planes from SOR candidates", "created": created}
+    Fabric planes only come from AOD-discovered infrastructure evidence or
+    explicit operator declarations.  Use POST /api/adapters/{plane}/connect
+    to register known infrastructure.
+    """
+    return {
+        "message": "Backfill disabled: AAM does not infer infrastructure from application categories. "
+                   "Fabric planes come from AOD discovery or operator declarations only.",
+        "created": 0
+    }

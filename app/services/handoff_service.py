@@ -14,7 +14,7 @@ from typing import Optional
 
 from ..config import settings
 from ..logger import get_logger
-from ..constants import SOR_CATEGORIES, infer_plane_type_from_category, DISPLAY_NAME_PLANE_HINTS
+from ..constants import SOR_CATEGORIES, DISPLAY_NAME_PLANE_HINTS
 from ..db import (
     store_fabric_plane,
     store_sor_declaration,
@@ -125,28 +125,10 @@ def resolve_fabric_planes(request: AODHandoffRequest) -> tuple[dict, int]:
                         _log.error("Failed to auto-create fabric plane for %s: %s", candidate.vendor_name, e)
                     break
 
-        # Pass 2: create planes for SOR-category vendors not already covered
-        for candidate in request.candidates:
-            cat_lower = candidate.category.lower() if candidate.category else ""
-            if cat_lower in SOR_CATEGORIES and candidate.vendor_name:
-                vendor_key = candidate.vendor_name.lower()
-                if vendor_key not in seen_vendors:
-                    seen_vendors.add(vendor_key)
-                    plane_type = infer_plane_type_from_category(cat_lower)
-                    plane_dict = {
-                        "plane_type": plane_type,
-                        "vendor": candidate.vendor_name,
-                        "display_name": f"{candidate.asset_key} ({candidate.category})",
-                        "domain": cat_lower,
-                        "managed_asset_count": 1,
-                    }
-                    try:
-                        result = store_fabric_plane(plane_dict, request.run_id)
-                        fabric_plane_map[vendor_key] = result["plane_id"]
-                        fabric_planes_stored += 1
-                        _log.info("Auto-created fabric plane for SOR: %s (%s)", candidate.vendor_name, plane_type)
-                    except Exception as e:
-                        _log.error("Failed to auto-create fabric plane for %s: %s", candidate.vendor_name, e)
+        # NOTE: We intentionally do NOT create fabric planes from SOR categories.
+        # Knowing a vendor is "CRM" or "ERP" tells you nothing about which
+        # integration infrastructure the enterprise deployed.  Only AOD-discovered
+        # infrastructure evidence or explicit operator declarations belong here.
 
     return fabric_plane_map, fabric_planes_stored
 
@@ -166,16 +148,6 @@ def link_candidate_to_plane(
     for plane_vendor, plane_id in fabric_plane_map.items():
         if plane_vendor in vendor_lower or vendor_lower in plane_vendor:
             return plane_id
-
-    # Fallback: infer from category using shared constant mapping
-    if fabric_plane_map and request_planes:
-        target_type = infer_plane_type_from_category(candidate.category or "")
-
-        for plane in request_planes:
-            if plane.plane_type.upper() == target_type.upper():
-                pid = fabric_plane_map.get(plane.vendor.lower())
-                if pid:
-                    return pid
 
     return None
 

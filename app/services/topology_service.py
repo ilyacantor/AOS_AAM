@@ -7,7 +7,7 @@ take precedence over candidate-derived SOR classifications.
 from datetime import datetime
 
 from ..logger import get_logger
-from ..constants import SOR_CATEGORIES, infer_plane_type_from_category
+from ..constants import SOR_CATEGORIES
 from ..db import list_pipes, list_candidates, get_canonical_stats
 from ..db.sor_declarations import get_sor_declarations
 

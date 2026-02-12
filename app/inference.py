@@ -136,36 +136,36 @@ def infer_single_pipe(observation: dict) -> Optional[dict]:
 
 
 def infer_fabric_plane(endpoint_info: dict, metadata: dict) -> str:
-    """Infer the integration fabric control plane"""
+    """Infer the integration fabric control plane.
+
+    RULES:
+    - If metadata already carries an explicit fabric_plane, trust it.
+    - Infrastructure vendor identity is valid evidence (Kafka IS an event bus).
+    - URL patterns for infrastructure products are valid evidence.
+    - Application categories (CRM, ERP, ITSM …) are NOT valid evidence.
+      A CRM could route through any of the four planes depending on how
+      the enterprise wired its integrations.
+    - When nothing matches, return None (unknown) instead of guessing.
+    """
+    from .constants import INFRA_VENDOR_PLANE
+
     url = endpoint_info.get("url", "").lower()
     vendor = metadata.get("vendor", "").lower()
-    category = metadata.get("category", "").lower()
     fabric = metadata.get("fabric_plane", "").upper()
-    
-    # If explicitly set in metadata, use that
+
     if fabric in ["IPAAS", "API_GATEWAY", "EVENT_BUS", "DATA_WAREHOUSE"]:
         return fabric
-    
-    # iPaaS indicators
-    if category == "ipaas" or vendor in ["workato", "mulesoft", "boomi", "zapier", "tray", "celigo"]:
-        return "IPAAS"
-    
-    # Event bus indicators
-    if any(x in url for x in ["kafka", "event", "pubsub", "queue", "stream", "sns", "sqs"]):
+
+    for infra_vendor, plane in INFRA_VENDOR_PLANE.items():
+        if infra_vendor in vendor:
+            return plane
+
+    if any(x in url for x in ["kafka", "pubsub", "queue", "stream", "sns", "sqs"]):
         return "EVENT_BUS"
-    if any(x in vendor for x in ["kafka", "confluent", "rabbitmq", "eventbridge"]):
-        return "EVENT_BUS"
-    
-    # Data warehouse indicators
     if any(x in url for x in ["warehouse", "bigquery", "snowflake", "redshift", "databricks", "synapse"]):
         return "DATA_WAREHOUSE"
-    if any(x in vendor for x in ["snowflake", "bigquery", "redshift", "databricks"]):
-        return "DATA_WAREHOUSE"
-    if category in ["data_warehouse", "analytics", "bi"]:
-        return "DATA_WAREHOUSE"
-    
-    # Default to API Gateway for REST/API endpoints
-    return "API_GATEWAY"
+
+    return "UNKNOWN"
 
 
 def infer_modality(endpoint_info: dict, metadata: dict) -> str:
