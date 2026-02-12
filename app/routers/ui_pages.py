@@ -1459,22 +1459,25 @@ async def ui_topology():
             flex-wrap: wrap;
             align-items: center;
         }}
-        .stats.compact {{
+        .topology-header {{
             display: flex;
-            gap: 8px;
-            margin-bottom: 12px;
+            align-items: baseline;
+            gap: 16px;
             flex-wrap: wrap;
+            margin-bottom: 12px;
         }}
-        .stats.compact .stat-card {{
-            padding: 6px 12px;
-            min-width: auto;
+        .topology-header h1 {{
+            margin: 0;
         }}
-        .stats.compact .stat-value {{
-            font-size: 1rem;
-            margin-bottom: 0;
+        .topology-header .inline-stats {{
+            display: flex;
+            gap: 12px;
+            font-size: 0.8rem;
+            color: var(--slate-400);
         }}
-        .stats.compact .stat-label {{
-            font-size: 0.65rem;
+        .topology-header .inline-stats span {{
+            color: var(--cyan-400);
+            font-weight: 600;
         }}
         .legend-below {{
             display: flex;
@@ -1547,27 +1550,13 @@ async def ui_topology():
 <body>
     {ui_nav("topology")}
     <div class="container">
-        <h1>Topology</h1>
-        <p class="page-subtitle">Interactive graph visualization of your integration mesh. Shows how fabric planes, pipes, source systems, and candidates connect.</p>
-
-        {aod_run_banner()}
-
-        <div class="stats compact" id="stats-container">
-            <div class="stat-card">
-                <div class="stat-value" id="stat-pipes">-</div>
-                <div class="stat-label">Pipes</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value" id="stat-fabrics">-</div>
-                <div class="stat-label">Fabrics</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value" id="stat-sors">-</div>
-                <div class="stat-label">SORs</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value" id="stat-drift">-</div>
-                <div class="stat-label">Drift</div>
+        <div class="topology-header">
+            <h1>Topology</h1>
+            <div class="inline-stats">
+                <div><span id="stat-pipes">-</span> Pipes</div>
+                <div><span id="stat-fabrics">-</span> Fabrics</div>
+                <div><span id="stat-sors">-</span> SORs</div>
+                <div><span id="stat-drift">-</span> Drift</div>
             </div>
         </div>
 
