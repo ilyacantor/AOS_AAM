@@ -298,7 +298,10 @@ async def ui_pipes_list(
                 const res = await fetch('/api/aam/infer', {{ method: 'POST' }});
                 const data = await res.json();
                 if (res.ok) {{
-                    showToast('Inference complete: ' + data.pipes_created + ' pipes created', 'success');
+                    let msg = 'Inference complete: ' + data.pipes_created + ' pipes created';
+                    if (data.from_candidates) msg += ' (' + data.from_candidates + ' from candidates)';
+                    if (data.candidates_unmatched) msg += ', ' + data.candidates_unmatched + ' unmatched';
+                    showToast(msg, data.pipes_created > 0 ? 'success' : 'warning');
                     setTimeout(() => location.reload(), 1500);
                 }} else {{
                     showToast('Error: ' + (data.detail || 'Failed'), 'error');

@@ -1,11 +1,14 @@
 """
 Collectors Router — collector execution and observation processing.
 """
+import logging
+
 from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
 
 from ..db import (
     list_collectors,
+    list_candidates,
     get_unprocessed_observations,
     mark_observation_processed,
     create_collector_run,
@@ -17,6 +20,9 @@ from ..db import (
 from ..inference import infer_pipes_from_observations
 from ..pii_redaction import redact_pii_from_observation
 from ..services.collector_service import run_adapter_collector
+from ..services.matching_service import match_candidate as match_candidate_service
+
+_log = logging.getLogger("aam.infer")
 
 router = APIRouter(tags=["Collectors"])
 
@@ -30,43 +36,66 @@ async def get_collectors():
 
 @router.post("/api/aam/infer")
 async def infer_pipes():
-    """Process pending observations and create pipes."""
+    """Process pending observations AND unmatched AOD candidates into pipes.
+
+    Two data paths feed this endpoint:
+      1. Adapter-collected observations (observations table, processed=0)
+      2. AOD handoff candidates that haven't been matched yet
+
+    Previously only path 1 was wired, so clicking "Run Inference" after an
+    AOD handoff always returned 0 pipes.
+    """
     from ..main import preset_loader
 
+    pipes_from_obs = 0
+    pipes_from_candidates = 0
+    match_failures = []
+
+    # ---- Path 1: adapter observations (legacy) ----
     observations = get_unprocessed_observations()
-    if not observations:
-        return {"message": "No pending observations", "pipes_created": 0, "pipes": []}
+    if observations:
+        policies = preset_loader.get_governance_policies()
+        pii_policy = policies.get("pii_redaction", "optional")
 
-    policies = preset_loader.get_governance_policies()
-    pii_policy = policies.get("pii_redaction", "optional")
+        redacted_observations = []
+        for obs in observations:
+            redacted_observations.append(redact_pii_from_observation(obs, policy=pii_policy))
 
-    redacted_observations = []
-    redaction_applied = 0
-    for obs in observations:
-        redacted_obs = redact_pii_from_observation(obs, policy=pii_policy)
-        redacted_observations.append(redacted_obs)
-        if redacted_obs.get("metadata", {}).get("pii_redacted"):
-            redaction_applied += 1
+        inferred_pipes = infer_pipes_from_observations(redacted_observations)
+        for pipe in inferred_pipes:
+            create_pipe(pipe)
+            pipes_from_obs += 1
 
-    inferred_pipes = infer_pipes_from_observations(redacted_observations)
+        for obs in observations:
+            mark_observation_processed(obs["observation_id"])
 
-    created_pipes = []
-    for pipe in inferred_pipes:
-        result = create_pipe(pipe)
-        pipe["pipe_id"] = result["pipe_id"]
-        pipe["version"] = result["version"]
-        created_pipes.append(pipe)
+    # ---- Path 2: unmatched AOD candidates ----
+    unmatched = [
+        c for c in list_candidates()
+        if not c.get("matched_pipe_id") and c.get("status") not in ("deferred",)
+    ]
+    for candidate in unmatched:
+        cid = candidate["candidate_id"]
+        try:
+            result = match_candidate_service(cid, None, preset_loader)
+            if result.get("matched_pipe_id"):
+                pipes_from_candidates += 1
+        except (ValueError, PermissionError) as exc:
+            match_failures.append({"candidate_id": cid, "reason": str(exc)})
+            _log.debug("Candidate %s not matched: %s", cid, exc)
 
-    for obs in observations:
-        mark_observation_processed(obs["observation_id"])
+    total_pipes = pipes_from_obs + pipes_from_candidates
+
+    if total_pipes == 0 and not observations and not unmatched:
+        return {"message": "Nothing to process — no observations or unmatched candidates", "pipes_created": 0}
 
     return {
         "message": "Inference complete",
-        "observations_processed": len(observations),
-        "pipes_created": len(created_pipes),
-        "pipes": created_pipes,
-        "pii_redaction_policy": pii_policy,
-        "observations_redacted": redaction_applied,
+        "pipes_created": total_pipes,
+        "from_observations": pipes_from_obs,
+        "from_candidates": pipes_from_candidates,
+        "candidates_unmatched": len(match_failures),
+        "unmatched_reasons": match_failures[:10],  # first 10 for diagnostics
     }
 
 
