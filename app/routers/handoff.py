@@ -168,32 +168,8 @@ async def receive_aod_handoff(raw_request: Request):
 
 @router.post("/fetch")
 async def fetch_aod_data():
-    """Re-send the last saved AOD payload (replay after reset).
-
-    If a raw body file exists from the last /receive call, re-normalize
-    from that (so normalizer fixes apply retroactively). Otherwise fall
-    back to the saved model dump.
-    """
-    import os
-    payload = None
-
-    if os.path.exists(RAW_AOD_BODY_FILE):
-        with open(RAW_AOD_BODY_FILE) as f:
-            raw = json.load(f)
-        raw_planes = raw.get("fabric_planes_raw", [])
-        raw_sors = raw.get("sors_raw", [])
-        saved = load_aod_payload()
-        if saved and (raw_planes or raw_sors):
-            _log.info("Fetch: re-normalizing from raw body (planes=%d, sors=%d)", len(raw_planes), len(raw_sors))
-            if raw_planes:
-                saved["fabric_planes"] = _normalize_fabric_planes(raw_planes)
-            if raw_sors:
-                saved["sors"] = _normalize_sors(raw_sors)
-            payload = saved
-
-    if not payload:
-        payload = load_aod_payload()
-
+    """Re-send the last saved AOD payload (replay after reset)."""
+    payload = load_aod_payload()
     if not payload:
         raise HTTPException(status_code=404, detail="No AOD data stored. Run AOD handoff first.")
 
