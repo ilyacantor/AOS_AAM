@@ -68,6 +68,34 @@ def _normalize_fabric_planes(raw_planes: list[dict]) -> list[dict]:
     return normalized
 
 
+def _normalize_sors(raw_sors: list[dict]) -> list[dict]:
+    """
+    Normalize AOD SOR declarations to AAM's expected schema.
+
+    AOD may send SORs with various field names:
+      { "domain": "CRM", "vendor": "Microsoft Dynamics", "category": "saas", "confidence": "high", "source": "farm" }
+    Or alternate naming:
+      { "type": "CRM", "name": "Microsoft Dynamics", "level": "high" }
+    """
+    normalized = []
+    for sor in raw_sors:
+        domain = sor.get("domain") or sor.get("type") or sor.get("business_domain") or ""
+        vendor = sor.get("vendor") or sor.get("name") or sor.get("application") or ""
+        category = sor.get("category") or sor.get("asset_category") or ""
+        confidence = sor.get("confidence") or sor.get("level") or sor.get("confidence_level") or "high"
+        source = sor.get("source") or "farm"
+
+        if domain and vendor:
+            normalized.append({
+                "domain": domain.upper(),
+                "vendor": vendor,
+                "category": category.lower() if category else "",
+                "confidence": confidence.lower(),
+                "source": source.lower(),
+            })
+    return normalized
+
+
 @router.post("/receive")
 async def receive_aod_handoff(raw_request: Request):
     """
@@ -91,10 +119,20 @@ async def receive_aod_handoff(raw_request: Request):
         for np in body["fabric_planes"]:
             _log.info("  norm: %s", json.dumps(np))
 
+    raw_sors = body.get("sors", [])
+    if raw_sors:
+        _log.info("Raw sors from AOD (%d):", len(raw_sors))
+        for rs in raw_sors:
+            _log.info("  raw sor: %s", json.dumps(rs))
+        body["sors"] = _normalize_sors(raw_sors)
+        _log.info("Normalized sors (%d):", len(body["sors"]))
+        for ns in body["sors"]:
+            _log.info("  norm sor: %s", json.dumps(ns))
+
     request = AODHandoffRequest(**body)
     _log.info(
-        "Receive endpoint: run_id=%s, candidates=%d, fabric_planes=%d",
-        request.run_id, len(request.candidates), len(request.fabric_planes),
+        "Receive endpoint: run_id=%s, candidates=%d, fabric_planes=%d, sors=%d",
+        request.run_id, len(request.candidates), len(request.fabric_planes), len(request.sors),
     )
     return process_handoff(request)
 

@@ -95,6 +95,21 @@ def init_db():
         )
     """)
     
+    # SOR Declarations (authoritative SOR list from Farm via AOD)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS sor_declarations (
+            sor_id TEXT PRIMARY KEY,
+            domain TEXT NOT NULL,
+            vendor TEXT NOT NULL,
+            category TEXT,
+            confidence TEXT DEFAULT 'high',
+            source TEXT DEFAULT 'farm',
+            aod_run_id TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+
     # Collectors
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS collectors (

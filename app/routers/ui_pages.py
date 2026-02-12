@@ -1928,18 +1928,29 @@ async def ui_topology():
                 );
             }}
 
-            allNodes = data.nodes.map(n => ({{
-                id: n.id,
-                label: n.label,
-                shape: nodeShapes[n.type] || 'dot',
-                color: n.type === 'fabric_plane'
+            allNodes = data.nodes.map(n => {{
+                let color = n.type === 'fabric_plane'
                     ? nodeColors.fabric_plane[n.metadata.plane_type] || '#64748b'
-                    : nodeColors[n.type] || '#64748b',
-                size: n.type === 'fabric_plane' ? 30 : (n.type === 'pipe' ? 20 : 15),
-                font: {{ color: '#ffffff', size: 12 }},
-                title: buildTooltip(n),
-                nodeData: n
-            }}));
+                    : nodeColors[n.type] || '#64748b';
+                let borderWidth = 1;
+                let borderColor = undefined;
+                if (n.metadata && n.metadata.is_authoritative) {{
+                    color = '#f59e0b';
+                    borderWidth = 3;
+                    borderColor = '#fbbf24';
+                }}
+                return {{
+                    id: n.id,
+                    label: n.label,
+                    shape: nodeShapes[n.type] || 'dot',
+                    color: borderColor ? {{ background: color, border: borderColor }} : color,
+                    borderWidth: borderWidth,
+                    size: n.type === 'fabric_plane' ? 30 : (n.type === 'pipe' ? 20 : 15),
+                    font: {{ color: '#ffffff', size: 12 }},
+                    title: buildTooltip(n),
+                    nodeData: n
+                }};
+            }});
 
             allEdges = data.edges.map(e => ({{
                 id: e.id,
@@ -1967,6 +1978,10 @@ async def ui_topology():
             let html = `<div style="background:#1e293b;padding:8px;border-radius:4px;color:#fff;">`;
             html += `<strong>${{node.label}}</strong><br/>`;
             html += `Type: ${{node.type}}<br/>`;
+            if (node.metadata.is_authoritative) html += `<span style="color:#fbbf24;font-weight:600;">Farm-Authoritative SOR</span><br/>`;
+            else if (node.metadata.is_sor) html += `<span style="color:#22d3ee;">SOR (candidate-derived)</span><br/>`;
+            if (node.metadata.domain) html += `Domain: ${{node.metadata.domain}}<br/>`;
+            if (node.metadata.confidence) html += `Confidence: ${{node.metadata.confidence}}<br/>`;
             if (node.metadata.fabric_plane) html += `Plane: ${{node.metadata.fabric_plane}}<br/>`;
             if (node.metadata.source_system) html += `Source: ${{node.metadata.source_system}}<br/>`;
             if (node.metadata.modality) html += `Modality: ${{node.metadata.modality}}<br/>`;

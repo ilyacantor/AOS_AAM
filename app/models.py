@@ -181,12 +181,28 @@ class FabricPlaneSummary(BaseModel):
     source: str = "aod"
 
 
+class SORDeclaration(BaseModel):
+    """System of Record declaration from Farm via AOD.
+
+    Farm declares which applications are the authoritative data source
+    for specific business domains.  AOD passes these through so AAM
+    knows which endpoints are SORs and can treat their data as
+    authoritative.
+    """
+    domain: str = Field(..., description="Business domain (CRM, ERP, HR, FINANCE, IDENTITY, CMDB, etc.)")
+    vendor: str = Field(..., description="Vendor name (e.g., Salesforce, SAP)")
+    category: str = Field("", description="Asset category mapping (e.g., saas, erp, idp, itsm)")
+    confidence: str = Field("high", description="Confidence level: high, medium, low")
+    source: str = Field("farm", description="Who declared this SOR (farm, computed, manual)")
+
+
 class AODHandoffRequest(BaseModel):
     """Batch handoff request from AOD"""
     run_id: str = Field(..., description="AOD discovery run ID")
     snapshot_name: Optional[str] = Field(None, description="Human-readable snapshot name (e.g., Networks-5OS6)")
     candidates: list[AODHandoffCandidate] = Field(..., description="Candidates to hand off")
     fabric_planes: list[FabricPlaneSummary] = Field(default_factory=list, description="Detected fabric planes")
+    sors: list[SORDeclaration] = Field(default_factory=list, description="Authoritative SOR declarations from Farm")
     policy_version: Optional[str] = Field(None, description="Version of governance policy applied")
     handoff_timestamp: datetime = Field(default_factory=datetime.utcnow)
 

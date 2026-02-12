@@ -16,6 +16,7 @@ from .topology import get_topology_data, get_topology_for_pipe, get_topology_for
 from .handoff import create_handoff_log, get_handoff_log, list_handoff_logs  # noqa: F401
 from .policy import save_policy_manifest, get_active_policy_manifest, list_policy_manifests, get_candidates_by_aod_run  # noqa: F401
 from .fabric_planes import store_fabric_plane, get_fabric_planes, find_fabric_plane_by_vendor  # noqa: F401
+from .sor_declarations import store_sor_declaration, get_sor_declarations, clear_sor_declarations  # noqa: F401
 from .reconciliation import get_aod_reconciliation, get_latest_aod_run  # noqa: F401
 from .stats import get_canonical_stats  # noqa: F401
 

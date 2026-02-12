@@ -27,6 +27,7 @@ def reset_aod_state():
         "connection_candidates",
         "tee_requests",
         "fabric_planes",
+        "sor_declarations",
         "aod_handoff_log",
         "aod_policy_manifest",
         "collectors",

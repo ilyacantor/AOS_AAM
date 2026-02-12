@@ -17,12 +17,13 @@ from ..logger import get_logger
 from ..constants import SOR_CATEGORIES, infer_plane_type_from_category, DISPLAY_NAME_PLANE_HINTS
 from ..db import (
     store_fabric_plane,
+    store_sor_declaration,
     create_candidate,
     create_handoff_log,
     get_handoff_log,
     list_handoff_logs,
 )
-from ..models import AODHandoffRequest, AODHandoffResponse
+from ..models import AODHandoffRequest, AODHandoffResponse, SORDeclaration
 
 _log = get_logger("services.handoff")
 
@@ -221,6 +222,20 @@ def _build_reconciliation_data(request: AODHandoffRequest) -> tuple[list, list]:
                     })
 
     aod_sor_data: dict = {}
+
+    if request.sors:
+        for sor in request.sors:
+            vendor_key = sor.vendor.lower()
+            aod_sor_data[vendor_key] = {
+                "vendor": sor.vendor,
+                "domain": sor.domain,
+                "category": sor.category,
+                "confidence": sor.confidence,
+                "source": sor.source,
+                "count": 0,
+                "authoritative": True,
+            }
+
     for candidate in request.candidates:
         cat_lower = candidate.category.lower() if candidate.category else ""
         if cat_lower in SOR_CATEGORIES and candidate.vendor_name:
@@ -292,7 +307,21 @@ def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
         request.run_id, request.snapshot_name, len(request.candidates),
     )
 
-    # 1. Resolve fabric planes
+    # 1a. Store authoritative SOR declarations from Farm (if provided)
+    sors_stored = 0
+    if request.sors:
+        for sor in request.sors:
+            try:
+                sor_dict = sor.model_dump()
+                store_sor_declaration(sor_dict, request.run_id)
+                sors_stored += 1
+                _log.info("Stored SOR declaration: %s / %s (confidence=%s, source=%s)",
+                          sor.domain, sor.vendor, sor.confidence, sor.source)
+            except Exception as e:
+                _log.error("Failed to store SOR declaration %s/%s: %s", sor.domain, sor.vendor, e)
+        _log.info("SOR declarations stored: %d", sors_stored)
+
+    # 1b. Resolve fabric planes
     fabric_plane_map, fabric_planes_stored = resolve_fabric_planes(request)
     _log.info("Fabric planes resolved: %d stored", fabric_planes_stored)
 

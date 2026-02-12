@@ -13,6 +13,7 @@ from ..db import (
     list_candidates,
     get_canonical_stats,
 )
+from ..db.sor_declarations import get_sor_declarations
 from ..services.topology_service import build_topology_summary
 
 router = APIRouter(prefix="/api/topology", tags=["Topology"])
@@ -128,5 +129,16 @@ async def get_source_topology(source_system: str):
             "pipes": len([n for n in nodes if n["type"] == "pipe"]),
             "candidates": len([n for n in nodes if n["type"] == "candidate"]),
         },
+        "generated_at": datetime.utcnow().isoformat(),
+    }
+
+
+@router.get("/sors")
+async def list_sor_declarations(aod_run_id: Optional[str] = Query(None)):
+    """List authoritative SOR declarations from Farm (via AOD)."""
+    declarations = get_sor_declarations(aod_run_id=aod_run_id)
+    return {
+        "sors": declarations,
+        "total": len(declarations),
         "generated_at": datetime.utcnow().isoformat(),
     }

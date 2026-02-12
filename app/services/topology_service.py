@@ -1,11 +1,15 @@
 """
 Topology Service — builds lightweight topology summaries for the UI.
+
+When Farm provides authoritative SOR declarations (via AOD), those
+take precedence over candidate-derived SOR classifications.
 """
 from datetime import datetime
 
 from ..logger import get_logger
 from ..constants import SOR_CATEGORIES, infer_plane_type_from_category
 from ..db import list_pipes, list_candidates, get_canonical_stats
+from ..db.sor_declarations import get_sor_declarations
 
 _log = get_logger("services.topology")
 
@@ -50,34 +54,65 @@ def build_topology_summary() -> dict:
         else:
             candidate_counts["OTHER"] += 1
 
-    # Build SOR systems from pipes + candidates
-    sor_systems: dict = {}
+    # Load authoritative SOR declarations from Farm (if any)
+    auth_sors = get_sor_declarations()
+    auth_sor_vendors: dict[str, dict] = {}
+    for s in auth_sors:
+        vendor_key = s["vendor"]
+        auth_sor_vendors[vendor_key.lower()] = s
+        _log.debug("Authoritative SOR: %s (domain=%s, category=%s)", vendor_key, s["domain"], s["category"])
+
+    # Build SOR systems from pipes + candidates + authoritative SORs.
+    # Use case-insensitive keys internally to merge entries, but
+    # prefer the authoritative vendor name for display.
+    sor_systems: dict = {}        # lowercase key -> data
+    display_names: dict = {}      # lowercase key -> display name
+
+    # Seed with authoritative SOR declarations first
+    for vendor_lower, decl in auth_sor_vendors.items():
+        display_names[vendor_lower] = decl["vendor"]
+        sor_systems[vendor_lower] = {
+            "pipe_count": 0,
+            "candidate_count": 0,
+            "planes": set(),
+            "is_sor": True,
+            "is_authoritative": True,
+            "category": decl.get("category") or None,
+            "domain": decl.get("domain"),
+            "confidence": decl.get("confidence", "high"),
+        }
+
     for p in pipes:
         source = p.get("source_system")
         if source:
-            if source not in sor_systems:
-                sor_systems[source] = {"pipe_count": 0, "candidate_count": 0, "planes": set(), "is_sor": False, "category": None}
-            sor_systems[source]["pipe_count"] += 1
-            sor_systems[source]["planes"].add(p.get("fabric_plane", "API_GATEWAY"))
+            key = source.lower()
+            if key not in sor_systems:
+                sor_systems[key] = {"pipe_count": 0, "candidate_count": 0, "planes": set(), "is_sor": False, "category": None}
+                display_names[key] = source
+            sor_systems[key]["pipe_count"] += 1
+            sor_systems[key]["planes"].add(p.get("fabric_plane", "API_GATEWAY"))
 
     for c in candidates:
         vendor = c.get("vendor_name")
         if vendor:
-            if vendor not in sor_systems:
-                sor_systems[vendor] = {"pipe_count": 0, "candidate_count": 0, "planes": set(), "is_candidate": True, "is_sor": False, "category": None}
-            sor_systems[vendor]["candidate_count"] = sor_systems[vendor].get("candidate_count", 0) + 1
-            if "is_candidate" not in sor_systems[vendor]:
-                sor_systems[vendor]["is_candidate"] = True
+            key = vendor.lower()
+            if key not in sor_systems:
+                sor_systems[key] = {"pipe_count": 0, "candidate_count": 0, "planes": set(), "is_candidate": True, "is_sor": False, "category": None}
+                display_names[key] = vendor
+            sor_systems[key]["candidate_count"] = sor_systems[key].get("candidate_count", 0) + 1
+            if "is_candidate" not in sor_systems[key]:
+                sor_systems[key]["is_candidate"] = True
             category = c.get("category", "").lower()
             if category in SOR_CATEGORIES:
-                sor_systems[vendor]["is_sor"] = True
-                sor_systems[vendor]["category"] = category
+                sor_systems[key]["is_sor"] = True
+                if not sor_systems[key].get("category"):
+                    sor_systems[key]["category"] = category
             fabric_plane_id = c.get("fabric_plane_id", "")
             connected_via = c.get("connected_via_plane", "")
             if fabric_plane_id and ":" in fabric_plane_id:
-                sor_systems[vendor]["planes"].add(fabric_plane_id.split(":")[0].upper())
+                sor_systems[key]["planes"].add(fabric_plane_id.split(":")[0].upper())
             elif connected_via:
-                sor_systems[vendor]["planes"].add(connected_via.upper())
+                sor_systems[key]["planes"].add(connected_via.upper())
 
     # Create nodes + edges
     nodes = []
@@ -95,19 +130,20 @@ def build_topology_summary() -> dict:
 
     # Prioritize true SORs, then fill with top others (up to 20)
     true_sors = sorted(
-        [(n, d) for n, d in sor_systems.items() if d.get("is_sor")],
+        [(k, d) for k, d in sor_systems.items() if d.get("is_sor")],
         key=lambda x: x[1]["pipe_count"] + x[1].get("candidate_count", 0),
         reverse=True,
     )
     other_systems = sorted(
-        [(n, d) for n, d in sor_systems.items() if not d.get("is_sor")],
+        [(k, d) for k, d in sor_systems.items() if not d.get("is_sor")],
         key=lambda x: x[1]["pipe_count"] + x[1].get("candidate_count", 0),
         reverse=True,
     )
     remaining_slots = max(0, 20 - len(true_sors))
     sorted_sors = true_sors + other_systems[:remaining_slots]
 
-    for sor_name, sor_data in sorted_sors:
+    for sor_key, sor_data in sorted_sors:
+        sor_name = display_names.get(sor_key, sor_key)
         pc = sor_data["pipe_count"]
         cc = sor_data.get("candidate_count", 0)
         if pc > 0 and cc > 0:
@@ -127,7 +163,10 @@ def build_topology_summary() -> dict:
                 "candidate_count": cc,
                 "is_candidate_source": sor_data.get("is_candidate", False),
                 "is_sor": sor_data.get("is_sor", False),
+                "is_authoritative": sor_data.get("is_authoritative", False),
                 "category": sor_data.get("category"),
+                "domain": sor_data.get("domain"),
+                "confidence": sor_data.get("confidence"),
             },
         })
         for plane in sor_data.get("planes", []):
