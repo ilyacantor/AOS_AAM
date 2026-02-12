@@ -9,15 +9,36 @@ SQLite database for:
 """
 import sqlite3
 import json
+from contextlib import contextmanager
 from datetime import datetime
 from typing import Optional
 import uuid
 
-DATABASE = "aam.db"
+from .config import settings
+from .logger import get_logger
+
+_log = get_logger("db")
+
+DATABASE = settings.DATABASE_URL
+
+
+@contextmanager
+def get_db():
+    """Context manager for database connections with auto-commit/rollback."""
+    conn = sqlite3.connect(DATABASE)
+    conn.row_factory = sqlite3.Row
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def get_connection():
-    """Get database connection with row factory"""
+    """Get database connection with row factory (legacy — prefer get_db())."""
     conn = sqlite3.connect(DATABASE)
     conn.row_factory = sqlite3.Row
     return conn
@@ -290,7 +311,7 @@ def init_db():
     
     conn.commit()
     conn.close()
-    print("✓ AAM Database initialized")
+    _log.info("Database initialized")
 
 
 # ============================================================================

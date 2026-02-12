@@ -6,8 +6,15 @@ requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.121.3",
     "httpx>=0.28.1",
+    "jinja2>=3.1.4",
     "pydantic>=2.12.4",
     "python-dotenv>=1.2.1",
     "requests>=2.32.5",
     "uvicorn[standard]>=0.38.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
 ]

@@ -4,11 +4,19 @@ AAM (Adaptive API Mesh) - FastAPI Backend
 Inventory reusable data pipes and make their behavior explicit.
 AOD emits intent → AAM declares pipes → DCL unifies meaning.
 """
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+
+from .config import settings
+from .logger import get_logger
+from .constants import SOR_CATEGORIES, infer_plane_type_from_category
+
+_log = get_logger("main")
 
 from .db import (
     init_db,
@@ -78,23 +86,24 @@ from .adapters.factory import get_adapter_for_plane
 from .adapters.base import AdapterStatus, PlaneHealth
 from .pii_redaction import redact_pii_from_observation
 
+@asynccontextmanager
+async def lifespan(app):
+    init_db()
+    yield
+
 app = FastAPI(
     title="AAM - Adaptive API Mesh",
     description="Inventory reusable data pipes and make their behavior explicit. AOD emits intent → AAM declares pipes → DCL unifies meaning.",
     version="0.1.0",
     docs_url=None,
-    redoc_url=None
+    redoc_url=None,
+    lifespan=lifespan,
 )
 
 # Global component instances
 preset_loader = PresetConfigLoader()
 drift_detector = FabricDriftDetector()
 adapter_registry: dict = {}  # plane_type -> adapter instance
-
-
-@app.on_event("startup")
-async def startup_event():
-    init_db()
 
 
 NAV_STYLE = """
@@ -2675,7 +2684,7 @@ async def reset_aod_data():
     from prior runs pollutes the current state.
     """
     reset_result = reset_aod_state()
-    print(f"[AAM RESET] Reset complete: {reset_result['total_rows_deleted']} rows cleared across {len(reset_result['tables_cleared'])} tables")
+    _log.info("Reset complete: %d rows cleared across %d tables", reset_result['total_rows_deleted'], len(reset_result['tables_cleared']))
     return reset_result
 
 
@@ -2689,7 +2698,7 @@ async def fetch_aod_data():
         raise HTTPException(status_code=404, detail="No AOD payload stored. Receive a handoff first.")
     
     reset_result = reset_aod_state()
-    print(f"[AAM FETCH] Reset complete: {reset_result['total_rows_deleted']} rows cleared")
+    _log.info("Fetch reset complete: %d rows cleared", reset_result['total_rows_deleted'])
     
     request = AODHandoffRequest(**payload)
     handoff_response = await receive_aod_handoff(request)
@@ -2699,7 +2708,7 @@ async def fetch_aod_data():
     return result
 
 
-AOD_PAYLOAD_FILE = "aod_last_payload.json"
+AOD_PAYLOAD_FILE = settings.AOD_PAYLOAD_FILE
 
 def _save_aod_payload(request: AODHandoffRequest):
     """Save raw AOD payload to file so it can be replayed after reset."""
@@ -2708,7 +2717,7 @@ def _save_aod_payload(request: AODHandoffRequest):
         with open(AOD_PAYLOAD_FILE, "w") as f:
             _json.dump(request.model_dump(mode="json"), f)
     except Exception as e:
-        print(f"[AAM] Failed to save AOD payload: {e}")
+        _log.error("Failed to save AOD payload: %s", e)
 
 def _load_aod_payload() -> Optional[dict]:
     """Load last saved AOD payload from file."""
@@ -2735,8 +2744,8 @@ async def receive_aod_handoff(request: AODHandoffRequest):
     """
     _save_aod_payload(request)
     
-    # LOG INCOMING REQUEST
-    print(f"[AAM HANDOFF] run_id={request.run_id}, snapshot_name={request.snapshot_name}, candidates={len(request.candidates)}")
+    _log.info("AOD handoff received: run_id=%s, snapshot=%s, candidates=%d",
+              request.run_id, request.snapshot_name, len(request.candidates))
     
     # Store fabric planes from AOD and build lookup map
     fabric_planes_stored = 0
@@ -2750,29 +2759,19 @@ async def receive_aod_handoff(request: AODHandoffRequest):
                 fabric_plane_map[plane.vendor.lower()] = plane_id
                 fabric_planes_stored += 1
             except Exception as e:
-                print(f"[AAM] Failed to store fabric plane {plane.vendor}: {e}")
+                _log.error("Failed to store fabric plane %s: %s", plane.vendor, e)
     
     # Auto-create fabric planes from SOR candidates if none provided
-    sor_categories = {'crm', 'erp', 'hcm', 'idp', 'itsm', 'saas', 'hr', 'finance', 'cmdb', 'identity'}
     if not request.fabric_planes:
         seen_vendors = set()
         for candidate in request.candidates:
             cat_lower = candidate.category.lower() if candidate.category else ""
-            if cat_lower in sor_categories and candidate.vendor_name:
+            if cat_lower in SOR_CATEGORIES and candidate.vendor_name:
                 vendor_key = candidate.vendor_name.lower()
                 if vendor_key not in seen_vendors:
                     seen_vendors.add(vendor_key)
-                    # Create fabric plane from SOR candidate
-                    plane_type = "API_GATEWAY"  # SORs typically expose APIs
-                    if cat_lower in {'erp', 'finance'}:
-                        plane_type = "DATA_WAREHOUSE"
-                    elif cat_lower in {'crm', 'saas', 'hr', 'hcm'}:
-                        plane_type = "API_GATEWAY"
-                    elif cat_lower in {'idp', 'identity'}:
-                        plane_type = "API_GATEWAY"
-                    elif cat_lower in {'itsm', 'cmdb'}:
-                        plane_type = "IPAAS"
-                    
+                    plane_type = infer_plane_type_from_category(cat_lower)
+
                     plane_dict = {
                         "plane_type": plane_type,
                         "vendor": candidate.vendor_name,
@@ -2785,9 +2784,9 @@ async def receive_aod_handoff(request: AODHandoffRequest):
                         plane_id = result["plane_id"]
                         fabric_plane_map[vendor_key] = plane_id
                         fabric_planes_stored += 1
-                        print(f"[AAM] Auto-created fabric plane for SOR: {candidate.vendor_name} ({plane_type})")
+                        _log.info("Auto-created fabric plane for SOR: %s (%s)", candidate.vendor_name, plane_type)
                     except Exception as e:
-                        print(f"[AAM] Failed to auto-create fabric plane for {candidate.vendor_name}: {e}")
+                        _log.error("Failed to auto-create fabric plane for %s: %s", candidate.vendor_name, e)
     
     accepted = []
     rejected = []
@@ -2871,27 +2870,22 @@ async def receive_aod_handoff(request: AODHandoffRequest):
         seen_fp_vendors = set()
         for candidate in request.candidates:
             cat_lower = candidate.category.lower() if candidate.category else ""
-            if cat_lower in sor_categories and candidate.vendor_name:
+            if cat_lower in SOR_CATEGORIES and candidate.vendor_name:
                 vendor_key = candidate.vendor_name.lower()
                 if vendor_key not in seen_fp_vendors:
                     seen_fp_vendors.add(vendor_key)
-                    plane_type = "API_GATEWAY"
-                    if cat_lower in {'erp', 'finance'}:
-                        plane_type = "DATA_WAREHOUSE"
-                    elif cat_lower in {'itsm', 'cmdb'}:
-                        plane_type = "IPAAS"
+                    plane_type = infer_plane_type_from_category(cat_lower)
                     aod_fabric_planes_data.append({
                         "plane_type": plane_type,
                         "vendor": candidate.vendor_name,
                         "is_healthy": True
                     })
-    
+
     # Extract SOR vendors from candidates for reconciliation
     aod_sor_data = {}
-    sor_cat_set = {'crm', 'erp', 'hcm', 'idp', 'itsm', 'saas', 'hr', 'finance', 'cmdb', 'identity'}
     for candidate in request.candidates:
         cat_lower = candidate.category.lower() if candidate.category else ""
-        if cat_lower in sor_cat_set and candidate.vendor_name:
+        if cat_lower in SOR_CATEGORIES and candidate.vendor_name:
             vendor_key = candidate.vendor_name.lower()
             if vendor_key not in aod_sor_data:
                 aod_sor_data[vendor_key] = {"vendor": candidate.vendor_name, "category": cat_lower, "count": 0}
@@ -2979,12 +2973,8 @@ async def backfill_fabric_planes_from_candidates():
         vendor_name, category, asset_key, aod_run_id = row
         cat_lower = category.lower() if category else ""
         
-        plane_type = "API_GATEWAY"
-        if cat_lower in {'erp', 'finance'}:
-            plane_type = "DATA_WAREHOUSE"
-        elif cat_lower in {'itsm', 'cmdb'}:
-            plane_type = "IPAAS"
-        
+        plane_type = infer_plane_type_from_category(cat_lower)
+
         plane_dict = {
             "plane_type": plane_type,
             "vendor": vendor_name,
@@ -2995,9 +2985,9 @@ async def backfill_fabric_planes_from_candidates():
         try:
             store_fabric_plane(plane_dict, aod_run_id)
             created += 1
-            print(f"[AAM] Backfilled fabric plane: {vendor_name} ({plane_type})")
+            _log.info("Backfilled fabric plane: %s (%s)", vendor_name, plane_type)
         except Exception as e:
-            print(f"[AAM] Skip duplicate fabric plane {vendor_name}: {e}")
+            _log.warning("Skip duplicate fabric plane %s: %s", vendor_name, e)
     
     return {
         "message": f"Backfilled {created} fabric planes from SOR candidates",

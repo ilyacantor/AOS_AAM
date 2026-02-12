@@ -21,6 +21,11 @@ from dataclasses import dataclass, field
 from pydantic import BaseModel, Field
 import uuid
 
+from .config import settings
+from .logger import get_logger
+
+_log = get_logger("fabric_drift")
+
 
 class FabricDriftType(str, Enum):
     """Types of fabric plane drift"""
@@ -61,9 +66,9 @@ class FabricDriftEvent(BaseModel):
 @dataclass
 class DriftThresholds:
     """Thresholds that trigger drift detection"""
-    latency_ms_threshold: float = 1000.0
-    consumer_lag_threshold: int = 10000
-    connection_timeout_seconds: int = 30
+    latency_ms_threshold: float = settings.DRIFT_LATENCY_THRESHOLD_MS
+    consumer_lag_threshold: int = settings.DRIFT_CONSUMER_LAG_THRESHOLD
+    connection_timeout_seconds: int = settings.DRIFT_CONNECTION_TIMEOUT_S
     auth_expiry_warning_hours: int = 24
 
 
@@ -239,6 +244,7 @@ class FabricDriftDetector:
             return success
             
         except Exception as e:
+            _log.error("Self-heal failed for drift %s: %s", drift.drift_id, e)
             drift.auto_heal_success = False
             self._heal_history.append({
                 "drift_id": drift.drift_id,
