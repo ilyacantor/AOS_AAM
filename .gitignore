@@ -23,6 +23,10 @@ salesforce.db
 *.swp
 *.swo
 
+# Runtime artifacts (written by AOD handoff)
+aod_last_payload.json
+aod_raw_body.json
+
 # OS
 .DS_Store
 Thumbs.db
