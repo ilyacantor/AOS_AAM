@@ -53,7 +53,7 @@ def create_candidate(candidate_data: dict) -> dict:
         json.dumps(candidate_data.get("known_endpoints", [])),
         candidate_data.get("preferred_modality"),
         candidate_data.get("priority_score"),
-        "connected",
+        candidate_data.get("status", "new"),
         execution_allowed,
         candidate_data.get("action_type", "provision"),
         json.dumps(candidate_data.get("blocking_findings", [])),
