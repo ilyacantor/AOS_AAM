@@ -317,6 +317,21 @@ async def download_reconciliation_summary(aod_run_id: str):
     )
 
 
+@router.get("/run/{aod_run_id}/reconciliation/download-json")
+async def download_reconciliation_json(aod_run_id: str):
+    """Download the full reconciliation report as JSON."""
+    import json as _json
+    data = get_aod_reconciliation(aod_run_id)
+    if data.get("error"):
+        raise HTTPException(status_code=404, detail=data["error"])
+    filename = f"reconciliation_{aod_run_id[:8]}.json"
+    return Response(
+        content=_json.dumps(data, indent=2, default=str),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 # Fabric-plane backfill endpoint
 fabric_router = APIRouter(prefix="/api/fabric-planes", tags=["Fabric Planes"])
 

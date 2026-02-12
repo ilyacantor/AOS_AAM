@@ -2698,7 +2698,8 @@ async def ui_reconcile(aod_run_id: str):
 
         <div style="text-align: center; margin-top: 24px; padding-bottom: 32px;">
             <a href="/ui/pipes" class="btn" data-testid="link-back-pipes" style="margin-right: 8px;">Back to Pipes</a>
-            <a href="/api/handoff/aod/run/{aod_run_id}/reconciliation/download" class="btn btn-sm" data-testid="link-download-csv" style="margin-right: 8px; color: var(--cyan-400); border-color: rgba(34,211,238,0.3);">Download Summary (CSV)</a>
+            <a href="/api/handoff/aod/run/{aod_run_id}/reconciliation/download" class="btn btn-sm" data-testid="link-download-csv" style="margin-right: 8px; color: var(--cyan-400); border-color: rgba(34,211,238,0.3);">Download CSV</a>
+            <a href="/api/handoff/aod/run/{aod_run_id}/reconciliation/download-json" class="btn btn-sm" data-testid="link-download-json" style="margin-right: 8px; color: var(--cyan-400); border-color: rgba(34,211,238,0.3);">Download JSON</a>
             <a href="/api/handoff/aod/run/{aod_run_id}/reconciliation" target="_blank" class="btn btn-sm" data-testid="link-raw-json" style="color: var(--slate-400); border-color: var(--slate-600);">View Raw JSON</a>
         </div>
     </div>
