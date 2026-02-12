@@ -14,19 +14,25 @@ from .candidates import _row_to_candidate
 # CANDIDATE MATCH OPERATIONS (v1 Practical Interface)
 # ============================================================================
 
-def update_candidate_match(candidate_id: str, pipe_id: str, score: float, reason: str) -> Optional[dict]:
-    """Update candidate with match information"""
+def update_candidate_match(candidate_id: str, pipe_id: str, score: float, reason: str,
+                           fabric_plane: str = None) -> Optional[dict]:
+    """Update candidate with match information and propagate plane linkage.
+
+    When a candidate matches a pipe, the pipe's fabric_plane (e.g. API_GATEWAY)
+    is written back to connected_via_plane so the topology view can resolve it.
+    """
     conn = get_connection()
     cursor = conn.cursor()
-    
+
     now = datetime.utcnow().isoformat()
-    
+
     cursor.execute("""
-        UPDATE connection_candidates 
-        SET matched_pipe_id = ?, match_score = ?, match_reason = ?, 
-            status = 'connected', updated_at = ?
+        UPDATE connection_candidates
+        SET matched_pipe_id = ?, match_score = ?, match_reason = ?,
+            status = 'connected', updated_at = ?,
+            connected_via_plane = COALESCE(?, connected_via_plane)
         WHERE candidate_id = ?
-    """, (pipe_id, score, reason, now, candidate_id))
+    """, (pipe_id, score, reason, now, fabric_plane, candidate_id))
     
     affected = cursor.rowcount
     conn.commit()

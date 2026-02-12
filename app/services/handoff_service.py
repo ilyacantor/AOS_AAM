@@ -148,6 +148,7 @@ def link_candidate_to_plane(
     candidate,
     fabric_plane_map: dict[str, str],
     request_planes,
+    preset_loader=None,
 ) -> Optional[str]:
     """
     Link a candidate to a fabric plane.
@@ -155,6 +156,7 @@ def link_candidate_to_plane(
     Resolution order:
       1. connected_via_plane (AOD routing hint) → match by plane TYPE
       2. Direct vendor-name match (plane vendor == candidate vendor)
+      3. Preset primary plane (enterprise default routing)
 
     Returns the plane_id or None.
     """
@@ -178,6 +180,15 @@ def link_candidate_to_plane(
         plane_norm = plane_vendor.replace("_", " ")
         if plane_norm in vendor_norm or vendor_norm in plane_norm:
             return plane_id
+
+    # 3. Preset primary plane — if AOD sent planes AND the enterprise preset
+    #    has a primary plane type that matches one of them, use it.
+    #    This is the enterprise's default routing for SaaS apps.
+    if preset_loader and fabric_plane_map:
+        primary = preset_loader.get_routing_decision()  # e.g. FabricPlane.API_GATEWAY
+        primary_type = primary.value if primary else None
+        if primary_type and primary_type in type_to_plane_id:
+            return type_to_plane_id[primary_type]
 
     return None
 
@@ -262,7 +273,7 @@ def _serialize_candidate(candidate) -> dict:
     return candidate_dict
 
 
-def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
+def process_handoff(request: AODHandoffRequest, preset_loader=None) -> AODHandoffResponse:
     """
     Full AOD handoff orchestration: planes → candidates → log → response.
 
@@ -325,12 +336,16 @@ def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
                 ))
                 continue
 
-            # Link to fabric plane
+            # Link to fabric plane (uses preset primary plane as last resort)
             fabric_plane_id = link_candidate_to_plane(
-                candidate, fabric_plane_map, request.fabric_planes
+                candidate, fabric_plane_map, request.fabric_planes, preset_loader
             )
             if fabric_plane_id:
                 candidate_dict["fabric_plane_id"] = fabric_plane_id
+                # Also set connected_via_plane for topology resolution
+                if not candidate_dict.get("connected_via_plane"):
+                    plane_type = fabric_plane_id.split(":")[0] if ":" in fabric_plane_id else fabric_plane_id
+                    candidate_dict["connected_via_plane"] = plane_type
 
             result = create_candidate(candidate_dict)
             accepted.append({

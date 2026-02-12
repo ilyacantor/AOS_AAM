@@ -43,6 +43,7 @@ def build_topology_summary() -> dict:
     """
     candidates = list_candidates()
     db_planes = get_fabric_planes()
+    all_pipes = list_pipes()
 
     # Build plane info lookup by plane_id (e.g. "IPAAS:workato")
     plane_info = {p["plane_id"]: p for p in db_planes}
@@ -53,8 +54,22 @@ def build_topology_summary() -> dict:
         if p["plane_type"] not in type_to_plane:
             type_to_plane[p["plane_type"]] = p["plane_id"]
 
+    # Build pipe_id → fabric_plane lookup for matched-pipe resolution
+    pipe_planes: dict[str, str] = {}
+    for p in all_pipes:
+        fp = p.get("fabric_plane", "")
+        if fp and fp not in ("UNMAPPED", "UNKNOWN"):
+            pipe_planes[p["pipe_id"]] = fp
+
     def _resolve_plane_id(candidate: dict) -> str:
-        """Resolve a candidate to its vendor-specific fabric plane_id."""
+        """Resolve a candidate to its vendor-specific fabric plane_id.
+
+        Resolution order:
+          1. Explicit fabric_plane_id on the candidate
+          2. connected_via_plane type hint → type_to_plane lookup
+          3. Matched pipe's fabric_plane (backfill for pre-propagation data)
+          4. "UNMAPPED" (operator must categorize)
+        """
         fpid = candidate.get("fabric_plane_id", "")
         if fpid and fpid in plane_info:
             return fpid
@@ -62,7 +77,16 @@ def build_topology_summary() -> dict:
             candidate.get("fabric_plane_id", ""),
             candidate.get("connected_via_plane", ""),
         )
-        return type_to_plane.get(plane_type, plane_type)
+        resolved = type_to_plane.get(plane_type)
+        if resolved:
+            return resolved
+
+        # Fallback: check matched pipe's fabric_plane
+        matched_pid = candidate.get("matched_pipe_id", "")
+        if matched_pid and matched_pid in pipe_planes:
+            return type_to_plane.get(pipe_planes[matched_pid], pipe_planes[matched_pid])
+
+        return "UNMAPPED"
 
     # Count candidates (= pipes) per vendor-plane
     vendor_plane_counts: dict[str, dict] = {}

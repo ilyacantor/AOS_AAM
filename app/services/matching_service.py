@@ -179,7 +179,15 @@ def match_candidate(
         if not pipe_id:
             raise ValueError(match_reason)
 
-    updated = update_candidate_match(candidate_id, pipe_id, score, match_reason)
+    # Resolve the matched pipe's fabric_plane and propagate to the candidate
+    # so the topology view shows the correct plane linkage
+    matched_pipe = get_pipe(pipe_id)
+    fabric_plane = matched_pipe.get("fabric_plane") if matched_pipe else None
+
+    updated = update_candidate_match(
+        candidate_id, pipe_id, score, match_reason,
+        fabric_plane=fabric_plane,
+    )
     if not updated:
         raise RuntimeError("Failed to update candidate")
 
