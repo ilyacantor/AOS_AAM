@@ -23,7 +23,7 @@ class DeferRequest(BaseModel):
 
 
 @router.post("/{candidate_id}/match")
-async def match_candidate(candidate_id: str, request: MatchRequest, preset_loader=None):
+async def match_candidate(candidate_id: str, request: MatchRequest):
     """
     Attempt to match candidate to a pipe.
 
@@ -32,11 +32,8 @@ async def match_candidate(candidate_id: str, request: MatchRequest, preset_loade
     - If action_type="inventory_only", blocks auto-matching
     - Respects blocking_findings from AOD
     """
-    # preset_loader is injected via app.state in the router inclusion
-    from ..main import preset_loader as _preset_loader
-
     try:
-        result = match_candidate_service(candidate_id, request.pipe_id, _preset_loader)
+        result = match_candidate_service(candidate_id, request.pipe_id)
         return result
     except ValueError as e:
         raise HTTPException(status_code=404 if "not found" in str(e).lower() else 400, detail=str(e))

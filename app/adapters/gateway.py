@@ -1,14 +1,10 @@
 """
 GatewayAdapter - API Gateway Plane
 
-Connects to API Gateways (Kong, Apigee, AWS API Gateway) 
+Connects to API Gateways (Kong, Apigee, AWS API Gateway)
 to inventory managed API endpoints.
 
 Modality: Proxy/REST - direct API access through the gateway.
-
-NOTE: In Preset 6 (Scrappy) mode, this adapter allows
-direct Point-to-Point connections to apps. In all other
-presets, it connects to the managed gateway layer.
 """
 
 from typing import Dict, Any, List, Optional
@@ -21,24 +17,21 @@ from .base import FabricAdapter, AdapterStatus, PlaneHealth, PlaneDrift
 class GatewayAdapter(FabricAdapter):
     """
     Adapter for API Gateway Fabric Plane.
-    
+
     Connects to API gateway management planes to:
     - Discover registered API endpoints
     - Monitor API health and latency
     - Apply governance policies (rate limiting, PII redaction)
     - Self-heal connection disruptions
-    
+
     Supported vendors: Kong, Apigee, AWS API Gateway, Azure APIM
-    
-    Special mode: In Preset 6 (Scrappy), allows direct app connections.
     """
-    
-    SUPPORTED_VENDORS = ["kong", "apigee", "aws_apigateway", "azure_apim", "direct"]
-    
+
+    SUPPORTED_VENDORS = ["kong", "apigee", "aws_apigateway", "azure_apim"]
+
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
         self._vendor = config.get("vendor", "kong").lower()
-        self._is_scrappy_mode = config.get("scrappy_mode", False)
         self._apis_discovered: List[Dict] = []
         self._governance_policies: List[Dict] = []
     
@@ -84,7 +77,6 @@ class GatewayAdapter(FabricAdapter):
             metrics={
                 "vendor": self._vendor,
                 "apis_discovered": len(self._apis_discovered),
-                "scrappy_mode": self._is_scrappy_mode,
                 "policies_active": len(self._governance_policies)
             }
         )
@@ -96,42 +88,24 @@ class GatewayAdapter(FabricAdapter):
         Returns observations for inference engine to process.
         """
         observations = []
-        
-        if self._is_scrappy_mode:
-            mock_apis = [
-                {
-                    "api_id": "api-direct-001",
-                    "name": "CRM Direct API (Scrappy Mode)",
-                    "base_url": "/api/crm/v1",
-                    "endpoints": ["/accounts", "/contacts"],
-                    "access_type": "direct_point_to_point"
-                },
-                {
-                    "api_id": "api-direct-002",
-                    "name": "Marketing Direct API (Scrappy Mode)",
-                    "base_url": "/api/marketing/v1",
-                    "endpoints": ["/contacts", "/companies"],
-                    "access_type": "direct_point_to_point"
-                }
-            ]
-        else:
-            mock_apis = [
-                {
-                    "api_id": f"api-{self._vendor}-001",
-                    "name": f"{self._vendor.title()} - CRM Gateway Route",
-                    "route": "/api/crm/*",
-                    "upstream": "internal-crm-service",
-                    "plugins": ["rate-limiting", "jwt-auth"]
-                },
-                {
-                    "api_id": f"api-{self._vendor}-002",
-                    "name": f"{self._vendor.title()} - ERP Gateway Route",
-                    "route": "/api/erp/*",
-                    "upstream": "internal-erp-service",
-                    "plugins": ["rate-limiting", "oauth2"]
-                }
-            ]
-        
+
+        mock_apis = [
+            {
+                "api_id": f"api-{self._vendor}-001",
+                "name": f"{self._vendor.title()} - CRM Gateway Route",
+                "route": "/api/crm/*",
+                "upstream": "internal-crm-service",
+                "plugins": ["rate-limiting", "jwt-auth"]
+            },
+            {
+                "api_id": f"api-{self._vendor}-002",
+                "name": f"{self._vendor.title()} - ERP Gateway Route",
+                "route": "/api/erp/*",
+                "upstream": "internal-erp-service",
+                "plugins": ["rate-limiting", "oauth2"]
+            }
+        ]
+
         for api in mock_apis:
             observations.append({
                 "observation_id": str(uuid.uuid4()),
@@ -142,8 +116,7 @@ class GatewayAdapter(FabricAdapter):
                     "type": "api_gateway",
                     "api_id": api["api_id"],
                     "api_name": api["name"],
-                    "vendor": self._vendor,
-                    "scrappy_mode": self._is_scrappy_mode
+                    "vendor": self._vendor
                 },
                 "entity_hints": self._extract_entities_from_endpoints(api),
                 "metadata": {

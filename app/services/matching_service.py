@@ -43,41 +43,15 @@ def validate_aod_governance(candidate: dict, is_auto_match: bool) -> tuple[bool,
     return True, ""
 
 
-def validate_direct_api_access(candidate: dict, pipe: dict, preset_loader) -> tuple[bool, str]:
+def find_matching_pipe(candidate: dict) -> tuple[Optional[str], float, str]:
     """
-    Validate that direct API access is allowed under the current preset.
-    Returns (allowed, reason).
-    """
-    vendor = candidate.get("vendor_name", "")
-    if preset_loader.should_block_direct_api(vendor):
-        if pipe and pipe.get("fabric_plane") == "API_GATEWAY":
-            is_valid, block_reason = preset_loader.validate_candidate_routing(
-                vendor, FabricPlane.API_GATEWAY
-            )
-            if not is_valid:
-                return False, (
-                    f"Direct API access blocked: {block_reason}. "
-                    f"Current preset ({preset_loader.current_config.name}) requires routing through "
-                    f"{preset_loader.current_config.primary_plane.value}."
-                )
-    return True, ""
-
-
-def find_matching_pipe(
-    candidate: dict,
-    preset_loader,
-) -> tuple[Optional[str], float, str]:
-    """
-    Four-strategy auto-matching:
+    Auto-matching strategies:
       1. Exact vendor name match
-      2. Partial vendor name match
-      3. Category hint match
-      4. Create new pipe from candidate
+      2. Create new pipe from candidate (only if AOD sent a plane hint)
 
     Returns (pipe_id, score, reason).
     """
     vendor = candidate.get("vendor_name", "").lower()
-    category = candidate.get("category", "").lower()
     candidate_id = candidate.get("candidate_id", "")
 
     # Strategy 1: Exact vendor name match
@@ -85,18 +59,10 @@ def find_matching_pipe(
     if pipes:
         return pipes[0]["pipe_id"], 0.9, "Auto-matched by vendor name"
 
-    # Strategy 2 (partial vendor substring match) removed — substring
-    # matching creates false positives (e.g. "work" matching "workato").
-    # Unmatched candidates stay unmatched for HITL review.
-
-    # Strategy 3 (category-based match) removed — app categories don't
-    # determine infrastructure routing.  Only vendor identity matters.
-
-    # Strategy 4: Create new pipe from candidate
+    # Strategy 2: Create new pipe from candidate (requires AOD plane hint)
     all_pipes = list_pipes(limit=1000)
     if all_pipes:
         aod_plane_hint = candidate.get("connected_via_plane")
-        candidate_category = candidate.get("category", "")
 
         if aod_plane_hint:
             try:
@@ -105,11 +71,7 @@ def find_matching_pipe(
             except ValueError:
                 return None, 0.0, f"Cannot create pipe: AOD plane hint '{aod_plane_hint}' is not a valid FabricPlane"
         else:
-            return None, 0.0, "Cannot create pipe: no fabric plane hint from AOD and category-based inference is disabled"
-
-        is_valid, route_reason = preset_loader.validate_candidate_routing(vendor, routed_plane)
-        if not is_valid:
-            return None, 0.0, f"Cannot create pipe: {route_reason}"
+            return None, 0.0, "Cannot create pipe: no fabric plane hint from AOD"
 
         lineage_hints = [f"candidate:{candidate_id}", f"routed_via:{routed_plane.value}"]
         if candidate.get("aod_run_id"):
@@ -143,7 +105,6 @@ def find_matching_pipe(
 def match_candidate(
     candidate_id: str,
     pipe_id_hint: Optional[str],
-    preset_loader,
 ) -> dict:
     """
     Full candidate-match orchestration: governance check → find/create pipe → update candidate.
@@ -166,16 +127,12 @@ def match_candidate(
         if not pipe:
             raise ValueError("Pipe not found")
 
-        ok, msg = validate_direct_api_access(candidate, pipe, preset_loader)
-        if not ok:
-            raise PermissionError(msg)
-
         pipe_id = pipe_id_hint
         score = 1.0
         match_reason = "Manual match"
     else:
         # Auto-match
-        pipe_id, score, match_reason = find_matching_pipe(candidate, preset_loader)
+        pipe_id, score, match_reason = find_matching_pipe(candidate)
         if not pipe_id:
             raise ValueError(match_reason)
 

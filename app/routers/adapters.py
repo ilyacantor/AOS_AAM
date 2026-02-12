@@ -11,14 +11,14 @@ router = APIRouter(prefix="/api/adapters", tags=["Fabric Adapters"])
 
 
 def _get_globals():
-    from ..main import adapter_registry, preset_loader, drift_detector
-    return adapter_registry, preset_loader, drift_detector
+    from ..main import adapter_registry, drift_detector
+    return adapter_registry, drift_detector
 
 
 @router.get("")
 async def list_adapters():
     """List all registered fabric plane adapters and their status."""
-    adapter_registry, preset_loader, _ = _get_globals()
+    adapter_registry, _ = _get_globals()
     result = []
     for plane_type, adapter in adapter_registry.items():
         health = await adapter.check_health()
@@ -29,21 +29,20 @@ async def list_adapters():
             "last_check": health.last_check.isoformat(),
             "latency_ms": health.latency_ms,
         })
-    return {"adapters": result, "count": len(result), "current_preset": preset_loader.current_config.name}
+    return {"adapters": result, "count": len(result)}
 
 
 @router.post("/{plane_type}/connect")
 async def connect_adapter(plane_type: str):
     """Connect to a fabric plane."""
-    adapter_registry, preset_loader, _ = _get_globals()
+    adapter_registry, _ = _get_globals()
 
     if plane_type not in adapter_registry:
         try:
             plane_enum = FabricPlane(plane_type.upper())
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Invalid plane type: {plane_type}")
-        config = preset_loader.current_config.adapter_config.get(plane_type.lower(), {})
-        adapter = get_adapter_for_plane(plane_enum, config)
+        adapter = get_adapter_for_plane(plane_enum)
         if not adapter:
             raise HTTPException(status_code=400, detail=f"Could not create adapter for {plane_type}")
         adapter_registry[plane_type] = adapter
@@ -62,7 +61,7 @@ async def connect_adapter(plane_type: str):
 @router.post("/{plane_type}/disconnect")
 async def disconnect_adapter(plane_type: str):
     """Disconnect from a fabric plane."""
-    adapter_registry, _, _ = _get_globals()
+    adapter_registry, _ = _get_globals()
     if plane_type not in adapter_registry:
         raise HTTPException(status_code=404, detail=f"Adapter not found: {plane_type}")
     adapter = adapter_registry[plane_type]
@@ -73,7 +72,7 @@ async def disconnect_adapter(plane_type: str):
 @router.get("/{plane_type}/health")
 async def check_adapter_health(plane_type: str):
     """Check health of a fabric plane adapter."""
-    adapter_registry, _, drift_detector = _get_globals()
+    adapter_registry, drift_detector = _get_globals()
     if plane_type not in adapter_registry:
         raise HTTPException(status_code=404, detail=f"Adapter not found: {plane_type}")
     adapter = adapter_registry[plane_type]
@@ -98,28 +97,25 @@ async def check_adapter_health(plane_type: str):
 @router.post("/{plane_type}/discover")
 async def discover_from_adapter(plane_type: str):
     """Discover pipes from a fabric plane adapter."""
-    adapter_registry, preset_loader, _ = _get_globals()
+    adapter_registry, _ = _get_globals()
     if plane_type not in adapter_registry:
         raise HTTPException(status_code=404, detail=f"Adapter not found: {plane_type}")
     adapter = adapter_registry[plane_type]
     health = await adapter.check_health()
     if health.status != AdapterStatus.CONNECTED:
         raise HTTPException(status_code=400, detail=f"Adapter not connected. Status: {health.status.value}")
-    policies = preset_loader.get_governance_policies()
-    adapter.apply_governance_policy(policies)
     observations = await adapter.discover_pipes()
     return {
         "plane_type": plane_type,
         "observations_count": len(observations),
         "observations": observations,
-        "governance_applied": list(policies.keys()),
     }
 
 
 @router.post("/{plane_type}/self-heal")
 async def trigger_self_heal(plane_type: str):
     """Trigger self-healing for a fabric plane adapter."""
-    adapter_registry, _, drift_detector = _get_globals()
+    adapter_registry, drift_detector = _get_globals()
     if plane_type not in adapter_registry:
         raise HTTPException(status_code=404, detail=f"Adapter not found: {plane_type}")
     adapter = adapter_registry[plane_type]

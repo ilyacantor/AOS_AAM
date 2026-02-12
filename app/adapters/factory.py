@@ -44,37 +44,3 @@ def get_adapter_for_plane(
         raise ValueError(f"Unknown fabric plane: {fabric_plane}")
     
     return adapter_class(config)
-
-
-def get_adapter_for_preset(preset_id: str, config: Optional[Dict[str, Any]] = None) -> FabricAdapter:
-    """
-    Get the primary adapter for an enterprise preset.
-    
-    Preset routing:
-    - early_scrappy (6): GatewayAdapter with scrappy_mode=True
-    - ipaas_centric (8): IPaaSAdapter (blocks direct API calls)
-    - platform_oriented (9): EventBusAdapter (prioritizes streaming)
-    - warehouse_centric (11): WarehouseAdapter (authoritative Source of Truth)
-    
-    Args:
-        preset_id: The enterprise preset identifier
-        config: Optional additional configuration
-        
-    Returns:
-        Appropriate FabricAdapter for the preset
-    """
-    config = config or {}
-    
-    preset_routing = {
-        "early_scrappy": (GatewayAdapter, {"scrappy_mode": True}),
-        "ipaas_centric": (IPaaSAdapter, {"vendor": "workato"}),
-        "platform_oriented": (EventBusAdapter, {"vendor": "kafka"}),
-        "warehouse_centric": (WarehouseAdapter, {"vendor": "snowflake"}),
-    }
-    
-    if preset_id not in preset_routing:
-        return GatewayAdapter({"scrappy_mode": True})
-    
-    adapter_class, default_config = preset_routing[preset_id]
-    merged_config = {**default_config, **config}
-    return adapter_class(merged_config)

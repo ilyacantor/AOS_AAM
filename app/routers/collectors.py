@@ -45,8 +45,6 @@ async def infer_pipes():
     Previously only path 1 was wired, so clicking "Run Inference" after an
     AOD handoff always returned 0 pipes.
     """
-    from ..main import preset_loader
-
     pipes_from_obs = 0
     pipes_from_candidates = 0
     match_failures = []
@@ -54,12 +52,9 @@ async def infer_pipes():
     # ---- Path 1: adapter observations (legacy) ----
     observations = get_unprocessed_observations()
     if observations:
-        policies = preset_loader.get_governance_policies()
-        pii_policy = policies.get("pii_redaction", "optional")
-
         redacted_observations = []
         for obs in observations:
-            redacted_observations.append(redact_pii_from_observation(obs, policy=pii_policy))
+            redacted_observations.append(redact_pii_from_observation(obs, policy="optional"))
 
         inferred_pipes = infer_pipes_from_observations(redacted_observations)
         for pipe in inferred_pipes:
@@ -77,7 +72,7 @@ async def infer_pipes():
     for candidate in unmatched:
         cid = candidate["candidate_id"]
         try:
-            result = match_candidate_service(cid, None, preset_loader)
+            result = match_candidate_service(cid, None)
             if result.get("matched_pipe_id"):
                 pipes_from_candidates += 1
         except (ValueError, PermissionError) as exc:
@@ -102,7 +97,7 @@ async def infer_pipes():
 @router.post("/api/collect/adapter/run")
 async def run_adapter(request=None):
     """Run adapter collector against connected fabric planes."""
-    from ..main import preset_loader, adapter_registry
+    from ..main import adapter_registry
 
     collector_id = "adapter-collector-001"
     run_id = create_collector_run(collector_id)
@@ -114,7 +109,7 @@ async def run_adapter(request=None):
                 status_code=400,
                 detail="No adapters connected. Connect adapters first via /api/adapters/{plane_type}/connect",
             )
-        result = await run_adapter_collector(collector_id, run_id, adapter_registry, preset_loader)
+        result = await run_adapter_collector(collector_id, run_id, adapter_registry)
         return {"run_id": run_id, "collector": "adapter", **result}
     except HTTPException:
         raise

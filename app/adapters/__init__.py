@@ -2,7 +2,6 @@
 AAM Fabric Plane Adapters
 
 AAM connects ONLY to Fabric Planes that aggregate data, NOT to individual SaaS apps.
-Exception: Preset 6 (Scrappy) mode allows direct Point-to-Point via GatewayAdapter.
 
 The 4 Fabric Planes:
 1. IPAAS: (Workato, MuleSoft) -> Control plane for integration flows

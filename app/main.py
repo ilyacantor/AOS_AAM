@@ -79,7 +79,6 @@ from .models import (
     AODHandoffResponse,
     AODPolicyManifest
 )
-from .preset_config import PresetConfigLoader, EnterpriseMaturity
 from .fabric_drift import FabricDriftDetector, FabricDriftType
 from .adapters.factory import get_adapter_for_plane
 from .adapters.base import AdapterStatus, PlaneHealth
@@ -106,7 +105,6 @@ app = FastAPI(
 )
 
 # Global component instances (accessed by routers via `from ..main import ...`)
-preset_loader = PresetConfigLoader()
 drift_detector = FabricDriftDetector()
 adapter_registry: dict = {}  # plane_type -> adapter instance
 
@@ -121,7 +119,6 @@ from .routers.collectors import router as collectors_router
 from .routers.drift import router as drift_router, fabric_drift_router
 from .routers.tee import router as tee_router
 from .routers.adapters import router as adapters_router
-from .routers.presets import config_router
 from .routers.topology import router as topology_router
 from .routers.export import router as export_router
 from .routers.admin import router as admin_router
@@ -136,7 +133,6 @@ app.include_router(drift_router)
 app.include_router(fabric_drift_router)
 app.include_router(tee_router)
 app.include_router(adapters_router)
-app.include_router(config_router)
 app.include_router(topology_router)
 app.include_router(export_router)
 app.include_router(admin_router)

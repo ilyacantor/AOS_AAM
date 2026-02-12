@@ -16,7 +16,6 @@ async def run_adapter_collector(
     collector_id: str,
     run_id: str,
     adapter_registry: dict,
-    preset_loader,
 ) -> dict:
     """
     Run all connected adapters, collect observations, and apply PII redaction.
@@ -32,10 +31,7 @@ async def run_adapter_collector(
         if health.status != AdapterStatus.CONNECTED:
             continue
 
-        policies = preset_loader.get_governance_policies()
-        adapter.apply_governance_policy(policies)
         observations = await adapter.discover_pipes()
-        pii_policy = policies.get("pii_redaction", "optional")
 
         for obs in observations:
             obs_data = {
@@ -49,11 +45,9 @@ async def run_adapter_collector(
                 "metadata": {
                     "plane_type": plane_type,
                     "vendor": adapter.plane_vendor,
-                    "governance_applied": list(policies.keys()),
-                    "preset": preset_loader.current_config.preset_id,
                 },
             }
-            obs_data = redact_pii_from_observation(obs_data, policy=pii_policy)
+            obs_data = redact_pii_from_observation(obs_data, policy="optional")
             create_observation(obs_data)
             all_observations.append(obs_data)
 
@@ -65,6 +59,5 @@ async def run_adapter_collector(
         "status": "completed",
         "observations_created": len(all_observations),
         "adapters_collected": adapters_collected,
-        "current_preset": preset_loader.current_config.name,
         "observations": all_observations,
     }
