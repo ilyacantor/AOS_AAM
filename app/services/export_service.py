@@ -40,9 +40,8 @@ def build_reconciliation_csv(aod_run_id: str) -> tuple[str, str]:
 
     checks = [
         ("Vendor Name Consistency", deep.get("vendor_matching", {})),
-        ("Candidate Row Integrity", deep.get("candidate_rows", {})),
         ("Fabric Plane Comparison", deep.get("fabric_comparison", {})),
-        ("SOR Vendor Comparison", deep.get("sor_comparison", {})),
+        ("SOR Ingestion & Classification", deep.get("sor_comparison", {})),
         ("Schema Completeness", deep.get("schema_completeness", {})),
         ("Duplicate Detection", deep.get("duplicates", {})),
     ]
@@ -63,17 +62,6 @@ def build_reconciliation_csv(aod_run_id: str) -> tuple[str, str]:
             variants = "; ".join([f'{v["name"]} ({v["count"]})' for v in d["variants"]])
             writer.writerow([d["canonical"], variants, d["total"]])
         writer.writerow([])
-
-    # Candidate rows
-    cr = deep.get("candidate_rows", {})
-    for label, key in [("UNCONNECTED CANDIDATES", "unconnected"), ("BLOCKED CANDIDATES", "blocked")]:
-        items = cr.get(key, [])
-        if items:
-            writer.writerow([f"--- {label} ---"])
-            writer.writerow(["Candidate ID", "Vendor", "Display Name", "Category", "Status"])
-            for c in items:
-                writer.writerow([c["candidate_id"], c.get("vendor", ""), c.get("display_name", ""), c.get("category", ""), c.get("status", "")])
-            writer.writerow([])
 
     # Fabric comparison
     fc = deep.get("fabric_comparison", {})

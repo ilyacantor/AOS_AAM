@@ -139,39 +139,7 @@ def get_aod_reconciliation(aod_run_id: str) -> dict:
                 "total": sum(v["count"] for v in variants)
             })
     
-    # ===== DEEP CHECK 2: Per-Candidate Row Check =====
-    # Find candidates from this run that might have issues
-    cursor.execute("""
-        SELECT candidate_id, vendor_name, display_name, category, status, 
-               connected_via_plane, execution_allowed
-        FROM connection_candidates
-        WHERE aod_run_id = ?
-    """, (aod_run_id,))
-    all_candidates = cursor.fetchall()
-    
-    # Check for candidates not connected
-    unconnected_candidates = []
-    blocked_candidates = []
-    for row in all_candidates:
-        cid, vendor, display, cat, status, plane, exec_allowed = row
-        if status and status.lower() not in ('connected', 'triaged'):
-            unconnected_candidates.append({
-                "candidate_id": cid,
-                "vendor": vendor,
-                "display_name": display,
-                "category": cat,
-                "status": status
-            })
-        if exec_allowed is not None and not exec_allowed:
-            blocked_candidates.append({
-                "candidate_id": cid,
-                "vendor": vendor,
-                "display_name": display,
-                "category": cat,
-                "status": status
-            })
-    
-    # ===== DEEP CHECK 3: Fabric Plane Comparison (AOD-explicit vs AAM-stored) =====
+    # ===== DEEP CHECK 2: Fabric Plane Comparison (AOD-explicit vs AAM-stored) =====
     # AOD side: what AOD *explicitly* told us about fabric planes (from handoff log)
     # These are ONLY planes AOD sent in the fabric_planes field, NOT AAM-inferred ones
     cursor.execute("""
@@ -591,14 +559,6 @@ def get_aod_reconciliation(aod_run_id: str) -> dict:
                 "vendors_by_count": vendors_stored,
                 "case_duplicates": vendor_case_duplicates,
                 "has_issues": len(vendor_case_duplicates) > 0
-            },
-            "candidate_rows": {
-                "total": len(all_candidates),
-                "unconnected": unconnected_candidates[:25],
-                "unconnected_count": len(unconnected_candidates),
-                "blocked": blocked_candidates[:25],
-                "blocked_count": len(blocked_candidates),
-                "has_issues": len(unconnected_candidates) > 0 or len(blocked_candidates) > 0
             },
             "fabric_comparison": {
                 "vendors": fabric_vendors,

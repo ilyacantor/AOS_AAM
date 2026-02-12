@@ -2167,60 +2167,6 @@ async def ui_reconcile(aod_run_id: str):
     else:
         vm_content = f'<div style="color: var(--slate-400); font-size: 0.85rem;">{vm.get("total_vendors", 0)} unique vendors stored. No case-sensitivity duplicates found.</div>'
     
-    # --- Deep Check 2: Candidate Row Check ---
-    cr = deep.get("candidate_rows", {})
-    cr_unconnected = cr.get("unconnected", [])
-    cr_blocked = cr.get("blocked", [])
-    cr_issue_count = cr.get("unconnected_count", 0) + cr.get("blocked_count", 0)
-    
-    cr_content = ""
-    if cr_unconnected:
-        cr_rows = ""
-        for c in cr_unconnected[:15]:
-            cr_rows += f"""
-            <tr>
-                <td style="font-family: monospace; font-size: 0.75rem;">{c["candidate_id"][:12]}...</td>
-                <td>{c["vendor"]}</td>
-                <td>{c["display_name"]}</td>
-                <td><span class="badge badge-{'new' if c['status'].lower() not in ('new','triaged','connected','deferred','open','acknowledged','suppressed','resolved') else c['status'].lower()}">{c["status"]}</span></td>
-            </tr>
-            """
-        more_text = f'<div style="color: var(--slate-400); font-size: 0.8rem; margin-top: 8px;">...and {cr.get("unconnected_count", 0) - 15} more</div>' if cr.get("unconnected_count", 0) > 15 else ""
-        cr_content += f"""
-        <div style="margin-bottom: 16px;">
-            <div style="font-size: 0.85rem; font-weight: 500; color: var(--orange-400); margin-bottom: 8px;">Unconnected Candidates ({cr.get("unconnected_count", 0)})</div>
-            <table>
-                <thead><tr><th>ID</th><th>Vendor</th><th>Name</th><th>Status</th></tr></thead>
-                <tbody>{cr_rows}</tbody>
-            </table>
-            {more_text}
-        </div>
-        """
-    
-    if cr_blocked:
-        bl_rows = ""
-        for c in cr_blocked[:10]:
-            bl_rows += f"""
-            <tr>
-                <td style="font-family: monospace; font-size: 0.75rem;">{c["candidate_id"][:12]}...</td>
-                <td>{c["vendor"]}</td>
-                <td>{c["display_name"]}</td>
-                <td><span class="badge badge-critical">Blocked</span></td>
-            </tr>
-            """
-        cr_content += f"""
-        <div>
-            <div style="font-size: 0.85rem; font-weight: 500; color: var(--red-400); margin-bottom: 8px;">Execution-Blocked Candidates ({cr.get("blocked_count", 0)})</div>
-            <table>
-                <thead><tr><th>ID</th><th>Vendor</th><th>Name</th><th>Status</th></tr></thead>
-                <tbody>{bl_rows}</tbody>
-            </table>
-        </div>
-        """
-    
-    if not cr_content:
-        cr_content = f'<div style="color: var(--slate-400); font-size: 0.85rem;">All {cr.get("total", 0)} candidates are connected and execution-allowed.</div>'
-    
     # --- Deep Check 3: Fabric Plane Comparison ---
     fc = deep.get("fabric_comparison", {})
     fc_vendors = fc.get("vendors", [])
@@ -2670,7 +2616,7 @@ async def ui_reconcile(aod_run_id: str):
 
         <!-- Deep Checks Section -->
         <h2 style="margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--slate-700);">Deep Reconciliation Checks</h2>
-        <p class="page-subtitle" style="margin-top: -8px;">Detailed data quality analysis across 6 dimensions</p>
+        <p class="page-subtitle" style="margin-top: -8px;">Detailed data quality analysis across 5 dimensions</p>
 
         <!-- Check 1: Vendor Matching -->
         <div class="deep-check">
@@ -2680,15 +2626,7 @@ async def ui_reconcile(aod_run_id: str):
             </div>
         </div>
 
-        <!-- Check 2: Candidate Row Check -->
-        <div class="deep-check">
-            <div class="panel" data-testid="check-candidate-rows">
-                {check_header("Candidate Row Integrity", cr.get("has_issues", False), cr_issue_count, "Flags candidates not connected or blocked from execution")}
-                {cr_content}
-            </div>
-        </div>
-
-        <!-- Check 3: Fabric Plane Comparison -->
+        <!-- Check 2: Fabric Plane Comparison -->
         <div class="deep-check">
             <div class="panel" data-testid="check-fabric-comparison">
                 {check_header("Fabric Plane Comparison", fc.get("has_issues", False), fc_mismatches, "Compares AOD-explicit fabric planes vs AAM-stored planes for this run")}
