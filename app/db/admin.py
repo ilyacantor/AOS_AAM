@@ -17,7 +17,9 @@ def reset_aod_state():
     """
     Clear candidate/fabric/SOR data so a fresh handoff can repopulate it.
 
-    Preserves the handoff log (audit trail) and collectors (infrastructure config).
+    Preserves collectors (infrastructure config) only.
+    The handoff log must be cleared because process_handoff() uses it for
+    idempotency checks — a stale log entry would short-circuit re-ingestion.
     """
     # Tables whose rows are repopulated on each handoff
     repopulated_tables = [
@@ -32,6 +34,7 @@ def reset_aod_state():
         "sor_declarations",
         "sor_dispositions",
         "aod_policy_manifest",
+        "aod_handoff_log",
     ]
 
     with get_db() as conn:
