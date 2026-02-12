@@ -100,8 +100,7 @@ async def receive_aod_handoff(raw_request: Request):
         "Receive endpoint: run_id=%s, candidates=%d, fabric_planes=%d, sors=%d",
         request.run_id, len(request.candidates), len(request.fabric_planes), len(request.sors),
     )
-    from ..main import preset_loader
-    return process_handoff(request, preset_loader=preset_loader)
+    return process_handoff(request)
 
 
 @router.post("/fetch")
@@ -113,8 +112,7 @@ async def fetch_aod_data():
 
     request = AODHandoffRequest(**payload)
     reset_aod_state()
-    from ..main import preset_loader
-    return process_handoff(request, preset_loader=preset_loader)
+    return process_handoff(request)
 
 
 @router.get("/debug/last-receive")

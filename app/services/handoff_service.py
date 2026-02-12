@@ -148,7 +148,6 @@ def link_candidate_to_plane(
     candidate,
     fabric_plane_map: dict[str, str],
     request_planes,
-    preset_loader=None,
 ) -> Optional[str]:
     """
     Link a candidate to a fabric plane.
@@ -156,9 +155,10 @@ def link_candidate_to_plane(
     Resolution order:
       1. connected_via_plane (AOD routing hint) → match by plane TYPE
       2. Direct vendor-name match (plane vendor == candidate vendor)
-      3. Preset primary plane (enterprise default routing)
 
-    Returns the plane_id or None.
+    If neither matches, returns None — the candidate stays UNMAPPED.
+    We do NOT guess a default plane from the preset; that was creating
+    the 654-into-API_GATEWAY pile-up.
     """
     # Build type → plane_id lookup from the stored planes
     type_to_plane_id: dict[str, str] = {}
@@ -180,15 +180,6 @@ def link_candidate_to_plane(
         plane_norm = plane_vendor.replace("_", " ")
         if plane_norm in vendor_norm or vendor_norm in plane_norm:
             return plane_id
-
-    # 3. Preset primary plane — if AOD sent planes AND the enterprise preset
-    #    has a primary plane type that matches one of them, use it.
-    #    This is the enterprise's default routing for SaaS apps.
-    if preset_loader and fabric_plane_map:
-        primary = preset_loader.get_routing_decision()  # e.g. FabricPlane.API_GATEWAY
-        primary_type = primary.value if primary else None
-        if primary_type and primary_type in type_to_plane_id:
-            return type_to_plane_id[primary_type]
 
     return None
 
@@ -273,7 +264,7 @@ def _serialize_candidate(candidate) -> dict:
     return candidate_dict
 
 
-def process_handoff(request: AODHandoffRequest, preset_loader=None) -> AODHandoffResponse:
+def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
     """
     Full AOD handoff orchestration: planes → candidates → log → response.
 
@@ -336,9 +327,9 @@ def process_handoff(request: AODHandoffRequest, preset_loader=None) -> AODHandof
                 ))
                 continue
 
-            # Link to fabric plane (uses preset primary plane as last resort)
+            # Link to fabric plane (AOD hint or vendor-name match only)
             fabric_plane_id = link_candidate_to_plane(
-                candidate, fabric_plane_map, request.fabric_planes, preset_loader
+                candidate, fabric_plane_map, request.fabric_planes
             )
             if fabric_plane_id:
                 candidate_dict["fabric_plane_id"] = fabric_plane_id
