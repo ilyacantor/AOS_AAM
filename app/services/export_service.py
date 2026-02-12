@@ -88,17 +88,27 @@ def build_reconciliation_csv(aod_run_id: str) -> tuple[str, str]:
             writer.writerow([v["vendor"], v.get("aod_plane_type", "-"), v.get("aam_plane_type", "-"), v["status"]])
         writer.writerow([])
 
-    # SOR comparison
+    # SOR ingestion/classification
     sc_sor = deep.get("sor_comparison", {})
-    sor_vendors = sc_sor.get("vendors", [])
+    sor_items = sc_sor.get("line_items", [])
     has_aod_sor = sc_sor.get("has_aod_data", False)
-    if sor_vendors:
-        writer.writerow(["--- SOR VENDOR COMPARISON ---"])
-        if not has_aod_sor:
-            writer.writerow(["NOTE: AOD SOR data not stored for this run."])
-        writer.writerow(["Vendor", "AOD Category", "AAM Pipe Count", "Status"])
-        for v in sor_vendors:
-            writer.writerow([v["vendor"], v.get("aod_category", "-"), v.get("aam_pipe_count", 0), v["status"]])
+    if sor_items:
+        writer.writerow(["--- SOR INGESTION & CLASSIFICATION ---"])
+        writer.writerow([f"Accuracy: {sc_sor.get('ingestion_accuracy', 0)}%",
+                         f"Matched: {sc_sor.get('matched', 0)}",
+                         f"Mismatches: {sc_sor.get('category_mismatches', 0)}",
+                         f"Missing: {sc_sor.get('missing', 0)}"])
+        writer.writerow(["Source", "Domain", "Vendor", "Expected Category", "AAM Category", "Candidates", "Verdict"])
+        for item in sor_items:
+            writer.writerow([
+                item.get("source", ""),
+                item.get("domain", ""),
+                item["vendor"],
+                item.get("expected_category", "-"),
+                item.get("aam_category", "-"),
+                item.get("aam_count", 0),
+                item["verdict"],
+            ])
         writer.writerow([])
 
     # Schema completeness

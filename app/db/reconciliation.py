@@ -296,86 +296,169 @@ def get_aod_reconciliation(aod_run_id: str) -> dict:
             "aam_vendors": aam_by_type.get(pt, []),
         })
     
-    # ===== DEEP CHECK 3b: SOR Vendor Comparison (AOD vs AAM) =====
-    # AOD side: SOR vendors from what AOD told us (handoff log), grouped by category
-    aod_sor_by_category = {}
-    aod_sor_all = {}  # vendor_lower -> {vendor, category, count}
-    for s in aod_sor_vendors_raw:
-        cat = s.get("category", "unknown")
-        vendor = s.get("vendor", "unknown")
-        if cat not in aod_sor_by_category:
-            aod_sor_by_category[cat] = []
-        aod_sor_by_category[cat].append({"vendor": vendor, "count": s.get("count", 0)})
-        aod_sor_all[vendor.lower()] = {"vendor": vendor, "category": cat, "count": s.get("count", 0)}
-    
-    # AAM side: vendors from declared_pipes (what AAM has actually cataloged into pipes)
-    # These represent AAM's processed output, not raw AOD input
+    # ===== DEEP CHECK 3b: SOR Line-Item Ingestion/Classification =====
+    # Compare each SOR declaration (from Farm via AOD) against actual AAM candidates.
+    # The question: did AAM correctly ingest and classify each SOR vendor?
+
+    # 1. Get authoritative SOR declarations stored from Farm
     cursor.execute("""
-        SELECT DISTINCT LOWER(COALESCE(source_system, 'unknown')) as vendor,
+        SELECT sor_id, domain, vendor, category, confidence, source
+        FROM sor_declarations
+        WHERE aod_run_id = ?
+        ORDER BY domain, vendor
+    """, (aod_run_id,))
+    farm_sors = cursor.fetchall()
+
+    # 2. Also build SOR expectations from AOD handoff log (aod_sor_vendors)
+    aod_sor_all = {}
+    for s in aod_sor_vendors_raw:
+        vendor = s.get("vendor", "unknown")
+        aod_sor_all[vendor.lower()] = {
+            "vendor": vendor,
+            "category": s.get("category", "unknown"),
+            "count": s.get("count", 0),
+            "domain": s.get("domain", ""),
+            "authoritative": s.get("authoritative", False),
+        }
+
+    # 3. Get AAM candidate data grouped by vendor for comparison
+    cursor.execute("""
+        SELECT LOWER(COALESCE(vendor_name, 'unknown')) as vendor_key,
+               vendor_name, 
+               LOWER(COALESCE(category, 'unknown')) as cat,
                COUNT(*) as cnt
-        FROM declared_pipes
-        GROUP BY vendor
-        ORDER BY vendor
-    """)
-    aam_pipe_vendors = cursor.fetchall()
-    aam_sor_all = {}  # vendor_lower -> {vendor, pipe_count}
-    for row in aam_pipe_vendors:
-        if row[0] and row[0] != 'unknown':
-            aam_sor_all[row[0]] = {"vendor": row[0], "count": row[1]}
-    
-    # Global SOR vendor comparison
-    aod_sor_keys = set(aod_sor_all.keys())
-    aam_sor_keys = set(aam_sor_all.keys())
-    sor_only_in_aod = aod_sor_keys - aam_sor_keys
-    sor_only_in_aam = aam_sor_keys - aod_sor_keys
-    sor_in_both = aod_sor_keys & aam_sor_keys
-    
-    # Build per-vendor SOR comparison
-    sor_vendors = []
-    for vk in sorted(aod_sor_keys | aam_sor_keys):
-        aod_info = aod_sor_all.get(vk)
-        aam_info = aam_sor_all.get(vk)
-        vendor_display = (aod_info or aam_info)["vendor"]
-        
-        if vk in sor_in_both:
-            status = "match"
-        elif vk in sor_only_in_aod:
-            status = "only_aod"
+        FROM connection_candidates
+        WHERE aod_run_id = ?
+        GROUP BY vendor_key, cat
+        ORDER BY vendor_key
+    """, (aod_run_id,))
+    aam_candidates_by_vendor = {}
+    for row in cursor.fetchall():
+        vk = row[0]
+        if vk not in aam_candidates_by_vendor:
+            aam_candidates_by_vendor[vk] = {
+                "vendor_name": row[1],
+                "categories": {},
+                "total": 0,
+            }
+        aam_candidates_by_vendor[vk]["categories"][row[2]] = row[3]
+        aam_candidates_by_vendor[vk]["total"] += row[3]
+
+    # 4. Build line-item comparison for each SOR
+    sor_line_items = []
+    sor_matched = 0
+    sor_category_mismatches = 0
+    sor_missing = 0
+
+    # Track which SOR vendors we've checked (combine Farm declarations + AOD SOR summary)
+    checked_vendors = set()
+
+    # First pass: Farm authoritative SOR declarations (highest priority)
+    for row in farm_sors:
+        sor_id, domain, vendor, expected_cat, confidence, source = row
+        vk = vendor.lower()
+        checked_vendors.add(vk)
+
+        aam_data = aam_candidates_by_vendor.get(vk)
+        if not aam_data:
+            sor_line_items.append({
+                "domain": domain,
+                "vendor": vendor,
+                "expected_category": expected_cat.lower() if expected_cat else "",
+                "confidence": confidence,
+                "source": source or "farm",
+                "ingested": False,
+                "aam_category": None,
+                "aam_count": 0,
+                "category_match": False,
+                "verdict": "missing",
+            })
+            sor_missing += 1
+            continue
+
+        aam_cats = aam_data["categories"]
+        aam_primary_cat = max(aam_cats, key=aam_cats.get) if aam_cats else "unknown"
+        expected_lower = expected_cat.lower() if expected_cat else ""
+
+        cat_match = expected_lower == aam_primary_cat or expected_lower in aam_cats
+
+        if cat_match:
+            verdict = "ok"
+            sor_matched += 1
         else:
-            status = "only_aam"
-        
-        sor_vendors.append({
-            "vendor": vendor_display,
-            "aod_category": aod_info["category"] if aod_info else None,
-            "aod_count": aod_info["count"] if aod_info else 0,
-            "aam_pipe_count": aam_info["count"] if aam_info else 0,
-            "status": status
+            verdict = "category_mismatch"
+            sor_category_mismatches += 1
+
+        sor_line_items.append({
+            "domain": domain,
+            "vendor": vendor,
+            "expected_category": expected_lower,
+            "confidence": confidence,
+            "source": source or "farm",
+            "ingested": True,
+            "aam_category": aam_primary_cat,
+            "aam_all_categories": dict(aam_cats),
+            "aam_count": aam_data["total"],
+            "category_match": cat_match,
+            "verdict": verdict,
         })
-    
-    sor_mismatches = len(sor_only_in_aod) + len(sor_only_in_aam)
-    
-    # Build per-category breakdown for AOD side
-    sor_comparison = []
-    for cat in sorted(aod_sor_by_category.keys()):
-        aod_vendors = aod_sor_by_category[cat]
-        # Find which of these vendors AAM has pipes for
-        cat_matched = []
-        cat_missing = []
-        for v in aod_vendors:
-            if v["vendor"].lower() in aam_sor_keys:
-                cat_matched.append(v["vendor"])
-            else:
-                cat_missing.append(v["vendor"])
-        sor_comparison.append({
-            "category": cat,
-            "aod_vendors": aod_vendors,
-            "matched_in_aam": cat_matched,
-            "missing_in_aam": cat_missing,
-            "is_match": len(cat_missing) == 0,
-            "vendor_count": len(aod_vendors)
+
+    # Second pass: AOD SOR vendors not already covered by Farm declarations
+    for vk, aod_info in sorted(aod_sor_all.items()):
+        if vk in checked_vendors:
+            continue
+        checked_vendors.add(vk)
+
+        aam_data = aam_candidates_by_vendor.get(vk)
+        expected_cat = aod_info["category"]
+
+        if not aam_data:
+            sor_line_items.append({
+                "domain": aod_info.get("domain", ""),
+                "vendor": aod_info["vendor"],
+                "expected_category": expected_cat,
+                "confidence": "inferred",
+                "source": "aod_candidate",
+                "ingested": False,
+                "aam_category": None,
+                "aam_count": 0,
+                "category_match": False,
+                "verdict": "missing",
+            })
+            sor_missing += 1
+            continue
+
+        aam_cats = aam_data["categories"]
+        aam_primary_cat = max(aam_cats, key=aam_cats.get) if aam_cats else "unknown"
+        cat_match = expected_cat == aam_primary_cat or expected_cat in aam_cats
+
+        if cat_match:
+            verdict = "ok"
+            sor_matched += 1
+        else:
+            verdict = "category_mismatch"
+            sor_category_mismatches += 1
+
+        sor_line_items.append({
+            "domain": aod_info.get("domain", ""),
+            "vendor": aod_info["vendor"],
+            "expected_category": expected_cat,
+            "confidence": "inferred",
+            "source": "aod_candidate",
+            "ingested": True,
+            "aam_category": aam_primary_cat,
+            "aam_all_categories": dict(aam_cats),
+            "aam_count": aam_data["total"],
+            "category_match": cat_match,
+            "verdict": verdict,
         })
-    
-    has_aod_sor_data = len(aod_sor_vendors_raw) > 0
+
+    total_sors = len(sor_line_items)
+    has_aod_sor_data = total_sors > 0
+    sor_mismatches = sor_category_mismatches + sor_missing
+
+    all_ok = total_sors > 0 and sor_mismatches == 0
+    ingestion_accuracy = round((sor_matched / total_sors) * 100, 1) if total_sors > 0 else 0
     
     # ===== DEEP CHECK 4: Schema Completeness =====
     # Find candidates missing key fields
@@ -470,7 +553,7 @@ def get_aod_reconciliation(aod_run_id: str) -> dict:
     # Issues = reconciliation errors (AAM didn't store what AOD sent correctly)
     # NOT data quality observations (AOD sent incomplete data - that's informational)
     real_fabric_issues = fabric_mismatches if has_aod_fabric_data else 0
-    real_sor_issues = sor_mismatches if len(aam_sor_all) > 0 else 0
+    real_sor_issues = sor_mismatches if has_aod_sor_data else 0
     issues_count = (
         len(vendor_case_duplicates) +
         real_fabric_issues +
@@ -528,16 +611,16 @@ def get_aod_reconciliation(aod_run_id: str) -> dict:
                 "has_issues": real_fabric_issues > 0
             },
             "sor_comparison": {
-                "vendors": sor_vendors,
-                "by_category": sor_comparison,
-                "only_in_aod": [aod_sor_all[k]["vendor"] for k in sorted(sor_only_in_aod)],
-                "only_in_aam": [aam_sor_all[k]["vendor"] for k in sorted(sor_only_in_aam)],
-                "in_both": [aod_sor_all[k]["vendor"] for k in sorted(sor_in_both)] if sor_in_both else [],
-                "total_categories": len(sor_comparison),
+                "line_items": sor_line_items,
+                "total_sors": total_sors,
+                "matched": sor_matched,
+                "category_mismatches": sor_category_mismatches,
+                "missing": sor_missing,
                 "mismatches": sor_mismatches,
+                "ingestion_accuracy": ingestion_accuracy,
+                "all_ok": all_ok,
                 "has_aod_data": has_aod_sor_data,
-                "has_issues": real_sor_issues > 0,
-                "inference_pending": len(aam_sor_all) == 0 and has_aod_sor_data
+                "has_issues": sor_mismatches > 0,
             },
             "schema_completeness": {
                 "total_candidates": total_for_completeness,

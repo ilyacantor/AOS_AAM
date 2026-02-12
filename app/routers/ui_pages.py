@@ -2322,94 +2322,119 @@ async def ui_reconcile(aod_run_id: str):
         if not fc_vendors:
             fc_content += '<div style="color: var(--slate-500); font-size: 0.85rem;">No fabric planes registered.</div>'
     
-    # --- Deep Check 3b: SOR Vendor Comparison ---
+    # --- Deep Check 3b: SOR Line-Item Ingestion/Classification ---
     sc_sor = deep.get("sor_comparison", {})
-    sor_vendors_list = sc_sor.get("vendors", [])
-    sor_by_cat = sc_sor.get("by_category", [])
+    sor_line_items = sc_sor.get("line_items", [])
     sor_mismatches = sc_sor.get("mismatches", 0)
     has_aod_sor = sc_sor.get("has_aod_data", False)
-    sor_only_aod = sc_sor.get("only_in_aod", [])
-    sor_only_aam = sc_sor.get("only_in_aam", [])
-    sor_in_both = sc_sor.get("in_both", [])
+    sor_all_ok = sc_sor.get("all_ok", False)
+    sor_accuracy = sc_sor.get("ingestion_accuracy", 0)
+    sor_total = sc_sor.get("total_sors", 0)
+    sor_matched_count = sc_sor.get("matched", 0)
+    sor_cat_mismatches = sc_sor.get("category_mismatches", 0)
+    sor_missing_count = sc_sor.get("missing", 0)
+    
+    cat_labels_sor = {
+        "crm": "CRM", "erp": "ERP", "hcm": "HCM", "idp": "Identity", "itsm": "ITSM",
+        "saas": "SaaS", "hr": "HR", "finance": "Finance", "cmdb": "CMDB", "identity": "Identity",
+    }
     
     sor_content = ""
-    inference_pending = sc_sor.get("inference_pending", False)
     
     if not has_aod_sor:
-        sor_content += '<div style="color: var(--slate-400); font-size: 0.85rem; margin-bottom: 12px; padding: 8px; background: rgba(255,255,255,0.02); border-radius: 6px;">AOD SOR data not stored for this run. Future handoffs will capture AOD SOR vendors for side-by-side comparison.</div>'
-    
-    if inference_pending:
-        sor_content += '<div style="color: var(--cyan-400); font-size: 0.85rem; margin-bottom: 12px; padding: 8px; background: rgba(34,211,238,0.05); border: 1px solid rgba(34,211,238,0.2); border-radius: 6px;">Inference has not been run yet. AAM has no declared pipes to compare against AOD SOR vendors. Run inference to populate this comparison.</div>'
-    
-    if has_aod_sor and sor_vendors_list:
-        cat_labels_sor = {
-            "crm": "CRM", "erp": "ERP", "hcm": "HCM", "idp": "Identity", "itsm": "ITSM"
-        }
+        sor_content += '<div style="color: var(--slate-400); font-size: 0.85rem; margin-bottom: 12px; padding: 8px; background: rgba(255,255,255,0.02); border-radius: 6px;">No SOR declarations found for this run. SORs are sent by Farm via AOD handoff.</div>'
+    else:
+        # Accuracy bar
+        acc_color = "var(--green-400)" if sor_accuracy >= 80 else ("var(--orange-400)" if sor_accuracy >= 50 else "var(--red-400)")
+        verdict_text = "All SORs ingested and classified correctly" if sor_all_ok else f"{sor_matched_count} of {sor_total} SORs verified"
+        verdict_color = "var(--green-400)" if sor_all_ok else "var(--orange-400)"
         
-        # Global SOR vendor comparison table
-        sor_content += """
-        <div style="margin-bottom: 12px;">
-            <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
-                <thead>
-                    <tr style="border-bottom: 1px solid rgba(255,255,255,0.1);">
-                        <th style="text-align: left; padding: 8px; color: var(--slate-400); font-weight: 500;">Vendor</th>
-                        <th style="text-align: center; padding: 8px; color: #a5b4fc; font-weight: 500;">AOD Category</th>
-                        <th style="text-align: center; padding: 8px; color: #86efac; font-weight: 500;">AAM Pipes</th>
-                        <th style="text-align: center; padding: 8px; color: var(--slate-400); font-weight: 500;">Status</th>
-                    </tr>
-                </thead>
-                <tbody>
-        """
-        for v in sor_vendors_list:
-            vendor_name = v["vendor"]
-            aod_cat = cat_labels_sor.get(v.get("aod_category", ""), v.get("aod_category") or "-")
-            aam_pipes = v.get("aam_pipe_count", 0)
-            status = v["status"]
-            
-            if status == "match":
-                status_html = f'<span style="color: var(--green-400);">&#10003; {aam_pipes} pipe{"s" if aam_pipes != 1 else ""}</span>'
-                row_bg = "rgba(34,197,94,0.03)"
-            elif status == "only_aod":
-                status_html = '<span style="color: #fca5a5;">No pipes in AAM</span>'
-                row_bg = "rgba(248,113,113,0.03)"
-            else:
-                status_html = f'<span style="color: #93c5fd;">{aam_pipes} pipe{"s" if aam_pipes != 1 else ""} (not in AOD)</span>'
-                row_bg = "rgba(147,197,253,0.03)"
-            
-            aod_cell = f'<span style="color: #a5b4fc;">{aod_cat}</span>' if v.get("aod_category") else '<span style="color: var(--slate-600);">-</span>'
-            
-            sor_content += f"""
-                    <tr style="border-bottom: 1px solid rgba(255,255,255,0.05); background: {row_bg};">
-                        <td style="padding: 8px; font-weight: 500; color: #e2e8f0;">{vendor_name}</td>
-                        <td style="padding: 8px; text-align: center;">{aod_cell}</td>
-                        <td style="padding: 8px; text-align: center; color: #86efac;">{aam_pipes if aam_pipes > 0 else '<span style="color: var(--slate-600);">0</span>'}</td>
-                        <td style="padding: 8px; text-align: center; font-size: 0.8rem;">{status_html}</td>
-                    </tr>
-            """
-        
-        sor_content += """
-                </tbody>
-            </table>
+        sor_content += f"""
+        <div style="margin-bottom: 16px; padding: 12px; background: {'rgba(34,197,94,0.06)' if sor_all_ok else 'rgba(251,191,36,0.06)'}; border: 1px solid {'rgba(34,197,94,0.2)' if sor_all_ok else 'rgba(251,191,36,0.2)'}; border-radius: 8px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;">
+                <div>
+                    <span style="color: {verdict_color}; font-size: 1.1rem; margin-right: 6px;">{'&#10003;' if sor_all_ok else '&#9888;'}</span>
+                    <span style="font-weight: 600; color: {verdict_color};">{verdict_text}</span>
+                </div>
+                <div style="display: flex; gap: 16px; font-size: 0.8rem;">
+                    <span style="color: var(--green-400);">{sor_matched_count} OK</span>
+                    {'<span style="color: var(--orange-400);">' + str(sor_cat_mismatches) + ' Category Mismatch</span>' if sor_cat_mismatches > 0 else ''}
+                    {'<span style="color: var(--red-400);">' + str(sor_missing_count) + ' Not Ingested</span>' if sor_missing_count > 0 else ''}
+                </div>
+            </div>
+            <div style="margin-top: 8px;">
+                <div style="height: 6px; background: var(--slate-800); border-radius: 3px; overflow: hidden;">
+                    <div style="height: 100%; width: {sor_accuracy}%; background: {acc_color}; border-radius: 3px;"></div>
+                </div>
+                <div style="font-size: 0.75rem; color: var(--slate-400); margin-top: 4px;">Ingestion accuracy: {sor_accuracy}%</div>
+            </div>
         </div>
         """
         
-        # Summary deltas
-        if sor_only_aod:
-            sor_content += '<div style="margin-top: 8px; padding: 8px; background: rgba(248,113,113,0.05); border-radius: 6px; border-left: 3px solid rgba(248,113,113,0.5);">'
-            sor_content += '<div style="font-size: 0.75rem; color: #fca5a5; margin-bottom: 4px; font-weight: 600;">AOD found these SOR vendors but AAM has no pipes for them</div>'
-            sor_content += " ".join([vendor_badge(v, "mismatch") for v in sor_only_aod])
-            sor_content += '</div>'
-        if sor_only_aam:
-            sor_content += '<div style="margin-top: 8px; padding: 8px; background: rgba(147,197,253,0.05); border-radius: 6px; border-left: 3px solid rgba(147,197,253,0.5);">'
-            sor_content += '<div style="font-size: 0.75rem; color: #93c5fd; margin-bottom: 4px; font-weight: 600;">AAM has pipes for vendors AOD did not report</div>'
-            sor_content += " ".join([vendor_badge(v, "aod") for v in sor_only_aam])
-            sor_content += '</div>'
-    elif not has_aod_sor and sor_vendors_list:
-        # No AOD data, show AAM's declared pipe vendors
-        for v in sor_vendors_list:
-            sor_content += vendor_badge(f'{v["vendor"]} ({v["aam_pipe_count"]} pipes)') + " "
-    elif not sor_vendors_list:
-        sor_content += '<div style="color: var(--slate-500); font-size: 0.85rem;">No SOR vendors to compare.</div>'
+        # Line-item table
+        sor_content += """
+        <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+            <thead>
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.1);">
+                    <th style="text-align: left; padding: 8px; color: var(--slate-400); font-weight: 500;">Source</th>
+                    <th style="text-align: left; padding: 8px; color: var(--slate-400); font-weight: 500;">Domain</th>
+                    <th style="text-align: left; padding: 8px; color: var(--slate-400); font-weight: 500;">Vendor</th>
+                    <th style="text-align: center; padding: 8px; color: #a5b4fc; font-weight: 500;">Expected</th>
+                    <th style="text-align: center; padding: 8px; color: #86efac; font-weight: 500;">AAM Found</th>
+                    <th style="text-align: center; padding: 8px; color: var(--slate-400); font-weight: 500;">Candidates</th>
+                    <th style="text-align: center; padding: 8px; color: var(--slate-400); font-weight: 500;">Verdict</th>
+                </tr>
+            </thead>
+            <tbody>
+        """
+        
+        for item in sor_line_items:
+            vendor_name = item["vendor"]
+            domain = item.get("domain", "") or ""
+            expected = cat_labels_sor.get(item["expected_category"], item["expected_category"].upper() if item["expected_category"] else "-")
+            aam_cat = cat_labels_sor.get(item.get("aam_category", ""), (item.get("aam_category") or "-").upper())
+            aam_count = item.get("aam_count", 0)
+            verdict = item["verdict"]
+            source = item.get("source", "")
+            
+            source_badge = ""
+            if source == "farm":
+                source_badge = '<span style="background: rgba(251,191,36,0.15); color: #fbbf24; padding: 2px 6px; border-radius: 3px; font-size: 0.7rem; font-weight: 600;">Farm</span>'
+            else:
+                source_badge = '<span style="background: rgba(99,102,241,0.15); color: #a5b4fc; padding: 2px 6px; border-radius: 3px; font-size: 0.7rem; font-weight: 500;">AOD</span>'
+            
+            if verdict == "ok":
+                verdict_html = '<span style="color: var(--green-400);">&#10003; OK</span>'
+                row_bg = "rgba(34,197,94,0.03)"
+                aam_cat_html = f'<span style="color: #86efac;">{aam_cat}</span>'
+            elif verdict == "category_mismatch":
+                verdict_html = '<span style="color: var(--orange-400);">&#9888; Category</span>'
+                row_bg = "rgba(251,191,36,0.03)"
+                aam_cat_html = f'<span style="color: #fcd34d;">{aam_cat}</span>'
+            else:
+                verdict_html = '<span style="color: var(--red-400);">&#10007; Missing</span>'
+                row_bg = "rgba(248,113,113,0.03)"
+                aam_cat_html = '<span style="color: var(--slate-600);">-</span>'
+            
+            expected_html = f'<span style="color: #a5b4fc;">{expected}</span>'
+            count_html = f'<span style="color: #86efac;">{aam_count}</span>' if aam_count > 0 else '<span style="color: var(--slate-600);">0</span>'
+            
+            sor_content += f"""
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.05); background: {row_bg};">
+                    <td style="padding: 8px;">{source_badge}</td>
+                    <td style="padding: 8px; color: #cbd5e1; font-size: 0.8rem;">{domain}</td>
+                    <td style="padding: 8px; font-weight: 500; color: #e2e8f0;">{vendor_name}</td>
+                    <td style="padding: 8px; text-align: center;">{expected_html}</td>
+                    <td style="padding: 8px; text-align: center;">{aam_cat_html}</td>
+                    <td style="padding: 8px; text-align: center;">{count_html}</td>
+                    <td style="padding: 8px; text-align: center; font-size: 0.8rem;">{verdict_html}</td>
+                </tr>
+            """
+        
+        sor_content += """
+            </tbody>
+        </table>
+        """
     
     # --- Deep Check 4: Schema Completeness ---
     sc = deep.get("schema_completeness", {})
@@ -2671,10 +2696,10 @@ async def ui_reconcile(aod_run_id: str):
             </div>
         </div>
 
-        <!-- Check 3b: SOR Vendor Comparison -->
+        <!-- Check 3b: SOR Ingestion/Classification -->
         <div class="deep-check">
             <div class="panel" data-testid="check-sor-comparison">
-                {check_header("SOR Vendor Comparison", sc_sor.get("has_issues", False), sor_mismatches, "Compares SOR vendors by category between AOD and AAM")}
+                {check_header("SOR Ingestion &amp; Classification", sc_sor.get("has_issues", False), sor_mismatches, "Line-item check: each SOR declaration matched against AAM candidates for vendor ingestion and category accuracy")}
                 {sor_content}
             </div>
         </div>
