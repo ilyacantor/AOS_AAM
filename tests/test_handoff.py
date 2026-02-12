@@ -95,3 +95,40 @@ def test_handoff_creates_fabric_planes_for_sors(db):
     assert len(planes) >= 1
     plane_vendors = [p["vendor"] for p in planes]
     assert "ServiceNow" in plane_vendors
+
+
+def test_handoff_explicit_planes_linked_to_candidates(db):
+    """When AOD sends explicit fabric_planes, candidates are linked by category."""
+    from app.models import AODHandoffRequest, FabricPlaneSummary
+    from app.services.handoff_service import process_handoff
+    from app.db import get_fabric_planes, list_candidates
+
+    run_id = "planes-run-001"
+    request = AODHandoffRequest(
+        run_id=run_id,
+        snapshot_name="planes-snap",
+        handoff_timestamp=datetime.utcnow(),
+        candidates=[
+            _candidate("servicenow.com", "ServiceNow", "ServiceNow ITSM", "itsm", "sn1", run_id),
+        ],
+        fabric_planes=[
+            FabricPlaneSummary(plane_type="IPAAS", vendor="mulesoft", is_healthy=True),
+            FabricPlaneSummary(plane_type="API_GATEWAY", vendor="kong", is_healthy=True),
+            FabricPlaneSummary(plane_type="EVENT_BUS", vendor="eventbridge", is_healthy=True),
+            FabricPlaneSummary(plane_type="DATA_WAREHOUSE", vendor="redshift", is_healthy=True),
+        ],
+    )
+
+    result = process_handoff(request)
+    assert result.candidates_accepted == 1
+
+    # All 4 explicit planes stored
+    planes = get_fabric_planes()
+    assert len(planes) == 4
+    plane_vendors = {p["vendor"] for p in planes}
+    assert plane_vendors == {"mulesoft", "kong", "eventbridge", "redshift"}
+
+    # ServiceNow (itsm) should be linked to the IPAAS plane (mulesoft)
+    candidates = list_candidates()
+    sn = [c for c in candidates if c["asset_key"] == "servicenow.com"][0]
+    assert sn["fabric_plane_id"] == "IPAAS:mulesoft"

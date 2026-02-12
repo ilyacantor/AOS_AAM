@@ -136,20 +136,12 @@ def link_candidate_to_plane(
         if plane_vendor in vendor_lower or vendor_lower in plane_vendor:
             return plane_id
 
-    # Fallback: infer from category
+    # Fallback: infer from category using shared constant mapping
     if fabric_plane_map and request_planes:
-        category_lower = candidate.category.lower()
-        if "data" in category_lower or "warehouse" in category_lower:
-            target_type = "warehouse"
-        elif "event" in category_lower or "stream" in category_lower:
-            target_type = "event_bus"
-        elif "gateway" in category_lower or "api" in category_lower:
-            target_type = "api_gateway"
-        else:
-            target_type = "ipaas"
+        target_type = infer_plane_type_from_category(candidate.category or "")
 
         for plane in request_planes:
-            if plane.plane_type == target_type:
+            if plane.plane_type.upper() == target_type.upper():
                 pid = fabric_plane_map.get(plane.vendor.lower())
                 if pid:
                     return pid
