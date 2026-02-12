@@ -136,13 +136,13 @@ def test_handoff_explicit_planes_stored_and_vendor_linked(db):
     assert sn["fabric_plane_id"] is None
 
 
-def test_handoff_auto_detects_fabric_planes_from_display_names(db):
-    """When AOD omits fabric_planes, AAM infers them from candidate display names only."""
+def test_handoff_no_planes_when_aod_sends_none(db):
+    """When AOD omits fabric_planes, AAM stores zero planes — AOD owns detection."""
     from app.models import AODHandoffRequest
     from app.services.handoff_service import process_handoff
     from app.db import get_fabric_planes
 
-    run_id = "display-hint-run-001"
+    run_id = "no-planes-run-001"
     request = AODHandoffRequest(
         run_id=run_id,
         snapshot_name="hint-snap",
@@ -159,18 +159,7 @@ def test_handoff_auto_detects_fabric_planes_from_display_names(db):
     result = process_handoff(request)
     assert result.candidates_accepted == 4
 
+    # AAM does NOT infer planes — display names, categories, vendor identity
+    # are all irrelevant.  No AOD planes → no AAM planes.
     planes = get_fabric_planes()
-    plane_types = {p["plane_type"] for p in planes}
-    plane_vendors = {p["vendor"] for p in planes}
-
-    # 3 fabric infra planes detected from display name hints
-    assert "IPAAS" in plane_types
-    assert "API_GATEWAY" in plane_types
-    assert "DATA_WAREHOUSE" in plane_types
-    assert "MuleSoft" in plane_vendors
-    assert "Kong" in plane_vendors
-    assert "AWS Redshift" in plane_vendors
-
-    # ServiceNow is NOT a fabric plane — "itsm" category doesn't imply infrastructure
-    assert "ServiceNow" not in plane_vendors
-    assert len(planes) == 3
+    assert len(planes) == 0

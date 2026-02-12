@@ -2202,7 +2202,7 @@ async def ui_reconcile(aod_run_id: str):
     
     fc_content = ""
     if not has_aod_fabric:
-        fc_content += '<div style="color: #fcd34d; font-size: 0.85rem; margin-bottom: 12px; padding: 8px; background: rgba(251,191,36,0.05); border: 1px solid rgba(251,191,36,0.2); border-radius: 6px;">AOD did not send explicit fabric planes. The planes below were auto-inferred by AAM from candidate data. This comparison cannot be validated without AOD-declared planes.</div>'
+        fc_content += '<div style="color: #fcd34d; font-size: 0.85rem; margin-bottom: 12px; padding: 8px; background: rgba(251,191,36,0.05); border: 1px solid rgba(251,191,36,0.2); border-radius: 6px;">AOD did not send fabric planes in this handoff. Fabric-plane comparison is unavailable until AOD provides plane declarations.</div>'
     
     if has_aod_fabric and fc_vendors:
         # Global vendor comparison table

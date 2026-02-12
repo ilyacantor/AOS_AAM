@@ -14,7 +14,7 @@ from typing import Optional
 
 from ..config import settings
 from ..logger import get_logger
-from ..constants import SOR_CATEGORIES, DISPLAY_NAME_PLANE_HINTS, PLANE_TYPE_ALIASES
+from ..constants import SOR_CATEGORIES, PLANE_TYPE_ALIASES
 from ..db import (
     store_fabric_plane,
     store_sor_declaration,
@@ -120,7 +120,11 @@ def load_aod_payload() -> Optional[dict]:
 
 def resolve_fabric_planes(request: AODHandoffRequest) -> tuple[dict, int]:
     """
-    Store explicit planes from AOD or auto-create from SOR categories.
+    Store explicit fabric planes that AOD sent.
+
+    If AOD didn't send fabric_planes, there are no planes — AAM does NOT
+    infer infrastructure from candidate metadata.  AOD owns fabric-plane
+    detection; AAM only allocates assets to planes AOD discovered.
 
     Returns (fabric_plane_map, planes_stored) where fabric_plane_map
     maps vendor-lowercase → plane_id.
@@ -128,52 +132,15 @@ def resolve_fabric_planes(request: AODHandoffRequest) -> tuple[dict, int]:
     fabric_plane_map: dict[str, str] = {}
     fabric_planes_stored = 0
 
-    if request.fabric_planes:
-        for plane in request.fabric_planes:
-            try:
-                plane_dict = plane.model_dump()
-                result = store_fabric_plane(plane_dict, request.run_id)
-                plane_id = result["plane_id"]
-                fabric_plane_map[plane.vendor.lower()] = plane_id
-                fabric_planes_stored += 1
-            except Exception as e:
-                _log.error("Failed to store fabric plane %s: %s", plane.vendor, e)
-    else:
-        # Auto-create from candidate metadata (display names + SOR categories)
-        seen_vendors: set[str] = set()
-        seen_plane_types: set[str] = set()
-
-        # Pass 1: detect fabric-infrastructure vendors from display_name hints
-        # e.g. "MuleSoft - Ipaas" → IPAAS, "Kong - Api Gateway" → API_GATEWAY
-        for candidate in request.candidates:
-            if not candidate.vendor_name:
-                continue
-            display = (candidate.display_name or "").lower()
-            for hint, plane_type in DISPLAY_NAME_PLANE_HINTS.items():
-                if hint in display and plane_type not in seen_plane_types:
-                    vendor_key = candidate.vendor_name.lower()
-                    seen_vendors.add(vendor_key)
-                    seen_plane_types.add(plane_type)
-                    plane_dict = {
-                        "plane_type": plane_type,
-                        "vendor": candidate.vendor_name,
-                        "display_name": candidate.display_name,
-                        "domain": hint.replace(" ", "_"),
-                        "managed_asset_count": 1,
-                    }
-                    try:
-                        result = store_fabric_plane(plane_dict, request.run_id)
-                        fabric_plane_map[vendor_key] = result["plane_id"]
-                        fabric_planes_stored += 1
-                        _log.info("Auto-created fabric plane from display hint: %s (%s)", candidate.vendor_name, plane_type)
-                    except Exception as e:
-                        _log.error("Failed to auto-create fabric plane for %s: %s", candidate.vendor_name, e)
-                    break
-
-        # NOTE: We intentionally do NOT create fabric planes from SOR categories.
-        # Knowing a vendor is "CRM" or "ERP" tells you nothing about which
-        # integration infrastructure the enterprise deployed.  Only AOD-discovered
-        # infrastructure evidence or explicit operator declarations belong here.
+    for plane in request.fabric_planes or []:
+        try:
+            plane_dict = plane.model_dump()
+            result = store_fabric_plane(plane_dict, request.run_id)
+            plane_id = result["plane_id"]
+            fabric_plane_map[plane.vendor.lower()] = plane_id
+            fabric_planes_stored += 1
+        except Exception as e:
+            _log.error("Failed to store fabric plane %s: %s", plane.vendor, e)
 
     return fabric_plane_map, fabric_planes_stored
 
