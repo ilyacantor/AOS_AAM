@@ -29,9 +29,11 @@ def infer_plane_type_from_category(category: str) -> str:
 
 # Keywords in candidate display_name that signal a fabric-infrastructure vendor.
 # Used by resolve_fabric_planes() when AOD omits the fabric_planes array.
+# Order matters: first match wins per plane type.
 DISPLAY_NAME_PLANE_HINTS: dict[str, str] = {
     "ipaas": "IPAAS",
     "api gateway": "API_GATEWAY",
     "event bus": "EVENT_BUS",
+    "event hub": "EVENT_BUS",
     "data warehouse": "DATA_WAREHOUSE",
 }
