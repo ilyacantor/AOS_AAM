@@ -1479,10 +1479,10 @@ async def ui_topology():
         }}
         .legend-below {{
             display: flex;
-            gap: 12px;
+            gap: 16px;
             flex-wrap: wrap;
             margin-top: 12px;
-            padding: 8px 12px;
+            padding: 10px 16px;
             background: rgba(30, 41, 59, 0.6);
             border-radius: 6px;
             justify-content: center;
@@ -1490,20 +1490,20 @@ async def ui_topology():
         .legend-item {{
             display: flex;
             align-items: center;
-            gap: 5px;
-            font-size: 0.7rem;
+            gap: 6px;
+            font-size: 0.85rem;
             color: var(--slate-300);
         }}
         .legend-shape {{
-            width: 14px;
-            height: 14px;
+            width: 18px;
+            height: 18px;
             display: flex;
             align-items: center;
             justify-content: center;
         }}
         .legend-shape svg {{
-            width: 12px;
-            height: 12px;
+            width: 16px;
+            height: 16px;
         }}
         .node-details {{
             position: absolute;
