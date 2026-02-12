@@ -1594,7 +1594,9 @@ async def ui_topology():
             <button class="btn" id="physics-toggle" onclick="togglePhysics()">🔓 Unlock Positions</button>
         </div>
 
+        <div style="padding-bottom: 80px;">
         <div id="topology-container"></div>
+        </div>
 
         <div class="legend-below">
             <div class="legend-item">
