@@ -128,7 +128,12 @@ def _check_vendor_duplicates(cursor, aod_run_id: str) -> dict:
 # ---------------------------------------------------------------------------
 
 def _compare_fabric_planes(cursor, aod_run_id: str) -> dict:
-    """Compare fabric planes AOD explicitly sent vs what AAM stored."""
+    """Compare fabric planes AOD explicitly sent vs what AAM stored.
+
+    Also checks whether each stored plane has candidates linked to it.
+    A plane that exists but has 0 candidates is flagged as "match_empty"
+    so the operator knows the infrastructure is declared but unused.
+    """
     ALL_PLANE_TYPES = ["IPAAS", "API_GATEWAY", "EVENT_BUS", "DATA_WAREHOUSE"]
 
     # --- AOD side: explicit planes from handoff log ---
@@ -156,7 +161,7 @@ def _compare_fabric_planes(cursor, aod_run_id: str) -> dict:
 
     # --- AAM side: stored fabric planes ---
     cursor.execute("""
-        SELECT plane_type, vendor, display_name
+        SELECT plane_type, vendor, display_name, plane_id
         FROM fabric_planes WHERE aod_run_id = ?
         ORDER BY plane_type, vendor
     """, (aod_run_id,))
@@ -167,7 +172,17 @@ def _compare_fabric_planes(cursor, aod_run_id: str) -> dict:
             "vendor": v,
             "plane_type": (row[0] or "").upper(),
             "display_name": row[2],
+            "plane_id": row[3],
         }
+
+    # --- Candidate counts per plane ---
+    cursor.execute("""
+        SELECT fabric_plane_id, COUNT(*)
+        FROM connection_candidates
+        WHERE aod_run_id = ? AND fabric_plane_id IS NOT NULL
+        GROUP BY fabric_plane_id
+    """, (aod_run_id,))
+    candidates_per_plane = {row[0]: row[1] for row in cursor.fetchall()}
 
     has_aod_data = len(aod_fabric_planes_raw) > 0
     aod_keys = set(aod_vendor_map)
@@ -188,12 +203,18 @@ def _compare_fabric_planes(cursor, aod_run_id: str) -> dict:
         aam_info = aam_vendor_map.get(vk)
         vendor_display = (aod_info or aam_info)["vendor"]
 
+        # How many candidates are linked to this plane?
+        plane_id = aam_info["plane_id"] if aam_info else None
+        linked_count = candidates_per_plane.get(plane_id, 0) if plane_id else 0
+
         if has_aod_data:
             if vk in in_both:
                 status = "match"
                 if (aod_info["plane_type"] and aam_info["plane_type"]
                         and aod_info["plane_type"] != aam_info["plane_type"]):
                     status = "type_mismatch"
+                elif linked_count == 0:
+                    status = "match_empty"
             elif vk in only_aod:
                 status = "only_aod"
             else:
@@ -205,13 +226,14 @@ def _compare_fabric_planes(cursor, aod_run_id: str) -> dict:
             "vendor": vendor_display,
             "aod_plane_type": aod_info["plane_type"] if aod_info else None,
             "aam_plane_type": aam_info["plane_type"] if aam_info else None,
+            "linked_candidates": linked_count,
             "status": status,
         })
 
     mismatches = 0
     if has_aod_data:
         mismatches = len(only_aod) + len(only_aam)
-        mismatches += sum(1 for v in vendors if v["status"] == "type_mismatch")
+        mismatches += sum(1 for v in vendors if v["status"] in ("type_mismatch", "match_empty"))
 
     # Group by plane type
     aod_by_type: dict[str, list] = {}

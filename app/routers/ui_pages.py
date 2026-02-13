@@ -2224,6 +2224,7 @@ async def ui_reconcile(aod_run_id: str):
                         <th style="text-align: left; padding: 8px; color: var(--slate-400); font-weight: 500;">Vendor</th>
                         <th style="text-align: center; padding: 8px; color: #a5b4fc; font-weight: 500;">AOD Type</th>
                         <th style="text-align: center; padding: 8px; color: #86efac; font-weight: 500;">AAM Type</th>
+                        <th style="text-align: center; padding: 8px; color: var(--slate-400); font-weight: 500;">Linked</th>
                         <th style="text-align: center; padding: 8px; color: var(--slate-400); font-weight: 500;">Status</th>
                     </tr>
                 </thead>
@@ -2235,9 +2236,13 @@ async def ui_reconcile(aod_run_id: str):
             aam_type = plane_labels.get(v.get("aam_plane_type", ""), v.get("aam_plane_type") or "-")
             status = v["status"]
             
+            linked = v.get("linked_candidates", 0)
             if status == "match":
                 status_html = '<span style="color: var(--green-400);">&#10003; Match</span>'
                 row_bg = "rgba(34,197,94,0.03)"
+            elif status == "match_empty":
+                status_html = '<span style="color: #fcd34d;">&#9888; 0 candidates</span>'
+                row_bg = "rgba(251,191,36,0.03)"
             elif status == "type_mismatch":
                 status_html = '<span style="color: #fcd34d;">&#9888; Type differs</span>'
                 row_bg = "rgba(251,191,36,0.03)"
@@ -2247,15 +2252,17 @@ async def ui_reconcile(aod_run_id: str):
             else:
                 status_html = '<span style="color: #93c5fd;">Extra in AAM</span>'
                 row_bg = "rgba(147,197,253,0.03)"
-            
+
+            linked_color = "var(--green-400)" if linked > 0 else "#fca5a5"
             aod_cell = f'<span style="color: #a5b4fc;">{aod_type}</span>' if v.get("aod_plane_type") else '<span style="color: var(--slate-600);">-</span>'
             aam_cell = f'<span style="color: #86efac;">{aam_type}</span>' if v.get("aam_plane_type") else '<span style="color: var(--slate-600);">-</span>'
-            
+
             fc_content += f"""
                     <tr style="border-bottom: 1px solid rgba(255,255,255,0.05); background: {row_bg};">
                         <td style="padding: 8px; font-weight: 500; color: #e2e8f0;">{vendor_name}</td>
                         <td style="padding: 8px; text-align: center;">{aod_cell}</td>
                         <td style="padding: 8px; text-align: center;">{aam_cell}</td>
+                        <td style="padding: 8px; text-align: center; color: {linked_color}; font-weight: 600;">{linked}</td>
                         <td style="padding: 8px; text-align: center; font-size: 0.8rem;">{status_html}</td>
                     </tr>
             """
