@@ -2041,7 +2041,7 @@ async def ui_reconcile(aod_run_id: str):
     timestamp = data.get("handoff_timestamp", "")[:19] if data.get("handoff_timestamp") else "N/A"
     
     # Overall status
-    all_match = recon["candidates_match"] and recon["pipes_match"]
+    all_match = recon["candidates_match"]
     status_color = "var(--green-400)" if all_match else "var(--red-400)"
     status_icon = "&#10003;" if all_match else "&#10007;"
     status_text = "All Reconciled" if all_match else "Discrepancy Detected"
@@ -2121,7 +2121,7 @@ async def ui_reconcile(aod_run_id: str):
         </tr>
         """
     
-    checks_html = check_row("Candidates / Pipes", aod_sent["candidates_accepted"], aam["candidates"], recon["candidates_match"])
+    checks_html = check_row("AOD Candidates Stored", aod_sent["candidates_accepted"], aam.get("aod_origin_candidates", aam["candidates"]), recon["candidates_match"])
     
     discrepancy_html = ""
     if recon["discrepancy"] != 0:
@@ -2465,8 +2465,8 @@ async def ui_reconcile(aod_run_id: str):
     </div>
     """
     
-    aod_fields = {"vendor_name", "display_name", "category", "known_endpoints"}
-    enrichment_fields = {"preferred_modality", "connected_via_plane"}
+    aod_fields = {"vendor_name", "display_name", "category", "known_endpoints", "connected_via_plane"}
+    enrichment_fields = {"preferred_modality"}
     
     if sc_field_counts:
         field_labels = {
@@ -2706,7 +2706,7 @@ async def ui_reconcile(aod_run_id: str):
         <!-- Check 4: Schema Completeness -->
         <div class="deep-check">
             <div class="panel" data-testid="check-schema-completeness">
-                {check_header("Schema Completeness", False, 0, "AOD data quality overview (informational)")}
+                {check_header("Schema Completeness", sc.get("has_issues", False), sc.get("incomplete_count", 0) if sc.get("has_issues") else 0, "Checks for missing vendor_name, display_name, or category")}
                 {sc_content}
             </div>
         </div>

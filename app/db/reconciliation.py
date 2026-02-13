@@ -46,10 +46,15 @@ def _get_handoff_summary(cursor, aod_run_id: str) -> Optional[dict]:
     """, (aod_run_id, *sor_categories))
     sors_stored = cursor.fetchone()[0]
 
+    # Count linked candidates per plane type (not plane records, which is always 1)
     cursor.execute("""
-        SELECT plane_type, COUNT(*) FROM fabric_planes
-        WHERE aod_run_id = ? GROUP BY plane_type
-    """, (aod_run_id,))
+        SELECT fp.plane_type, COUNT(c.candidate_id)
+        FROM fabric_planes fp
+        LEFT JOIN connection_candidates c ON c.fabric_plane_id = fp.plane_id
+            AND c.aod_run_id = ?
+        WHERE fp.aod_run_id = ?
+        GROUP BY fp.plane_type
+    """, (aod_run_id, aod_run_id))
     fabrics_by_type = {row[0]: row[1] for row in cursor.fetchall()}
 
     cursor.execute("""
@@ -433,8 +438,9 @@ def _check_schema_completeness(cursor, aod_run_id: str) -> dict:
 
     issues = []
     aod_missing = {"vendor_name": 0, "display_name": 0,
-                   "category": 0, "known_endpoints": 0}
-    enrichment_missing = {"preferred_modality": 0, "connected_via_plane": 0}
+                   "category": 0, "known_endpoints": 0,
+                   "connected_via_plane": 0}
+    enrichment_missing = {"preferred_modality": 0}
     total = 0
 
     for row in cursor.fetchall():
@@ -453,10 +459,10 @@ def _check_schema_completeness(cursor, aod_run_id: str) -> dict:
         if not endpoints or endpoints in ("[]", "", "null"):
             missing_aod.append("known_endpoints")
             aod_missing["known_endpoints"] += 1
+        if not plane or plane == "":
+            aod_missing["connected_via_plane"] += 1
         if not modality or modality.lower() in ("unknown", ""):
             enrichment_missing["preferred_modality"] += 1
-        if not plane or plane == "":
-            enrichment_missing["connected_via_plane"] += 1
         if missing_aod:
             issues.append({
                 "candidate_id": cid, "vendor": vendor,
@@ -465,13 +471,16 @@ def _check_schema_completeness(cursor, aod_run_id: str) -> dict:
 
     score = round((1 - len(issues) / max(total, 1)) * 100, 1)
 
+    # Flag as an issue if core AOD fields (vendor, display, category) are missing.
+    # known_endpoints is optional so we only count the structural fields.
+    core_aod_missing = aod_missing["vendor_name"] + aod_missing["display_name"] + aod_missing["category"]
     return {
         "total_candidates": total,
         "incomplete_count": len(issues),
         "incomplete_candidates": issues[:25],
         "field_missing_counts": {**aod_missing, **enrichment_missing},
         "completeness_score": score,
-        "has_issues": False,  # informational, not a reconciliation error
+        "has_issues": core_aod_missing > 0,
         "data_quality_notes": len(issues),
     }
 
@@ -542,14 +551,29 @@ def get_aod_reconciliation(aod_run_id: str) -> dict:
 
     handoff_row = summary["handoff_row"]
     candidates_stored = summary["candidates_stored"]
-    pipes_count = candidates_stored  # Canonical: Candidates = Pipes
+
+    # Count only AOD-origin candidates (exclude AAM-created infra candidates)
+    cursor2 = get_connection().cursor()
+    cursor2.execute("""
+        SELECT COUNT(*) FROM connection_candidates
+        WHERE aod_run_id = ? AND asset_key NOT LIKE 'infra:%'
+    """, (aod_run_id,))
+    aod_origin_stored = cursor2.fetchone()[0]
+    cursor2.connection.close()
+
+    # Count candidates with a fabric plane linkage
+    fabric_linked = sum(
+        v.get("linked_candidates", 0) for v in fabric_check.get("vendors", [])
+    )
 
     real_fabric_issues = fabric_check["mismatches"] if fabric_check["has_aod_data"] else 0
     real_sor_issues = sor_check["mismatches"] if sor_check["has_aod_data"] else 0
+    schema_issues = completeness.get("incomplete_count", 0) if completeness.get("has_issues") else 0
     issues_count = (
         len(vendor_check["case_duplicates"])
         + real_fabric_issues
         + real_sor_issues
+        + schema_issues
         + duplicates["total_groups"]
     )
 
@@ -563,17 +587,17 @@ def get_aod_reconciliation(aod_run_id: str) -> dict:
         },
         "aam_stored": {
             "candidates": candidates_stored,
-            "pipes": pipes_count,
+            "aod_origin_candidates": aod_origin_stored,
             "fabric_planes": summary["fabric_planes_stored"],
+            "fabric_linked": fabric_linked,
             "sors": summary["sors_stored"],
             "fabrics_by_type": summary["fabrics_by_type"],
             "candidates_by_category": summary["candidates_by_category"],
             "top_vendors": summary["top_vendors"],
         },
         "reconciliation": {
-            "candidates_match": handoff_row[1] == candidates_stored,
-            "pipes_match": handoff_row[1] == pipes_count,
-            "discrepancy": handoff_row[1] - candidates_stored,
+            "candidates_match": handoff_row[1] == aod_origin_stored,
+            "discrepancy": handoff_row[1] - aod_origin_stored,
         },
         "deep_checks": {
             "vendor_matching": vendor_check,

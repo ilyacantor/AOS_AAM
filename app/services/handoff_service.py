@@ -374,7 +374,8 @@ def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
                 rejection_type=RejectionType.SYSTEM,
             ))
 
-    _log.info("Candidates processed: %d accepted, %d rejected", len(accepted), len(rejected))
+    aod_accepted_count = len(accepted)  # snapshot BEFORE infra candidates
+    _log.info("Candidates processed: %d accepted, %d rejected", aod_accepted_count, len(rejected))
 
     # 2b. Ensure every fabric plane vendor has a representative candidate.
     #     AOD declares fabric planes (infrastructure endpoints) but doesn't
@@ -382,12 +383,12 @@ def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
     #     plane is invisible in pipes / candidates views even though it shows
     #     in topology and reconciliation.  This is NOT fabrication — AOD
     #     explicitly told us this infrastructure exists.
-    accepted_vendors = {c.vendor_name.lower() for c in request.candidates}
+    accepted_vendors = {c.vendor_name.lower() for c in request.candidates if c.vendor_name}
     for plane in request.fabric_planes or []:
         vendor_lower = plane.vendor.lower().replace("_", " ")
         # Check if any accepted candidate already covers this vendor
         already_covered = any(
-            vendor_lower in v.replace("_", " ") or v.replace("_", " ") in vendor_lower
+            v and (vendor_lower in v.replace("_", " ") or v.replace("_", " ") in vendor_lower)
             for v in accepted_vendors
         )
         if already_covered:
@@ -441,7 +442,7 @@ def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
         "aod_run_id": request.run_id,
         "snapshot_name": request.snapshot_name,
         "candidates_received": len(request.candidates),
-        "candidates_accepted": len(accepted),
+        "candidates_accepted": aod_accepted_count,
         "candidates_rejected": len(rejected),
         "rejected_reasons": rejected_dicts,
         "policy_version": request.policy_version,
@@ -453,7 +454,7 @@ def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
     return AODHandoffResponse(
         run_id=request.run_id,
         candidates_received=len(request.candidates),
-        candidates_accepted=len(accepted),
+        candidates_accepted=aod_accepted_count,
         candidates_rejected=len(rejected),
         rejected_reasons=rejected_dicts,
         handoff_id=handoff_log["handoff_id"],
