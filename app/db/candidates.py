@@ -73,7 +73,7 @@ def create_candidate(candidate_data: dict) -> dict:
 
     return {
         "candidate_id": candidate_id,
-        "status": "connected",
+        "status": candidate_data.get("status") or "new",
         "execution_allowed": bool(execution_allowed) if execution_allowed is not None else None,
         "action_type": candidate_data.get("action_type"),
         "created_at": now,

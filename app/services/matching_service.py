@@ -12,6 +12,7 @@ from ..db import (
     create_pipe,
     update_candidate_match,
 )
+from ..db.fabric_planes import get_fabric_planes
 from ..models import FabricPlane
 
 _log = get_logger("services.matching")
@@ -141,14 +142,30 @@ def match_candidate(
         if not pipe_id:
             raise ValueError(match_reason)
 
-    # Resolve the matched pipe's fabric_plane and propagate to the candidate
-    # so the topology view shows the correct plane linkage
+    # Resolve the matched pipe's fabric_plane and the vendor-specific
+    # fabric_plane_id so the topology view resolves on step 1 (no fallback)
     matched_pipe = get_pipe(pipe_id)
     fabric_plane = matched_pipe.get("fabric_plane") if matched_pipe else None
+
+    # Look up the composite fabric_plane_id (e.g. "API_GATEWAY:aws api gateway")
+    # from the fabric_planes table by matching on plane_type
+    resolved_plane_id = None
+    if fabric_plane and fabric_plane not in ("UNMAPPED", "UNKNOWN"):
+        for fp in get_fabric_planes():
+            if fp["plane_type"] == fabric_plane:
+                resolved_plane_id = fp["plane_id"]
+                break
+        if not resolved_plane_id:
+            _log.warning(
+                "fabric_plane '%s' from pipe %s has no matching fabric_planes row — "
+                "candidate %s will rely on connected_via_plane fallback",
+                fabric_plane, pipe_id, candidate_id,
+            )
 
     updated = update_candidate_match(
         candidate_id, pipe_id, score, match_reason,
         fabric_plane=fabric_plane,
+        fabric_plane_id=resolved_plane_id,
     )
     if not updated:
         raise RuntimeError("Failed to update candidate")

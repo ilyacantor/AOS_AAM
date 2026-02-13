@@ -84,12 +84,21 @@ def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
         else:
             unlinked_candidates.append(candidate)
     
-    # Unlinked candidates remain unlinked — we do NOT infer fabric planes
-    # from application categories.  If a candidate wasn't linked to a plane
-    # by AOD or by explicit infrastructure evidence, it stays unlinked.
-    for candidate in unlinked_candidates:
-        _log.debug("Candidate %s (%s) has no fabric plane link — skipping DCL grouping",
-                   candidate.get("vendor_name"), candidate.get("category"))
+    # Unlinked candidates are grouped under a synthetic "UNMAPPED" plane
+    # so DCL can see they exist (instead of silently dropping them).
+    if unlinked_candidates:
+        _log.warning(
+            "%d candidate(s) have no fabric_plane_id — grouped under UNMAPPED in DCL export",
+            len(unlinked_candidates),
+        )
+        planes_dict["UNMAPPED"] = {
+            "plane": {
+                "plane_type": "UNMAPPED",
+                "vendor": "unlinked",
+                "is_healthy": None,
+            },
+            "candidates": unlinked_candidates,
+        }
     
     # Build fabric plane objects for DCL
     fabric_planes_output = []
@@ -122,7 +131,9 @@ def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
             vendor=plane["vendor"],
             connection_count=len(connections),
             connections=connections,
-            health="healthy" if plane["is_healthy"] else "degraded"
+            health="healthy" if plane["is_healthy"] is True else (
+                "unknown" if plane["is_healthy"] is None else "degraded"
+            )
         )
         fabric_planes_output.append(fabric_plane_obj)
         total_connections += len(connections)

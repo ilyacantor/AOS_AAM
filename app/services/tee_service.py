@@ -2,7 +2,7 @@
 TEE (Tee-off) Service — workflow enforcement for tee requests.
 """
 from ..logger import get_logger
-from ..db import get_tee_request, get_pipe, update_tee_request_status
+from ..db import get_tee_request, get_pipe_or_candidate, update_tee_request_status
 
 _log = get_logger("services.tee")
 
@@ -43,7 +43,7 @@ def validate_tee_transition(tee_id: str, new_status: str, verification_method=No
                 "Verification requires a verification_method "
                 "(e.g., 'manual_test', 'automated_check', 'log_review')"
             )
-        pipe = get_pipe(tee_req["pipe_id"])
+        pipe = get_pipe_or_candidate(tee_req["pipe_id"])
         if not pipe:
             raise ValueError("Cannot verify: Associated pipe no longer exists")
 

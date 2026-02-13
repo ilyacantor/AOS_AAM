@@ -70,7 +70,7 @@ def get_fabric_planes(aod_run_id: Optional[str] = None) -> list[dict]:
         "display_name": row["display_name"],
         "domain": row["domain"],
         "managed_asset_count": row["managed_asset_count"],
-        "is_healthy": bool(row["is_healthy"]),
+        "is_healthy": None if row["is_healthy"] is None else bool(row["is_healthy"]),
         "aod_run_id": row["aod_run_id"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"]
@@ -106,7 +106,7 @@ def find_fabric_plane_by_vendor(vendor: str, plane_type: Optional[str] = None) -
             "display_name": row["display_name"],
             "domain": row["domain"],
             "managed_asset_count": row["managed_asset_count"],
-            "is_healthy": bool(row["is_healthy"])
+            "is_healthy": None if row["is_healthy"] is None else bool(row["is_healthy"]),
         }
     return None
 

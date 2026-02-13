@@ -159,7 +159,7 @@ def infer_fabric_plane(endpoint_info: dict, metadata: dict) -> str:
     if any(x in url for x in ["warehouse", "bigquery", "snowflake", "redshift", "databricks", "synapse"]):
         return "DATA_WAREHOUSE"
 
-    return "UNKNOWN"
+    return None
 
 
 def infer_modality(endpoint_info: dict, metadata: dict) -> str:

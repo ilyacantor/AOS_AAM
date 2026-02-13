@@ -34,10 +34,12 @@ async def push_to_dcl(request: Request):
     Optional body: {"aod_run_id": "...", "notes": "..."}
     """
     body = {}
-    try:
-        body = await request.json()
-    except Exception:
-        pass
+    raw = await request.body()
+    if raw:
+        try:
+            body = await request.json()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Request body is not valid JSON")
 
     aod_run_id = body.get("aod_run_id")
     notes = body.get("notes")

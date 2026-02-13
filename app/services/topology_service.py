@@ -8,7 +8,7 @@ from datetime import datetime
 
 from ..logger import get_logger
 from ..constants import SOR_CATEGORIES
-from ..db import list_pipes, list_candidates, get_canonical_stats
+from ..db import list_declared_pipes, list_candidates, get_canonical_stats
 from ..db.fabric_planes import get_fabric_planes
 from ..db.sor_declarations import get_sor_declarations
 
@@ -43,7 +43,6 @@ def build_topology_summary() -> dict:
     """
     candidates = list_candidates()
     db_planes = get_fabric_planes()
-    all_pipes = list_pipes()
 
     # Build plane info lookup by plane_id (e.g. "IPAAS:workato")
     plane_info = {p["plane_id"]: p for p in db_planes}
@@ -54,11 +53,12 @@ def build_topology_summary() -> dict:
         if p["plane_type"] not in type_to_plane:
             type_to_plane[p["plane_type"]] = p["plane_id"]
 
-    # Build pipe_id → fabric_plane lookup for matched-pipe resolution
+    # Build pipe_id → fabric_plane lookup from actual declared pipes
+    # (used for step-3 backfill when candidate lacks direct fabric_plane_id)
     pipe_planes: dict[str, str] = {}
-    for p in all_pipes:
-        fp = p.get("fabric_plane", "")
-        if fp and fp not in ("UNMAPPED", "UNKNOWN"):
+    for p in list_declared_pipes():
+        fp = p.get("fabric_plane")
+        if fp:
             pipe_planes[p["pipe_id"]] = fp
 
     def _resolve_plane_id(candidate: dict) -> str:
@@ -70,9 +70,20 @@ def build_topology_summary() -> dict:
           3. Matched pipe's fabric_plane (backfill for pre-propagation data)
           4. "UNMAPPED" (operator must categorize)
         """
+        cid = candidate.get("candidate_id", "?")
+        vendor = candidate.get("vendor_name", "?")
+
         fpid = candidate.get("fabric_plane_id", "")
         if fpid and fpid in plane_info:
             return fpid
+
+        # Step 1 missed — log so we can measure how often the fallback fires
+        _log.warning(
+            "Topology fallback: candidate %s (%s) has no direct fabric_plane_id "
+            "(value=%r), trying connected_via_plane",
+            cid, vendor, fpid or None,
+        )
+
         plane_type = _extract_plane_type(
             candidate.get("fabric_plane_id", ""),
             candidate.get("connected_via_plane", ""),
@@ -84,8 +95,16 @@ def build_topology_summary() -> dict:
         # Fallback: check matched pipe's fabric_plane
         matched_pid = candidate.get("matched_pipe_id", "")
         if matched_pid and matched_pid in pipe_planes:
+            _log.warning(
+                "Topology fallback: candidate %s (%s) resolved via matched pipe %s",
+                cid, vendor, matched_pid,
+            )
             return type_to_plane.get(pipe_planes[matched_pid], pipe_planes[matched_pid])
 
+        _log.warning(
+            "Topology fallback: candidate %s (%s) fully UNMAPPED — no plane linkage found",
+            cid, vendor,
+        )
         return "UNMAPPED"
 
     # Count candidates per vendor-plane, split by match status
