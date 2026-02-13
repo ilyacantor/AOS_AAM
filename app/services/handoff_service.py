@@ -54,6 +54,26 @@ def normalize_fabric_planes(raw_planes: list[dict]) -> list[dict]:
     return normalized
 
 
+def normalize_candidates(raw_candidates: list[dict]) -> list[dict]:
+    """Normalize AOD candidate objects before pydantic parsing.
+
+    The FabricPlane enum is case-sensitive (e.g. "API_GATEWAY").  AOD may
+    send connected_via_plane in lowercase ("api_gateway") which would crash
+    pydantic validation for the ENTIRE batch.  Normalize it here, same as
+    we normalize plane_type on fabric planes.
+    """
+    for c in raw_candidates:
+        cvp = c.get("connected_via_plane")
+        if cvp and isinstance(cvp, str):
+            normalized = PLANE_TYPE_ALIASES.get(cvp, cvp.upper().replace(" ", "_"))
+            c["connected_via_plane"] = normalized
+        # Also handle preferred_modality if it's lowercase
+        pm = c.get("preferred_modality")
+        if pm and isinstance(pm, str):
+            c["preferred_modality"] = pm.upper().replace(" ", "_")
+    return raw_candidates
+
+
 def normalize_sors(raw_sors: list[dict]) -> list[dict]:
     """Normalize AOD SOR declarations to AAM's expected schema."""
     normalized = []
@@ -355,6 +375,62 @@ def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
             ))
 
     _log.info("Candidates processed: %d accepted, %d rejected", len(accepted), len(rejected))
+
+    # 2b. Ensure every fabric plane vendor has a representative candidate.
+    #     AOD declares fabric planes (infrastructure endpoints) but doesn't
+    #     always include them as candidates.  Without a candidate record the
+    #     plane is invisible in pipes / candidates views even though it shows
+    #     in topology and reconciliation.  This is NOT fabrication — AOD
+    #     explicitly told us this infrastructure exists.
+    accepted_vendors = {c.vendor_name.lower() for c in request.candidates}
+    for plane in request.fabric_planes or []:
+        vendor_lower = plane.vendor.lower().replace("_", " ")
+        # Check if any accepted candidate already covers this vendor
+        already_covered = any(
+            vendor_lower in v.replace("_", " ") or v.replace("_", " ") in vendor_lower
+            for v in accepted_vendors
+        )
+        if already_covered:
+            continue
+
+        plane_id = fabric_plane_map.get(plane.vendor.lower())
+        if not plane_id:
+            continue
+
+        infra_candidate = {
+            "asset_key": f"infra:{plane.plane_type.lower()}:{plane.vendor.lower()}",
+            "vendor_name": plane.vendor,
+            "display_name": f"{plane.vendor}, {plane.plane_type.replace('_', ' ').title()}",
+            "category": plane.plane_type.lower(),
+            "governance_status": None,
+            "findings": [],
+            "sor_tagging": None,
+            "evidence_refs": [],
+            "signals_summary": None,
+            "known_endpoints": [],
+            "preferred_modality": None,
+            "priority_score": None,
+            "execution_allowed": True,
+            "action_type": "provision",
+            "blocking_findings": [],
+            "connected_via_plane": plane.plane_type.upper(),
+            "aod_run_id": request.run_id,
+            "aod_asset_id": f"infra-{plane.vendor.lower()}",
+            "fabric_plane_id": plane_id,
+            "status": "new",
+        }
+        try:
+            result = create_candidate(infra_candidate)
+            accepted.append({
+                "aod_asset_id": infra_candidate["aod_asset_id"],
+                "candidate_id": result["candidate_id"],
+                "execution_allowed": True,
+                "action_type": "provision",
+            })
+            _log.info("Created infrastructure candidate for plane %s (%s)",
+                       plane.vendor, plane.plane_type)
+        except Exception as e:
+            _log.warning("Failed to create infra candidate for %s: %s", plane.vendor, e)
 
     # 3. Build reconciliation data
     aod_fabric_planes_data, aod_sor_vendors = _build_reconciliation_data(request)

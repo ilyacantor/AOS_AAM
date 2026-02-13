@@ -26,7 +26,7 @@ from ..db import (
 from ..models import AODHandoffRequest, AODHandoffResponse, AODPolicyManifest
 from ..services.handoff_service import (
     process_handoff, load_aod_payload,
-    normalize_fabric_planes, normalize_sors,
+    normalize_fabric_planes, normalize_sors, normalize_candidates,
 )
 from ..services.export_service import build_reconciliation_csv
 
@@ -94,6 +94,13 @@ async def receive_aod_handoff(raw_request: Request):
             _log.info("  norm sor: %s", json.dumps(ns))
     else:
         _log.warning("AOD sent NO sors. All top-level keys: %s", list(body.keys()))
+
+    # Normalize candidate fields (connected_via_plane case sensitivity)
+    # before pydantic parsing — a single lowercase "api_gateway" would
+    # crash validation for the entire batch.
+    raw_candidates = body.get("candidates", [])
+    if raw_candidates:
+        body["candidates"] = normalize_candidates(raw_candidates)
 
     request = AODHandoffRequest(**body)
     _log.info(
