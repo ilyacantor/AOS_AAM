@@ -5,15 +5,16 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from typing import Optional
 from datetime import datetime
 
-from ..db import list_pipes, get_pipe_stats, list_candidates, record_dcl_push, list_dcl_pushes, get_dcl_push
+from ..db import list_declared_pipes, get_pipe_stats, list_candidates, record_dcl_push, list_dcl_pushes, get_dcl_push
 
 router = APIRouter(tags=["Export"])
 
 
 @router.get("/api/export/dcl/declared-pipes")
 async def export_for_dcl(aod_run_id: Optional[str] = Query(None)):
-    """Export all pipes in DCL format. This is the canonical DCL export endpoint."""
-    pipes = list_pipes()
+    """Export all declared pipes in DCL format. Reads from the declared_pipes
+    table which is populated during inference/matching."""
+    pipes = list_declared_pipes()
     if aod_run_id:
         pipes = [p for p in pipes if p.get("provenance", {}).get("aod_run_id") == aod_run_id]
     return {
@@ -41,7 +42,7 @@ async def push_to_dcl(request: Request):
     aod_run_id = body.get("aod_run_id")
     notes = body.get("notes")
 
-    pipes = list_pipes()
+    pipes = list_declared_pipes()
     if aod_run_id:
         pipes = [p for p in pipes if p.get("provenance", {}).get("aod_run_id") == aod_run_id]
 

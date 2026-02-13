@@ -8,7 +8,7 @@ from ..logger import get_logger
 from ..db import (
     get_candidate,
     get_pipe,
-    list_pipes,
+    list_declared_pipes,
     create_pipe,
     update_candidate_match,
 )
@@ -55,8 +55,8 @@ def find_matching_pipe(candidate: dict) -> tuple[Optional[str], float, str]:
     vendor = candidate.get("vendor_name", "").lower()
     candidate_id = candidate.get("candidate_id", "")
 
-    # Strategy 1: Exact vendor name match
-    pipes = list_pipes(source_system=candidate.get("vendor_name"))
+    # Strategy 1: Exact vendor name match against actual declared pipes
+    pipes = list_declared_pipes(source_system=candidate.get("vendor_name"))
     if pipes:
         return pipes[0]["pipe_id"], 0.9, "Auto-matched by vendor name"
 

@@ -61,14 +61,18 @@ def create_pipe(pipe_data: dict) -> dict:
 
 
 def get_pipe(pipe_id: str) -> Optional[dict]:
-    """
-    Get a pipe by ID.
-    CANONICAL: Pipes = Candidates, so check candidates first.
-    """
+    """Get a pipe by ID.  Checks declared_pipes first, then candidates."""
     conn = get_connection()
     cursor = conn.cursor()
-    
-    # Check candidates first (canonical source)
+
+    # Check declared_pipes first (actual pipes created during inference)
+    cursor.execute("SELECT * FROM declared_pipes WHERE pipe_id = ?", (pipe_id,))
+    row = cursor.fetchone()
+    if row:
+        conn.close()
+        return _row_to_pipe(row)
+
+    # Fallback: check candidates (for UI compatibility)
     cursor.execute("""
         SELECT c.*, fp.plane_type as fabric_plane
         FROM connection_candidates c
@@ -76,18 +80,9 @@ def get_pipe(pipe_id: str) -> Optional[dict]:
         WHERE c.candidate_id = ?
     """, (pipe_id,))
     row = cursor.fetchone()
-    
-    if row:
-        conn.close()
-        return _candidate_to_pipe(row)
-    
-    # Fallback: check declared_pipes for backward compatibility
-    cursor.execute("SELECT * FROM declared_pipes WHERE pipe_id = ?", (pipe_id,))
-    row = cursor.fetchone()
     conn.close()
-    
     if row:
-        return _row_to_pipe(row)
+        return _candidate_to_pipe(row)
     return None
 
 
@@ -267,10 +262,10 @@ def _row_to_pipe(row) -> dict:
     provenance = json.loads(row["provenance"]) if row["provenance"] else {}
     schema_info = json.loads(row["schema_info"]) if row["schema_info"] else None
     access_info = json.loads(row["access_info"]) if row["access_info"] else None
-    
+
     keys = row.keys()
     fabric_plane = row["fabric_plane"] if "fabric_plane" in keys and row["fabric_plane"] else "UNKNOWN"
-    
+
     return {
         "pipe_id": row["pipe_id"],
         "display_name": row["display_name"],
@@ -292,5 +287,34 @@ def _row_to_pipe(row) -> dict:
         "created_at": row["created_at"],
         "updated_at": row["updated_at"]
     }
+
+
+def list_declared_pipes(source_system: Optional[str] = None, fabric_plane: Optional[str] = None) -> list[dict]:
+    """List actual pipes from the declared_pipes table.
+
+    Unlike list_pipes() (which returns candidates), this reads real pipes
+    created during inference/matching.  Used by matching (Strategy 1) and
+    the DCL export.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    conditions = []
+    params = []
+    if source_system:
+        conditions.append("source_system = ?")
+        params.append(source_system)
+    if fabric_plane:
+        conditions.append("UPPER(fabric_plane) = ?")
+        params.append(fabric_plane.upper())
+
+    where = " WHERE " + " AND ".join(conditions) if conditions else ""
+    cursor.execute(
+        f"SELECT * FROM declared_pipes{where} ORDER BY created_at DESC",
+        params,
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [_row_to_pipe(row) for row in rows]
 
 

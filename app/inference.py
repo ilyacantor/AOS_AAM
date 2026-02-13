@@ -22,7 +22,7 @@ from .db import (
     mark_observation_processed,
     create_pipe,
     get_pipe,
-    list_pipes
+    list_declared_pipes,
 )
 from .models import Modality, TransportKind, ChangeSemantics
 
@@ -522,7 +522,7 @@ def find_existing_pipe(pipe: dict) -> Optional[dict]:
     Find an existing pipe that matches the new pipe.
     Match by source_system + endpoint_ref combination.
     """
-    existing_pipes = list_pipes(source_system=pipe["source_system"])
+    existing_pipes = list_declared_pipes(source_system=pipe["source_system"])
     
     for existing in existing_pipes:
         # Match by endpoint URL
