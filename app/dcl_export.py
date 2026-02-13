@@ -6,7 +6,7 @@ Uses REAL fabric plane data from AOD instead of hardcoded vendors.
 """
 import logging
 from typing import List, Dict, Any, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from datetime import datetime
 
 from .db import get_candidates_by_aod_run, list_candidates, get_fabric_planes
@@ -21,7 +21,6 @@ class DCLConnectionSchema(BaseModel):
     category: str
     governance_status: Optional[str] = None
     health: str = "healthy"
-    fields: List[str] = Field(default_factory=list, description="Field names from schema")
     last_sync: Optional[str] = None
     asset_key: str
     aod_asset_id: Optional[str] = None
@@ -43,41 +42,6 @@ class DCLExportResponse(BaseModel):
     fabric_planes: List[DCLFabricPlane]
     total_connections: int
     source: str = "aam"
-
-
-def _infer_fields_from_category(category: str) -> List[str]:
-    """Infer likely schema fields from asset category (not vendor name)."""
-    category_lower = category.lower()
-
-    if "crm" in category_lower:
-        return [
-            "account_id", "account_name", "opportunity_id", "amount",
-            "stage", "close_date", "owner_id", "created_at"
-        ]
-    elif "erp" in category_lower:
-        return [
-            "invoice_id", "customer_id", "amount", "currency",
-            "status", "issue_date", "due_date", "gl_account"
-        ]
-    elif "finance" in category_lower:
-        return [
-            "transaction_id", "account", "debit", "credit",
-            "date", "description", "category"
-        ]
-    elif "hcm" in category_lower or "hr" in category_lower:
-        return [
-            "employee_id", "name", "department", "title",
-            "salary", "hire_date", "manager_id", "status"
-        ]
-    elif "data" in category_lower or "warehouse" in category_lower:
-        return [
-            "date", "customer_id", "revenue", "cost",
-            "margin", "segment", "region"
-        ]
-    else:
-        return [
-            "id", "name", "created_at", "updated_at", "status"
-        ]
 
 
 def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
@@ -139,19 +103,15 @@ def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
         
         connections = []
         for candidate in candidates_list:
-            category = candidate.get("category", "other")
-            fields = _infer_fields_from_category(category)
-            
             connection = DCLConnectionSchema(
                 source_name=candidate.get("display_name", "Unknown"),
                 vendor=candidate.get("vendor_name", "Unknown"),
-                category=category,
+                category=candidate.get("category", "other"),
                 governance_status=candidate.get("governance_status"),
-                health="unknown",  # health is infra status, not governance permission
-                fields=fields,
+                health="unknown",
                 last_sync=candidate.get("updated_at"),
                 asset_key=candidate.get("asset_key", ""),
-                aod_asset_id=candidate.get("aod_asset_id")
+                aod_asset_id=candidate.get("aod_asset_id"),
             )
             connections.append(connection)
         
