@@ -60,46 +60,41 @@ def find_matching_pipe(candidate: dict) -> tuple[Optional[str], float, str]:
         return pipes[0]["pipe_id"], 0.9, "Auto-matched by vendor name"
 
     # Strategy 2: Create new pipe from candidate (requires AOD plane hint)
-    all_pipes = list_pipes(limit=1000)
-    if all_pipes:
-        aod_plane_hint = candidate.get("connected_via_plane")
+    aod_plane_hint = candidate.get("connected_via_plane")
+    if not aod_plane_hint:
+        return None, 0.0, "Cannot create pipe: no fabric plane hint from AOD"
 
-        if aod_plane_hint:
-            try:
-                routed_plane = FabricPlane(aod_plane_hint)
-                routing_source = "aod_hint"
-            except ValueError:
-                return None, 0.0, f"Cannot create pipe: AOD plane hint '{aod_plane_hint}' is not a valid FabricPlane"
-        else:
-            return None, 0.0, "Cannot create pipe: no fabric plane hint from AOD"
+    try:
+        routed_plane = FabricPlane(aod_plane_hint)
+        routing_source = "aod_hint"
+    except ValueError:
+        return None, 0.0, f"Cannot create pipe: AOD plane hint '{aod_plane_hint}' is not a valid FabricPlane"
 
-        lineage_hints = [f"candidate:{candidate_id}", f"routed_via:{routed_plane.value}"]
-        if candidate.get("aod_run_id"):
-            lineage_hints.append(f"aod_run:{candidate.get('aod_run_id')}")
-        if candidate.get("aod_asset_id"):
-            lineage_hints.append(f"aod_asset:{candidate.get('aod_asset_id')}")
-        lineage_hints.append(f"routing_source:{routing_source}")
+    lineage_hints = [f"candidate:{candidate_id}", f"routed_via:{routed_plane.value}"]
+    if candidate.get("aod_run_id"):
+        lineage_hints.append(f"aod_run:{candidate.get('aod_run_id')}")
+    if candidate.get("aod_asset_id"):
+        lineage_hints.append(f"aod_asset:{candidate.get('aod_asset_id')}")
+    lineage_hints.append(f"routing_source:{routing_source}")
 
-        new_pipe_data = {
-            "display_name": candidate.get("display_name") or candidate.get("vendor_name"),
-            "source_system": candidate.get("vendor_name"),
-            "fabric_plane": routed_plane.value,
-            "modality": candidate.get("preferred_modality") or "DECLARED_INTERFACE",
-            "transport_kind": "API",
-            "provenance": {
-                "discovered_by": "auto-match",
-                "discovered_at": datetime.utcnow().isoformat(),
-                "lineage_hints": lineage_hints,
-            },
-        }
-        result = create_pipe(new_pipe_data)
-        return (
-            result["pipe_id"],
-            0.6,
-            f"Created new pipe from candidate ({candidate.get('vendor_name')}) via {routed_plane.value} ({routing_source})",
-        )
-
-    return None, 0.0, "Auto-match failed and no pipes exist"
+    new_pipe_data = {
+        "display_name": candidate.get("display_name") or candidate.get("vendor_name"),
+        "source_system": candidate.get("vendor_name"),
+        "fabric_plane": routed_plane.value,
+        "modality": candidate.get("preferred_modality") or "DECLARED_INTERFACE",
+        "transport_kind": "API",
+        "provenance": {
+            "discovered_by": "auto-match",
+            "discovered_at": datetime.utcnow().isoformat(),
+            "lineage_hints": lineage_hints,
+        },
+    }
+    result = create_pipe(new_pipe_data)
+    return (
+        result["pipe_id"],
+        0.6,
+        f"Created new pipe from candidate ({candidate.get('vendor_name')}) via {routed_plane.value} ({routing_source})",
+    )
 
 
 def match_candidate(
