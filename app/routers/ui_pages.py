@@ -1943,8 +1943,11 @@ async def ui_topology():
         }}
 
         function resetView() {{
-            document.getElementById('view-filter').value = 'all';
+            document.getElementById('asset-filter').value = 'all';
+            document.getElementById('detail-filter').value = 'full';
             document.getElementById('layout-select').value = 'physics';
+            _lastLayout = 'physics';
+            physicsEnabled = true;
             loadTopology('all');
         }}
 
@@ -1953,8 +1956,7 @@ async def ui_topology():
         }}
 
         function refreshData() {{
-            const filter = document.getElementById('view-filter').value;
-            loadTopology(filter);
+            applyTopologyFilters();
         }}
 
         function togglePhysics() {{
