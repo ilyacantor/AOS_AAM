@@ -20,6 +20,7 @@ from .sor_declarations import store_sor_declaration, get_sor_declarations, clear
 from .sor_dispositions import set_sor_disposition, get_sor_dispositions  # noqa: F401
 from .reconciliation import get_aod_reconciliation, get_latest_aod_run  # noqa: F401
 from .stats import get_canonical_stats  # noqa: F401
+from .dcl_pushes import init_dcl_pushes_table, record_dcl_push, list_dcl_pushes, get_dcl_push  # noqa: F401
 
 # Re-export DATABASE for monkeypatching in tests
 from .connection import DATABASE  # noqa: F401

@@ -1,19 +1,21 @@
 """
-Export Router — DCL export and stats endpoints.
+Export Router — DCL export, push tracking, and stats endpoints.
 """
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from typing import Optional
 from datetime import datetime
 
-from ..db import list_pipes, get_pipe_stats, list_candidates
+from ..db import list_pipes, get_pipe_stats, list_candidates, record_dcl_push, list_dcl_pushes, get_dcl_push
 
 router = APIRouter(tags=["Export"])
 
 
 @router.get("/api/export/dcl/declared-pipes")
-async def export_for_dcl():
-    """Export all pipes in DCL format."""
+async def export_for_dcl(aod_run_id: Optional[str] = Query(None)):
+    """Export all pipes in DCL format. This is the canonical DCL export endpoint."""
     pipes = list_pipes()
+    if aod_run_id:
+        pipes = [p for p in pipes if p.get("provenance", {}).get("aod_run_id") == aod_run_id]
     return {
         "export_version": "1.0",
         "exported_at": datetime.utcnow().isoformat(),
@@ -22,9 +24,86 @@ async def export_for_dcl():
     }
 
 
+@router.post("/api/export/dcl/push")
+async def push_to_dcl(request: Request):
+    """
+    Export pipes to DCL and record the push for reconciliation.
+    Returns the export payload and a push_id for tracking.
+
+    Optional body: {"aod_run_id": "...", "notes": "..."}
+    """
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+
+    aod_run_id = body.get("aod_run_id")
+    notes = body.get("notes")
+
+    pipes = list_pipes()
+    if aod_run_id:
+        pipes = [p for p in pipes if p.get("provenance", {}).get("aod_run_id") == aod_run_id]
+
+    export_payload = {
+        "export_version": "1.0",
+        "exported_at": datetime.utcnow().isoformat(),
+        "pipe_count": len(pipes),
+        "pipes": pipes,
+    }
+
+    push_record = record_dcl_push(
+        pipe_count=len(pipes),
+        payload=export_payload,
+        aod_run_id=aod_run_id,
+        notes=notes,
+    )
+
+    return {
+        "push": push_record,
+        "export": export_payload,
+    }
+
+
+@router.get("/api/export/dcl/pushes")
+async def get_push_history(limit: int = Query(25)):
+    """List recent DCL push records (without full payload)."""
+    return list_dcl_pushes(limit=limit)
+
+
+@router.get("/api/export/dcl/pushes/{push_id}")
+async def get_push_detail(push_id: str):
+    """Get a specific DCL push including the full payload that was sent."""
+    result = get_dcl_push(push_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Push not found")
+    return result
+
+
+@router.get("/api/export/dcl/pushes/{push_id}/download")
+async def download_push_payload(push_id: str):
+    """Download the full payload from a specific DCL push as a JSON file."""
+    import json as _json
+    from starlette.responses import Response
+
+    result = get_dcl_push(push_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Push not found")
+    filename = f"dcl_push_{push_id[:8]}.json"
+    return Response(
+        content=_json.dumps(result["payload"], indent=2, default=str),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.get("/api/dcl/export-pipes", tags=["DCL Export"])
 async def export_pipes_for_dcl(aod_run_id: Optional[str] = Query(None)):
-    """Export pipe definitions grouped by fabric plane for DCL consumption."""
+    """Export pipe definitions grouped by fabric plane for DCL consumption.
+    
+    Note: Most pipes may be UNMAPPED if no fabric planes are assigned.
+    Use /api/export/dcl/declared-pipes for the flat canonical export.
+    """
     from ..dcl_export import build_dcl_export
 
     export_data = build_dcl_export(aod_run_id=aod_run_id)
