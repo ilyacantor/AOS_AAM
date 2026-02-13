@@ -265,6 +265,16 @@ def init_db():
     _add_column_if_not_exists(cursor, "aod_handoff_log", "aod_fabric_planes", "TEXT")
     _add_column_if_not_exists(cursor, "aod_handoff_log", "aod_sor_vendors", "TEXT")
     
+    # AOD Payload Cache — stores the raw handoff payload so /fetch can
+    # replay it.  NOT cleared by reset_aod_state() (that's the whole point).
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS aod_payload_cache (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            payload TEXT NOT NULL,
+            cached_at TEXT NOT NULL
+        )
+    """)
+
     # Create indexes
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_candidates_status ON connection_candidates(status)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_candidates_asset_key ON connection_candidates(asset_key)")
