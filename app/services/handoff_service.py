@@ -25,6 +25,7 @@ from ..db import (
     reset_aod_state,
 )
 from ..models import AODHandoffRequest, AODHandoffResponse, SORDeclaration, CandidateStatus
+from .matching_service import match_candidate as _match_candidate
 
 _log = get_logger("services.handoff")
 
@@ -432,6 +433,21 @@ def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
                        plane.vendor, plane.plane_type)
         except Exception as e:
             _log.warning("Failed to create infra candidate for %s: %s", plane.vendor, e)
+
+    # 2c. Auto-match candidates so topology shows connections immediately.
+    #     Process infrastructure candidates first — they create pipes that
+    #     regular candidates can then match against by vendor name.
+    infra_ids = [a["candidate_id"] for a in accepted if a.get("action_type") == "provision"]
+    regular_ids = [a["candidate_id"] for a in accepted if a.get("action_type") != "provision"]
+    matched_count = 0
+    for cid in infra_ids + regular_ids:
+        try:
+            _match_candidate(cid, None)
+            matched_count += 1
+        except (ValueError, PermissionError):
+            pass  # unmatched candidates stay as-is for manual review
+    if matched_count:
+        _log.info("Auto-matched %d/%d candidates during handoff", matched_count, len(accepted))
 
     # 3. Build reconciliation data
     aod_fabric_planes_data, aod_sor_vendors = _build_reconciliation_data(request)
