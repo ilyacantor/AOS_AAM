@@ -31,7 +31,7 @@ def create_pipe(pipe_data: dict) -> dict:
         """, (
             pipe_id,
             pipe_data["display_name"],
-            pipe_data.get("fabric_plane", "API_GATEWAY"),
+            pipe_data.get("fabric_plane"),  # None is valid — means unrouted
             pipe_data["modality"],
             pipe_data["source_system"],
             pipe_data["transport_kind"],

@@ -162,7 +162,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS declared_pipes (
             pipe_id TEXT PRIMARY KEY,
             display_name TEXT NOT NULL,
-            fabric_plane TEXT NOT NULL DEFAULT 'API_GATEWAY',
+            fabric_plane TEXT DEFAULT NULL,
             modality TEXT NOT NULL,
             source_system TEXT NOT NULL,
             transport_kind TEXT NOT NULL,
@@ -299,7 +299,53 @@ def init_db():
     # Migrations - add new columns to existing tables
     _add_column_if_not_exists(cursor, "aod_handoff_log", "snapshot_name", "TEXT")
     _add_column_if_not_exists(cursor, "declared_pipes", "drift_status", "TEXT DEFAULT 'NONE'")
-    
+
+    # Migration: relax NOT NULL on declared_pipes.fabric_plane for existing DBs.
+    # SQLite can't ALTER COLUMN, so we recreate the table preserving data.
+    cursor.execute("PRAGMA table_info(declared_pipes)")
+    cols = cursor.fetchall()
+    for col in cols:
+        if col[1] == "fabric_plane" and col[3] == 1:  # col[3] = notnull flag
+            _log.info("Migrating declared_pipes: relaxing NOT NULL on fabric_plane")
+            cursor.execute("ALTER TABLE declared_pipes RENAME TO _declared_pipes_old")
+            cursor.execute("""
+                CREATE TABLE declared_pipes (
+                    pipe_id TEXT PRIMARY KEY,
+                    display_name TEXT NOT NULL,
+                    fabric_plane TEXT DEFAULT NULL,
+                    modality TEXT NOT NULL,
+                    source_system TEXT NOT NULL,
+                    transport_kind TEXT NOT NULL,
+                    endpoint_ref TEXT,
+                    entity_scope TEXT,
+                    identity_keys TEXT,
+                    change_semantics TEXT DEFAULT 'UNKNOWN',
+                    provenance TEXT NOT NULL,
+                    owner_signals TEXT,
+                    trust_labels TEXT,
+                    schema_info TEXT,
+                    freshness TEXT,
+                    access_info TEXT,
+                    version INTEGER DEFAULT 1,
+                    schema_hash TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    drift_status TEXT DEFAULT 'NONE'
+                )
+            """)
+            cursor.execute("""
+                INSERT INTO declared_pipes
+                SELECT pipe_id, display_name, fabric_plane, modality, source_system,
+                       transport_kind, endpoint_ref, entity_scope, identity_keys,
+                       change_semantics, provenance, owner_signals, trust_labels,
+                       schema_info, freshness, access_info, version, schema_hash,
+                       created_at, updated_at, drift_status
+                FROM _declared_pipes_old
+            """)
+            cursor.execute("DROP TABLE _declared_pipes_old")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_pipes_source ON declared_pipes(source_system)")
+            break
+
     conn.commit()
     conn.close()
     _log.info("Database initialized")
