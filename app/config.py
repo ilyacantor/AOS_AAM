@@ -11,7 +11,6 @@ class Settings:
 
     def __init__(self):
         self.DATABASE_URL: str = os.environ.get("AAM_DATABASE_URL", "aam.db")
-        self.AOD_PAYLOAD_FILE: str = os.environ.get("AAM_AOD_PAYLOAD_FILE", "aod_last_payload.json")
         self.LOG_LEVEL: str = os.environ.get("AAM_LOG_LEVEL", "INFO")
         self.DRIFT_LATENCY_THRESHOLD_MS: float = float(
             os.environ.get("AAM_DRIFT_LATENCY_THRESHOLD_MS", "1000")

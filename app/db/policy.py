@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Optional
 
 from .connection import get_connection
+from .candidates import _row_to_candidate
 
 # ============================================================================
 # AOD POLICY MANIFEST OPERATIONS

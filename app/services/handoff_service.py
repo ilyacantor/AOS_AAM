@@ -28,8 +28,6 @@ from ..models import AODHandoffRequest, AODHandoffResponse, SORDeclaration, Cand
 
 _log = get_logger("services.handoff")
 
-AOD_PAYLOAD_FILE = settings.AOD_PAYLOAD_FILE
-
 
 # ---- AOD payload normalization ----
 
@@ -120,21 +118,66 @@ class CandidateRejection:
 
 
 def save_aod_payload(request: AODHandoffRequest):
-    """Persist raw AOD payload to disk for replay after reset."""
-    try:
-        with open(AOD_PAYLOAD_FILE, "w") as f:
-            json.dump(request.model_dump(mode="json"), f)
-    except Exception as e:
-        _log.error("Failed to save AOD payload: %s", e)
+    """Persist raw AOD payload to the handoff log table.
+
+    Previously wrote to a JSON file on disk; the database handoff log
+    now stores everything we need, so this is a no-op kept for call-site
+    compatibility.  The actual persistence happens in create_handoff_log().
+    """
+    pass
 
 
 def load_aod_payload() -> Optional[dict]:
-    """Load last saved AOD payload from file."""
-    try:
-        with open(AOD_PAYLOAD_FILE, "r") as f:
-            return json.load(f)
-    except Exception:
+    """Load the most recent AOD handoff payload from the database.
+
+    Previously read from a JSON file on disk.  Now reconstructs the
+    payload from the latest handoff log + stored candidates/planes.
+    """
+    logs = list_handoff_logs(limit=1)
+    if not logs:
         return None
+
+    latest = logs[0]
+    run_id = latest["aod_run_id"]
+
+    # Reconstruct the payload from DB state
+    from ..db.fabric_planes import get_fabric_planes
+    from ..db.sor_declarations import get_sor_declarations
+    from ..db import get_candidates_by_aod_run
+
+    planes = get_fabric_planes()
+    candidates = get_candidates_by_aod_run(run_id)
+    sors = get_sor_declarations()
+
+    return {
+        "run_id": run_id,
+        "snapshot_name": latest.get("snapshot_name"),
+        "fabric_planes": [
+            {"plane_type": p["plane_type"], "vendor": p["vendor"], "is_healthy": p.get("is_healthy", True)}
+            for p in planes
+        ],
+        "candidates": [
+            {
+                "asset_key": c["asset_key"],
+                "vendor_name": c["vendor_name"],
+                "display_name": c["display_name"],
+                "category": c["category"],
+                "aod_run_id": c.get("aod_run_id"),
+                "aod_asset_id": c.get("aod_asset_id"),
+                "connected_via_plane": c.get("connected_via_plane"),
+                "execution_allowed": c.get("execution_allowed"),
+                "action_type": c.get("action_type", "provision"),
+            }
+            for c in candidates
+            # Skip infrastructure candidates — they're auto-created during handoff
+            if not c["asset_key"].startswith("infra:")
+        ],
+        "sors": [
+            {"vendor": s["vendor"], "domain": s.get("domain"), "category": s.get("category"),
+             "confidence": s.get("confidence")}
+            for s in sors
+        ],
+    }
 
 
 def resolve_fabric_planes(request: AODHandoffRequest) -> tuple[dict, int]:

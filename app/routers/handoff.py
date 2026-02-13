@@ -32,28 +32,7 @@ from ..services.export_service import build_reconciliation_csv
 
 _log = get_logger("routers.handoff")
 
-RAW_AOD_BODY_FILE = "aod_raw_body.json"
-
 router = APIRouter(prefix="/api/handoff/aod", tags=["AOD Handoff"])
-
-
-def _save_raw_aod_body(body: dict):
-    """Save the exact raw JSON body AOD sent, before any normalization."""
-    try:
-        summary = {
-            "run_id": body.get("run_id"),
-            "snapshot_name": body.get("snapshot_name"),
-            "top_level_keys": list(body.keys()),
-            "candidates_count": len(body.get("candidates", [])),
-            "fabric_planes_raw": body.get("fabric_planes", []),
-            "sors_raw": body.get("sors", []),
-            "systems_of_record_raw": body.get("systems_of_record", []),
-        }
-        with open(RAW_AOD_BODY_FILE, "w") as f:
-            json.dump(summary, f, indent=2, default=str)
-        _log.info("Saved raw AOD body summary to %s", RAW_AOD_BODY_FILE)
-    except Exception as e:
-        _log.error("Failed to save raw AOD body: %s", e)
 
 
 @router.post("/receive")
@@ -68,9 +47,6 @@ async def receive_aod_handoff(raw_request: Request):
     4. Logs the handoff for reconciliation
     """
     body = await raw_request.json()
-
-    # Save raw body for diagnostics BEFORE any normalization
-    _save_raw_aod_body(body)
 
     raw_planes = body.get("fabric_planes", [])
     _log.info("AOD raw fabric_planes field: count=%d, value=%s",
@@ -124,35 +100,29 @@ async def fetch_aod_data():
 
 @router.get("/debug/last-receive")
 async def debug_last_receive():
-    """Show exactly what AOD sent in the last /receive call (raw, pre-normalization).
-
-    Use this to trace whether AOD is sending fabric_planes and sors,
-    and what field names it uses.
-    """
-    import os
-    if not os.path.exists(RAW_AOD_BODY_FILE):
-        raise HTTPException(status_code=404, detail="No raw AOD body saved yet. Trigger a /receive first.")
-    with open(RAW_AOD_BODY_FILE) as f:
-        raw = json.load(f)
-
+    """Show what AAM stored from the last AOD handoff (from database, not files)."""
     saved = load_aod_payload()
-    saved_fp = saved.get("fabric_planes", []) if saved else []
-    saved_sors = saved.get("sors", []) if saved else []
+    if not saved:
+        raise HTTPException(status_code=404, detail="No AOD handoff data in database. Trigger a /receive first.")
+
+    saved_fp = saved.get("fabric_planes", [])
+    saved_sors = saved.get("sors", [])
+    saved_candidates = saved.get("candidates", [])
 
     return {
-        "what_aod_sent_raw": raw,
-        "what_aam_saved_after_normalization": {
+        "run_id": saved.get("run_id"),
+        "snapshot_name": saved.get("snapshot_name"),
+        "what_aam_stored": {
             "fabric_planes_count": len(saved_fp),
             "fabric_planes": saved_fp,
             "sors_count": len(saved_sors),
             "sors": saved_sors,
+            "candidates_count": len(saved_candidates),
         },
         "diagnosis": {
-            "aod_sent_fabric_planes": len(raw.get("fabric_planes_raw", [])) > 0,
-            "aod_sent_sors": len(raw.get("sors_raw", [])) > 0,
-            "aod_used_alternate_key_systems_of_record": len(raw.get("systems_of_record_raw", [])) > 0,
-            "aam_has_fabric_planes_after_parse": len(saved_fp) > 0,
-            "aam_has_sors_after_parse": len(saved_sors) > 0,
+            "aam_has_fabric_planes": len(saved_fp) > 0,
+            "aam_has_sors": len(saved_sors) > 0,
+            "aam_has_candidates": len(saved_candidates) > 0,
         },
     }
 
