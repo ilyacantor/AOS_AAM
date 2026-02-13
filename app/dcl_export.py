@@ -6,6 +6,8 @@ Uses REAL fabric plane data from AOD instead of hardcoded vendors.
 """
 import logging
 from typing import List, Dict, Any, Optional
+
+from .models import CandidateStatus
 from pydantic import BaseModel
 from datetime import datetime
 
@@ -60,7 +62,7 @@ def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
     else:
         # Get all candidates with status 'connected' or 'triaged'
         all_candidates = list_candidates()
-        candidates = [c for c in all_candidates if c.get("status") in ["connected", "triaged", "new"]]
+        candidates = [c for c in all_candidates if c.get("status") in [CandidateStatus.CONNECTED, CandidateStatus.TRIAGED, CandidateStatus.NEW]]
     
     # Group candidates by fabric plane (using fabric_plane_id linkage)
     planes_dict: Dict[str, Dict] = {}

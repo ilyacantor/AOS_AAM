@@ -24,7 +24,7 @@ from ..db import (
     list_handoff_logs,
     reset_aod_state,
 )
-from ..models import AODHandoffRequest, AODHandoffResponse, SORDeclaration
+from ..models import AODHandoffRequest, AODHandoffResponse, SORDeclaration, CandidateStatus
 
 _log = get_logger("services.handoff")
 
@@ -418,7 +418,7 @@ def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
             "aod_run_id": request.run_id,
             "aod_asset_id": f"infra-{plane.vendor.lower()}",
             "fabric_plane_id": plane_id,
-            "status": "new",
+            "status": CandidateStatus.NEW,
         }
         try:
             result = create_candidate(infra_candidate)

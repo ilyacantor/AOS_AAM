@@ -9,6 +9,10 @@ from fastapi.responses import HTMLResponse
 from typing import Optional
 from datetime import datetime
 
+from ..constants import (
+    ALL_PLANE_TYPES, PLANE_TYPE_LABELS, PLANE_TYPE_SHORT, PLANE_TYPE_COLORS,
+    SOR_CATEGORY_COLORS, SOR_CATEGORY_LABELS,
+)
 from ..ui.styles import NAV_STYLE, UI_STYLE, NAV_HTML, ui_nav, aod_run_banner
 from ..db import (
     list_pipes,
@@ -35,14 +39,14 @@ async def ui_pipes_list(
     # Single filter for asset classes
     if filter == "all":
         pipes = all_pipes
-    elif filter in ["IPAAS", "API_GATEWAY", "EVENT_BUS", "DATA_WAREHOUSE"]:
+    elif filter in ALL_PLANE_TYPES:
         pipes = [p for p in all_pipes if p.get("fabric_plane") == filter]
     else:
         # Filter by source system
         pipes = [p for p in all_pipes if p.get("source_system") == filter]
     
     source_systems = sorted(set(p.get("source_system", "") for p in all_pipes if p.get("source_system")))
-    fabric_planes = ["IPAAS", "API_GATEWAY", "EVENT_BUS", "DATA_WAREHOUSE"]
+    fabric_planes = ALL_PLANE_TYPES
     
     all_drift = list_all_drift_events()
     drift_by_pipe = {}
@@ -55,13 +59,7 @@ async def ui_pipes_list(
             if d.get("status") == "open":
                 drift_by_pipe[pid]["open"] += 1
     
-    fabric_plane_colors = {
-        "IPAAS": "#22d3ee",
-        "API_GATEWAY": "#a78bfa",
-        "EVENT_BUS": "#f97316",
-        "DATA_WAREHOUSE": "#10b981",
-        "UNMAPPED": "#ef4444",
-    }
+    fabric_plane_colors = {**PLANE_TYPE_COLORS, "UNMAPPED": "#ef4444"}
     
     rows_html = ""
     for p in pipes:
@@ -2047,19 +2045,14 @@ async def ui_reconcile(aod_run_id: str):
     status_text = "All Reconciled" if all_match else "Discrepancy Detected"
     
     # Fabric plane bars
-    fabric_types = ["API_GATEWAY", "DATA_WAREHOUSE", "IPAAS", "EVENT_BUS"]
+    fabric_types = ALL_PLANE_TYPES
     fabric_colors = {
         "API_GATEWAY": "var(--cyan-400)",
         "DATA_WAREHOUSE": "var(--blue-400)",
         "IPAAS": "var(--purple-400)",
-        "EVENT_BUS": "var(--orange-400)"
+        "EVENT_BUS": "var(--orange-400)",
     }
-    fabric_labels = {
-        "API_GATEWAY": "API Gateway",
-        "DATA_WAREHOUSE": "Data Warehouse",
-        "IPAAS": "iPaaS",
-        "EVENT_BUS": "Event Bus"
-    }
+    fabric_labels = PLANE_TYPE_LABELS
     fabrics_by_type = aam.get("fabrics_by_type", {})
     max_fabric = max(fabrics_by_type.values()) if fabrics_by_type else 1
     
@@ -2084,12 +2077,7 @@ async def ui_reconcile(aod_run_id: str):
     # Category breakdown
     candidates_by_cat = aam.get("candidates_by_category", {})
     from ..constants import SOR_CATEGORIES as sor_categories
-    cat_colors = {
-        "crm": "var(--cyan-400)", "erp": "var(--blue-400)", "hcm": "var(--green-400)",
-        "idp": "var(--purple-400)", "itsm": "var(--orange-400)", "finance": "var(--emerald-400)",
-        "saas": "var(--pink-400)", "hr": "var(--green-400)", "cmdb": "var(--amber-400)",
-        "identity": "var(--purple-400)", "other": "var(--slate-400)", "unknown": "var(--slate-500)"
-    }
+    cat_colors = SOR_CATEGORY_COLORS
     
     category_rows_html = ""
     for cat, count in sorted(candidates_by_cat.items(), key=lambda x: -x[1]):
@@ -2192,9 +2180,7 @@ async def ui_reconcile(aod_run_id: str):
     fc_only_aam = fc.get("only_in_aam", [])
     fc_in_both = fc.get("in_both", [])
     
-    plane_labels = {
-        "IPAAS": "iPaaS", "API_GATEWAY": "API GW", "EVENT_BUS": "Event Bus", "DATA_WAREHOUSE": "DW"
-    }
+    plane_labels = PLANE_TYPE_SHORT
     
     def vendor_badge(name, style_type="default"):
         if style_type == "aod":
@@ -2303,10 +2289,7 @@ async def ui_reconcile(aod_run_id: str):
     sor_cat_mismatches = sc_sor.get("category_mismatches", 0)
     sor_missing_count = sc_sor.get("missing", 0)
     
-    cat_labels_sor = {
-        "crm": "CRM", "erp": "ERP", "hcm": "HCM", "idp": "Identity", "itsm": "ITSM",
-        "saas": "SaaS", "hr": "HR", "finance": "Finance", "cmdb": "CMDB", "identity": "Identity",
-    }
+    cat_labels_sor = SOR_CATEGORY_LABELS
     
     sor_undispositioned = sc_sor.get("undispositioned", 0)
     

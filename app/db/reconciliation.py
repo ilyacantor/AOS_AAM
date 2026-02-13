@@ -139,7 +139,7 @@ def _compare_fabric_planes(cursor, aod_run_id: str) -> dict:
     A plane that exists but has 0 candidates is flagged as "match_empty"
     so the operator knows the infrastructure is declared but unused.
     """
-    ALL_PLANE_TYPES = ["IPAAS", "API_GATEWAY", "EVENT_BUS", "DATA_WAREHOUSE"]
+    from ..constants import ALL_PLANE_TYPES
 
     # --- AOD side: explicit planes from handoff log ---
     cursor.execute("""

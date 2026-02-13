@@ -17,6 +17,47 @@ SOR_CATEGORIES: set[str] = {
     "saas", "hr", "finance", "cmdb", "identity",
 }
 
+# Canonical fabric plane types
+ALL_PLANE_TYPES: list[str] = ["IPAAS", "API_GATEWAY", "EVENT_BUS", "DATA_WAREHOUSE"]
+
+# UI display labels for plane types
+PLANE_TYPE_LABELS: dict[str, str] = {
+    "IPAAS": "iPaaS",
+    "API_GATEWAY": "API Gateway",
+    "EVENT_BUS": "Event Bus",
+    "DATA_WAREHOUSE": "Data Warehouse",
+}
+
+# Short abbreviations for plane types (used in compact tables)
+PLANE_TYPE_SHORT: dict[str, str] = {
+    "IPAAS": "iPaaS",
+    "API_GATEWAY": "API GW",
+    "EVENT_BUS": "Event Bus",
+    "DATA_WAREHOUSE": "DW",
+}
+
+# UI accent colors per plane type (CSS color values)
+PLANE_TYPE_COLORS: dict[str, str] = {
+    "IPAAS": "#22d3ee",
+    "API_GATEWAY": "#a78bfa",
+    "EVENT_BUS": "#f97316",
+    "DATA_WAREHOUSE": "#10b981",
+}
+
+# UI accent colors per SOR category (CSS variable references)
+SOR_CATEGORY_COLORS: dict[str, str] = {
+    "crm": "var(--cyan-400)", "erp": "var(--blue-400)", "hcm": "var(--green-400)",
+    "idp": "var(--purple-400)", "itsm": "var(--orange-400)", "finance": "var(--emerald-400)",
+    "saas": "var(--pink-400)", "hr": "var(--green-400)", "cmdb": "var(--amber-400)",
+    "identity": "var(--purple-400)", "other": "var(--slate-400)", "unknown": "var(--slate-500)",
+}
+
+# UI display labels for SOR categories (upper-case presentation)
+SOR_CATEGORY_LABELS: dict[str, str] = {
+    "crm": "CRM", "erp": "ERP", "hcm": "HCM", "idp": "Identity", "itsm": "ITSM",
+    "saas": "SaaS", "hr": "HR", "finance": "Finance", "cmdb": "CMDB", "identity": "Identity",
+}
+
 # Keywords in candidate display_name that signal a fabric-infrastructure vendor.
 # These are NOT category inferences — they match explicit infrastructure labels
 # that AOD attached to candidate records (e.g. "MuleSoft - iPaaS").

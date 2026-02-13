@@ -83,11 +83,11 @@ async def get_pipe_topology(pipe_id: str):
 @router.get("/plane/{fabric_plane}")
 async def get_plane_topology(fabric_plane: str):
     """Get topology for a specific fabric plane."""
-    valid_planes = ["IPAAS", "API_GATEWAY", "EVENT_BUS", "DATA_WAREHOUSE"]
-    if fabric_plane.upper() not in valid_planes:
+    from ..constants import ALL_PLANE_TYPES
+    if fabric_plane.upper() not in ALL_PLANE_TYPES:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid fabric plane. Must be one of: {', '.join(valid_planes)}",
+            detail=f"Invalid fabric plane. Must be one of: {', '.join(ALL_PLANE_TYPES)}",
         )
     result = get_topology_for_fabric_plane(fabric_plane.upper())
     return {**result, "generated_at": datetime.utcnow().isoformat()}

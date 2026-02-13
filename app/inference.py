@@ -141,13 +141,13 @@ def infer_fabric_plane(endpoint_info: dict, metadata: dict) -> str:
       the enterprise wired its integrations.
     - When nothing matches, return None (unknown) instead of guessing.
     """
-    from .constants import INFRA_VENDOR_PLANE
+    from .constants import INFRA_VENDOR_PLANE, ALL_PLANE_TYPES
 
     url = endpoint_info.get("url", "").lower()
     vendor = metadata.get("vendor", "").lower()
     fabric = metadata.get("fabric_plane", "").upper()
 
-    if fabric in ["IPAAS", "API_GATEWAY", "EVENT_BUS", "DATA_WAREHOUSE"]:
+    if fabric in ALL_PLANE_TYPES:
         return fabric
 
     for infra_vendor, plane in INFRA_VENDOR_PLANE.items():

@@ -70,6 +70,11 @@ class DriftThresholds:
     consumer_lag_threshold: int = settings.DRIFT_CONSUMER_LAG_THRESHOLD
     connection_timeout_seconds: int = settings.DRIFT_CONNECTION_TIMEOUT_S
     auth_expiry_warning_hours: int = 24
+    # Severity escalation multipliers (applied to base thresholds)
+    latency_high_multiplier: float = 3.0
+    latency_critical_multiplier: float = 5.0
+    lag_high_multiplier: float = 5.0
+    lag_critical_multiplier: float = 10.0
 
 
 class FabricDriftDetector:
@@ -122,9 +127,9 @@ class FabricDriftDetector:
         """Detect abnormal latency on a plane"""
         if latency_ms > self._thresholds.latency_ms_threshold:
             severity = DriftSeverity.MEDIUM
-            if latency_ms > self._thresholds.latency_ms_threshold * 3:
+            if latency_ms > self._thresholds.latency_ms_threshold * self._thresholds.latency_high_multiplier:
                 severity = DriftSeverity.HIGH
-            if latency_ms > self._thresholds.latency_ms_threshold * 5:
+            if latency_ms > self._thresholds.latency_ms_threshold * self._thresholds.latency_critical_multiplier:
                 severity = DriftSeverity.CRITICAL
             
             drift = FabricDriftEvent(
@@ -152,9 +157,9 @@ class FabricDriftDetector:
         """Detect Kafka consumer falling behind"""
         if consumer_lag > self._thresholds.consumer_lag_threshold:
             severity = DriftSeverity.MEDIUM
-            if consumer_lag > self._thresholds.consumer_lag_threshold * 5:
+            if consumer_lag > self._thresholds.consumer_lag_threshold * self._thresholds.lag_high_multiplier:
                 severity = DriftSeverity.HIGH
-            if consumer_lag > self._thresholds.consumer_lag_threshold * 10:
+            if consumer_lag > self._thresholds.consumer_lag_threshold * self._thresholds.lag_critical_multiplier:
                 severity = DriftSeverity.CRITICAL
             
             drift = FabricDriftEvent(

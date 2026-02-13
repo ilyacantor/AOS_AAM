@@ -4,6 +4,7 @@ Admin Router — clear data, debug, and diagnostic endpoints.
 from fastapi import APIRouter
 
 from ..db import clear_all_data, get_connection, get_canonical_stats
+from ..constants import SOR_CATEGORIES
 
 router = APIRouter(tags=["Admin"])
 
@@ -92,7 +93,7 @@ async def debug_handoff_state():
             "fabric_planes_missing": fabric_plane_count == 0,
             "all_candidates_unassigned": assignment_stats.get("assigned", 0) == 0 and total_candidates > 0,
             "no_sor_categories": not any(
-                cat.lower() in ["crm", "erp", "hcm", "idp", "itsm"] for cat in category_dist.keys()
+                cat.lower() in SOR_CATEGORIES for cat in category_dist.keys()
             ),
         },
     }
