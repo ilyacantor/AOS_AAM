@@ -100,7 +100,26 @@ async def fetch_aod_data():
     if not payload:
         raise HTTPException(status_code=404, detail="No AOD data stored. Run AOD handoff first.")
 
-    request = AODHandoffRequest(**payload)
+    # Apply the same normalization that /receive does — the cached payload
+    # may contain raw AOD values (wrong case, datetime strings, etc.)
+    raw_planes = payload.get("fabric_planes", [])
+    if raw_planes:
+        payload["fabric_planes"] = normalize_fabric_planes(raw_planes)
+    raw_sors = payload.get("sors", [])
+    if raw_sors:
+        payload["sors"] = normalize_sors(raw_sors)
+    raw_candidates = payload.get("candidates", [])
+    if raw_candidates:
+        payload["candidates"] = normalize_candidates(raw_candidates)
+
+    try:
+        request = AODHandoffRequest(**payload)
+    except Exception as e:
+        _log.error("Cached AOD payload failed validation on replay: %s", e)
+        raise HTTPException(
+            status_code=422,
+            detail=f"Cached AOD payload is invalid: {e}",
+        )
     reset_aod_state()
     return process_handoff(request)
 
