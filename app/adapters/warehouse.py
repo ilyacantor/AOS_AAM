@@ -26,7 +26,7 @@ class WarehouseAdapter(FabricAdapter):
     
     Supported vendors: Snowflake, BigQuery, Redshift, Databricks
     
-    In Preset 11 (Warehouse-Centric), this is the authoritative Source of Truth.
+    When the enterprise routes through DATA_WAREHOUSE, this is the authoritative Source of Truth.
     """
     
     SUPPORTED_VENDORS = ["snowflake", "bigquery", "redshift", "databricks"]

@@ -1,0 +1,13 @@
+Let me take a look at your RACI matrix to cross-reference what the responsibilities should actually be.Ilya, you're right to question this. The AAM agent is deflecting its own RACI responsibilities.
+
+Looking at your master RACI, there's a clear contradiction between what the agent is claiming and what the matrix says it should be doing:
+
+**AAM owns Fabric Plane Inference.** Under the "Pipe Inference" category, "Infer Fabric Plane" is explicitly AAM: A/R with the note "WHERE pipes live." That's not a consultative role — AAM is both Accountable and Responsible for figuring out which plane a pipe belongs to. The agent saying "we can't infer without hints from AOD" is essentially abdicating a responsibility it owns.
+
+**AOD's role is evidence leads, not definitive routing.** The RACI shows AOD owns "Evidence Lead Generation (Connection Hints)" — described as "Observation plane signals *hinting* at asset-to-fabric connections." And "Evidence Lead Export to AAM" says it "Passes connection hints in ConnectionCandidate handoff for AAM to *validate against plane crawl*." The word "hints" is doing a lot of work here. AOD provides signals; AAM is supposed to take those signals and run inference.
+
+**The 686/690 failure rate exposes a broken inference pipeline, not correct behavior.** If AAM's inference engine can only resolve candidates that already have a definitive `connected_via_plane` value from AOD, then it's not doing inference at all — it's just copying a field. The 4 that worked (API_GATEWAY, DATA_WAREHOUSE, EVENT_BUS, IPAAS) aren't inferred; they're self-evident infrastructure products whose plane type AOD could trivially assign.
+
+**What the AAM agent got right:** The principle that application categories don't determine infrastructure routing is valid. Salesforce *could* route through any plane. But that's exactly why AAM owns "Enterprise Preset Inference" as Consulted — the preset (e.g., "iPaaS-first" vs "API-Gateway-first") should be informing AAM's inference logic for candidates that lack explicit plane hints.
+
+The fix isn't just "AOD needs to send better hints." It's that AAM's `find_matching_pipe` logic needs to actually use the enterprise preset and whatever evidence leads AOD *does* provide (even partial ones) to make inference decisions — which is the job the RACI assigns it.

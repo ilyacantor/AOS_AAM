@@ -2,7 +2,7 @@
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | **MESH (AAM)** |  |  |  |  |  |  |  | *The Fabric* |
 | **Fabric Mgmt** | **Fabric Plane Connection** (The Backbone) |  | **A/R** |  |  | I | FUNCTIONAL | *Connects to Planes, not Apps* |
-|  | **Preset Config Loading** (6, 8, 9, 11) |  | **A/R** |  |  | I | FUNCTIONAL | *Configures Mesh behavior* |
+|  | **Fabric Plane Inference Cascade** |  | **A/R** |  |  | I | FUNCTIONAL | *Evidence-based plane routing* |
 |  | Routing Policy Enforcement |  | A/R |  |  | I | FUNCTIONAL | *Enforces "Block Direct Access"* |
 | **Adapters** | Adapter Factory Resolution |  | A/R |  |  | I | FUNCTIONAL | *Instantiates Strategy (Gateway vs Bus)* |
 |  | IPAAS Connection (Workato, MuleSoft) |  | A/R |  |  | I | FUNCTIONAL | *Webhooks/Signals modality* |
@@ -19,7 +19,7 @@
 | **Governance** | **PII Redaction** (Edge) |  | **A/R** |  |  | I | FUNCTIONAL | *Redacts before data enters DCL* |
 |  | Rate Limit Enforcement |  | A/R |  |  | I | FUNCTIONAL | *Plane-level rate limiting* |
 |  | Auth Policy Enforcement |  | A/R |  |  | I | FUNCTIONAL | *Plane-level auth validation* |
-|  | Block Direct App Access |  | A/R |  |  | I | FUNCTIONAL | *Enforced for non-Scrappy presets* |
+|  | Block Direct App Access |  | A/R |  |  | I | FUNCTIONAL | *Enforced via fabric plane routing* |
 | **Pipe Inference** | Fabric Plane Inference |  | A/R |  |  | I | FUNCTIONAL | *WHERE pipes live* |
 |  | Modality Inference |  | A/R |  |  | I | FUNCTIONAL | *HOW pipes are accessed* |
 |  | Transport Kind Inference |  | A/R |  |  | I | FUNCTIONAL | *API, EVENT_STREAM, TABLE, FILE* |

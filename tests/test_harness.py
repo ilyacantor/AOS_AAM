@@ -198,7 +198,7 @@ def test_story_1(run_id):
 
 def test_story_2(run_id):
     """
-    Story 2: User navigates to Topology → SOR preset view.
+    Story 2: User navigates to Topology → SOR view.
     SORs should match candidate data.
     """
     result = TestResult("Story 2: Topology SOR View")
@@ -285,7 +285,7 @@ def test_story_2(run_id):
 
 def test_story_3(run_id):
     """
-    Story 3: User views Topology Fabric preset view.
+    Story 3: User views Topology Fabric Plane view.
     Fabrics should match candidate data.
     """
     result = TestResult("Story 3: Topology Fabric View")
