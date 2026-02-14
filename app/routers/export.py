@@ -44,7 +44,7 @@ async def push_to_dcl(request: Request):
     push_record = record_dcl_push(
         pipe_count=export_data.total_connections,
         payload=export_payload,
-        aod_run_id=aod_run_id or export_data.run_id,
+        aod_run_id=aod_run_id or export_data.aod_run_id,
         notes=notes,
     )
 

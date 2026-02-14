@@ -4,7 +4,6 @@ AAM → DCL Export Module
 Provides pipe definitions grouped by fabric plane for DCL consumption.
 Uses REAL fabric plane data from AOD instead of hardcoded vendors.
 """
-import json
 import logging
 from typing import List, Dict, Any, Optional
 
@@ -19,15 +18,16 @@ _log = logging.getLogger(__name__)
 
 class DCLConnectionSchema(BaseModel):
     """Schema for a single connection in a fabric plane"""
+    pipe_id: str
     source_name: str
     vendor: str
     category: str
     governance_status: Optional[str] = None
+    fields: List[str] = []
     health: str = "healthy"
     last_sync: Optional[str] = None
     asset_key: str
     aod_asset_id: Optional[str] = None
-    fields: List[str] = []
 
 
 class DCLFabricPlane(BaseModel):
@@ -41,7 +41,7 @@ class DCLFabricPlane(BaseModel):
 
 class DCLExportResponse(BaseModel):
     """Response for DCL export endpoint"""
-    run_id: Optional[str] = None
+    aod_run_id: Optional[str] = None
     timestamp: str
     fabric_planes: List[DCLFabricPlane]
     total_connections: int
@@ -107,25 +107,17 @@ def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
         
         connections = []
         for candidate in candidates_list:
-            # known_endpoints may be a JSON string or already a list
-            raw_ep = candidate.get("known_endpoints", [])
-            if isinstance(raw_ep, str):
-                try:
-                    raw_ep = json.loads(raw_ep)
-                except (json.JSONDecodeError, TypeError):
-                    raw_ep = []
-            fields = raw_ep if isinstance(raw_ep, list) else []
-
             connection = DCLConnectionSchema(
+                pipe_id=candidate.get("candidate_id", ""),
                 source_name=candidate.get("display_name", "Unknown"),
                 vendor=candidate.get("vendor_name", "Unknown"),
                 category=candidate.get("category", "other"),
                 governance_status=candidate.get("governance_status"),
+                fields=[],  # Schema column names — populated after observation/enrichment
                 health="unknown",
                 last_sync=candidate.get("updated_at"),
                 asset_key=candidate.get("asset_key", ""),
                 aod_asset_id=candidate.get("aod_asset_id"),
-                fields=fields,
             )
             connections.append(connection)
         
@@ -140,7 +132,7 @@ def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
         total_connections += len(connections)
     
     return DCLExportResponse(
-        run_id=aod_run_id,
+        aod_run_id=aod_run_id,
         timestamp=datetime.utcnow().isoformat() + "Z",
         fabric_planes=fabric_planes_output,
         total_connections=total_connections,
