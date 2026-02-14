@@ -24,7 +24,7 @@ from ..db import (
     list_handoff_logs,
     reset_aod_state,
 )
-from ..models import AODHandoffRequest, AODHandoffResponse, SORDeclaration, CandidateStatus
+from ..models import AODHandoffRequest, AODHandoffResponse, SORDeclaration, CandidateStatus, FabricPlane, Modality
 
 _log = get_logger("services.handoff")
 
@@ -39,18 +39,16 @@ def normalize_fabric_planes(raw_planes: list[dict]) -> list[dict]:
     for fp in raw_planes:
         pt = fp.get("plane_type") or fp.get("type") or fp.get("planeType") or ""
         vendor = fp.get("vendor") or fp.get("name") or ""
-        health_raw = fp.get("is_healthy")
-        if health_raw is None:
-            is_healthy = None  # AOD didn't declare — preserve uncertainty
-        else:
-            is_healthy = bool(health_raw)
         source = fp.get("source", "aod")
         pt_upper = PLANE_TYPE_ALIASES.get(pt, pt.upper().replace(" ", "_") if pt else "")
         if pt_upper and vendor:
-            normalized.append({
-                "plane_type": pt_upper, "vendor": vendor,
-                "is_healthy": is_healthy, "source": source,
-            })
+            entry: dict = {"plane_type": pt_upper, "vendor": vendor, "source": source}
+            # Only include is_healthy when AOD explicitly declared it;
+            # omitting the key lets Pydantic use the model default (True).
+            health_raw = fp.get("is_healthy")
+            if health_raw is not None:
+                entry["is_healthy"] = bool(health_raw)
+            normalized.append(entry)
     return normalized
 
 
@@ -61,16 +59,36 @@ def normalize_candidates(raw_candidates: list[dict]) -> list[dict]:
     send connected_via_plane in lowercase ("api_gateway") which would crash
     pydantic validation for the ENTIRE batch.  Normalize it here, same as
     we normalize plane_type on fabric planes.
+
+    Unknown enum values are stripped to None so one bad routing hint
+    doesn't reject the entire batch.
     """
+    valid_planes = {e.value for e in FabricPlane}
+    valid_modalities = {e.value for e in Modality}
     for c in raw_candidates:
         cvp = c.get("connected_via_plane")
         if cvp and isinstance(cvp, str):
             normalized = PLANE_TYPE_ALIASES.get(cvp, cvp.upper().replace(" ", "_"))
-            c["connected_via_plane"] = normalized
+            if normalized in valid_planes:
+                c["connected_via_plane"] = normalized
+            else:
+                _log.warning("Unknown connected_via_plane '%s' for %s, stripping to null",
+                             cvp, c.get("asset_key", "?"))
+                c["connected_via_plane"] = None
+        elif cvp is not None:
+            c["connected_via_plane"] = None
         # Also handle preferred_modality if it's lowercase
         pm = c.get("preferred_modality")
         if pm and isinstance(pm, str):
-            c["preferred_modality"] = pm.upper().replace(" ", "_")
+            normalized_pm = pm.upper().replace(" ", "_")
+            if normalized_pm in valid_modalities:
+                c["preferred_modality"] = normalized_pm
+            else:
+                _log.warning("Unknown preferred_modality '%s' for %s, stripping to null",
+                             pm, c.get("asset_key", "?"))
+                c["preferred_modality"] = None
+        elif pm is not None:
+            c["preferred_modality"] = None
     return raw_candidates
 
 

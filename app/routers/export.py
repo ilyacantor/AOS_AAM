@@ -5,29 +5,26 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from typing import Optional
 from datetime import datetime
 
-from ..db import list_pipes, get_pipe_stats, list_candidates, record_dcl_push, list_dcl_pushes, get_dcl_push
+from ..db import get_pipe_stats, list_candidates, record_dcl_push, list_dcl_pushes, get_dcl_push
+from ..dcl_export import build_dcl_export
 
 router = APIRouter(tags=["Export"])
 
 
 @router.get("/api/export/dcl/declared-pipes")
 async def export_for_dcl(aod_run_id: Optional[str] = Query(None)):
-    """Export all pipes in DCL format. This is the canonical DCL export endpoint."""
-    pipes = list_pipes()
-    if aod_run_id:
-        pipes = [p for p in pipes if p.get("provenance", {}).get("aod_run_id") == aod_run_id]
-    return {
-        "export_version": "1.0",
-        "exported_at": datetime.utcnow().isoformat(),
-        "pipe_count": len(pipes),
-        "pipes": pipes,
-    }
+    """Export connections grouped by fabric plane for DCL consumption.
+
+    Returns fabric_planes[] with total_connections — the canonical DCL format.
+    """
+    export_data = build_dcl_export(aod_run_id=aod_run_id)
+    return export_data.model_dump()
 
 
 @router.post("/api/export/dcl/push")
 async def push_to_dcl(request: Request):
     """
-    Export pipes to DCL and record the push for reconciliation.
+    Export connections to DCL and record the push for reconciliation.
     Returns the export payload and a push_id for tracking.
 
     Optional body: {"aod_run_id": "...", "notes": "..."}
@@ -41,21 +38,13 @@ async def push_to_dcl(request: Request):
     aod_run_id = body.get("aod_run_id")
     notes = body.get("notes")
 
-    pipes = list_pipes()
-    if aod_run_id:
-        pipes = [p for p in pipes if p.get("provenance", {}).get("aod_run_id") == aod_run_id]
-
-    export_payload = {
-        "export_version": "1.0",
-        "exported_at": datetime.utcnow().isoformat(),
-        "pipe_count": len(pipes),
-        "pipes": pipes,
-    }
+    export_data = build_dcl_export(aod_run_id=aod_run_id)
+    export_payload = export_data.model_dump()
 
     push_record = record_dcl_push(
-        pipe_count=len(pipes),
+        pipe_count=export_data.total_connections,
         payload=export_payload,
-        aod_run_id=aod_run_id,
+        aod_run_id=aod_run_id or export_data.run_id,
         notes=notes,
     )
 
@@ -99,13 +88,7 @@ async def download_push_payload(push_id: str):
 
 @router.get("/api/dcl/export-pipes", tags=["DCL Export"])
 async def export_pipes_for_dcl(aod_run_id: Optional[str] = Query(None)):
-    """Export pipe definitions grouped by fabric plane for DCL consumption.
-    
-    Note: Most pipes may be UNMAPPED if no fabric planes are assigned.
-    Use /api/export/dcl/declared-pipes for the flat canonical export.
-    """
-    from ..dcl_export import build_dcl_export
-
+    """Alias for /api/export/dcl/declared-pipes — same fabric-plane-grouped format."""
     export_data = build_dcl_export(aod_run_id=aod_run_id)
     return export_data.model_dump()
 

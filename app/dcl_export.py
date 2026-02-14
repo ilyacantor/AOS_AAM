@@ -4,6 +4,7 @@ AAM → DCL Export Module
 Provides pipe definitions grouped by fabric plane for DCL consumption.
 Uses REAL fabric plane data from AOD instead of hardcoded vendors.
 """
+import json
 import logging
 from typing import List, Dict, Any, Optional
 
@@ -26,6 +27,7 @@ class DCLConnectionSchema(BaseModel):
     last_sync: Optional[str] = None
     asset_key: str
     aod_asset_id: Optional[str] = None
+    fields: List[str] = []
 
 
 class DCLFabricPlane(BaseModel):
@@ -105,6 +107,15 @@ def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
         
         connections = []
         for candidate in candidates_list:
+            # known_endpoints may be a JSON string or already a list
+            raw_ep = candidate.get("known_endpoints", [])
+            if isinstance(raw_ep, str):
+                try:
+                    raw_ep = json.loads(raw_ep)
+                except (json.JSONDecodeError, TypeError):
+                    raw_ep = []
+            fields = raw_ep if isinstance(raw_ep, list) else []
+
             connection = DCLConnectionSchema(
                 source_name=candidate.get("display_name", "Unknown"),
                 vendor=candidate.get("vendor_name", "Unknown"),
@@ -114,6 +125,7 @@ def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
                 last_sync=candidate.get("updated_at"),
                 asset_key=candidate.get("asset_key", ""),
                 aod_asset_id=candidate.get("aod_asset_id"),
+                fields=fields,
             )
             connections.append(connection)
         
