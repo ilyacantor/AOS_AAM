@@ -3,25 +3,32 @@ Topology Service — builds lightweight topology summaries for the UI.
 
 When Farm provides authoritative SOR declarations (via AOD), those
 take precedence over candidate-derived SOR classifications.
-
-Resolution logic is in ``app.plane_resolution`` — the single source of truth
-for mapping candidates to fabric planes.  This module MUST NOT duplicate it.
 """
 from datetime import datetime
 
 from ..logger import get_logger
 from ..constants import SOR_CATEGORIES
-from ..db import list_declared_pipes, list_candidates, get_canonical_stats
+from ..db import list_pipes, list_candidates, get_canonical_stats
 from ..db.fabric_planes import get_fabric_planes
 from ..db.sor_declarations import get_sor_declarations
-from ..plane_resolution import (
-    resolve_candidate_to_plane,
-    build_plane_lookups,
-    build_plane_node,
-    parse_plane_type,
-)
 
 _log = get_logger("services.topology")
+
+PLANE_LABELS = {
+    "IPAAS": "iPaaS",
+    "API_GATEWAY": "API Gateway",
+    "EVENT_BUS": "Event Bus",
+    "DATA_WAREHOUSE": "Data Warehouse",
+}
+
+
+def _extract_plane_type(fabric_plane_id: str, connected_via: str) -> str:
+    """Extract plane type from composite ID (e.g. 'IPAAS:workato' -> 'IPAAS')."""
+    if fabric_plane_id and ":" in fabric_plane_id:
+        return fabric_plane_id.split(":", 1)[0].upper()
+    if connected_via:
+        return connected_via.upper()
+    return "UNMAPPED"
 
 
 def build_topology_summary() -> dict:
@@ -36,18 +43,62 @@ def build_topology_summary() -> dict:
     """
     candidates = list_candidates()
     db_planes = get_fabric_planes()
+    all_pipes = list_pipes()
 
-    # Single shared resolution lookups (from plane_resolution module)
-    plane_info, type_to_plane = build_plane_lookups(db_planes)
+    # Build plane info lookup by plane_id (e.g. "IPAAS:workato")
+    plane_info = {p["plane_id"]: p for p in db_planes}
+
+    # Build type-to-first-plane fallback for candidates without fabric_plane_id
+    type_to_plane: dict[str, str] = {}
+    for p in db_planes:
+        if p["plane_type"] not in type_to_plane:
+            type_to_plane[p["plane_type"]] = p["plane_id"]
+
+    # Build pipe_id → fabric_plane lookup for matched-pipe resolution
+    pipe_planes: dict[str, str] = {}
+    for p in all_pipes:
+        fp = p.get("fabric_plane", "")
+        if fp and fp not in ("UNMAPPED", "UNKNOWN"):
+            pipe_planes[p["pipe_id"]] = fp
+
+    def _resolve_plane_id(candidate: dict) -> str:
+        """Resolve a candidate to its vendor-specific fabric plane_id.
+
+        Resolution order:
+          1. Explicit fabric_plane_id on the candidate
+          2. connected_via_plane type hint → type_to_plane lookup
+          3. Matched pipe's fabric_plane (backfill for pre-propagation data)
+          4. "UNMAPPED" (operator must categorize)
+        """
+        fpid = candidate.get("fabric_plane_id", "")
+        if fpid and fpid in plane_info:
+            return fpid
+        plane_type = _extract_plane_type(
+            candidate.get("fabric_plane_id", ""),
+            candidate.get("connected_via_plane", ""),
+        )
+        resolved = type_to_plane.get(plane_type)
+        if resolved:
+            return resolved
+
+        # Fallback: check matched pipe's fabric_plane
+        matched_pid = candidate.get("matched_pipe_id", "")
+        if matched_pid and matched_pid in pipe_planes:
+            return type_to_plane.get(pipe_planes[matched_pid], pipe_planes[matched_pid])
+
+        return "UNMAPPED"
 
     # Count candidates per vendor-plane, split by match status
+    # "connected" = has matched_pipe_id (inference ran and matched)
+    # "total" = all candidates routed to this plane
     vendor_plane_counts: dict[str, dict] = {}
     for c in candidates:
-        pid = resolve_candidate_to_plane(c, plane_info, type_to_plane)
-        counts = vendor_plane_counts.setdefault(pid, {"connected": 0, "total": 0})
-        counts["total"] += 1
-        if c.get("matched_pipe_id"):
-            counts["connected"] += 1
+        pid = _resolve_plane_id(c)
+        if pid:
+            counts = vendor_plane_counts.setdefault(pid, {"connected": 0, "total": 0})
+            counts["total"] += 1
+            if c.get("matched_pipe_id"):
+                counts["connected"] += 1
 
     # Load authoritative SOR declarations from Farm (if any)
     auth_sors = get_sor_declarations()
@@ -58,6 +109,7 @@ def build_topology_summary() -> dict:
         _log.debug("Authoritative SOR: %s (domain=%s, category=%s)", vendor_key, s["domain"], s["category"])
 
     # Build SOR systems from candidates + authoritative SORs.
+    # planes set now stores vendor-specific plane_ids (e.g. "IPAAS:workato")
     sor_systems: dict = {}
     display_names: dict = {}
 
@@ -96,7 +148,7 @@ def build_topology_summary() -> dict:
             sor_systems[key]["is_sor"] = True
             if not sor_systems[key].get("category"):
                 sor_systems[key]["category"] = category
-        pid = resolve_candidate_to_plane(c, plane_info, type_to_plane)
+        pid = _resolve_plane_id(c)
         if pid and pid != "OTHER":
             sor_systems[key]["planes"].add(pid)
 
@@ -104,21 +156,41 @@ def build_topology_summary() -> dict:
     nodes = []
     edges = []
 
-    # Vendor-specific fabric plane nodes — built by shared build_plane_node()
+    # Vendor-specific fabric plane nodes
+    # Label format: "Vendor, Type\n(X connected / Y total)"
+    # Before inference: "0 connected / 654 total"
+    # After inference:  "654 connected / 654 total"
     created_plane_ids: set[str] = set()
-    for plane_id in plane_info:
+    for plane_id, info in plane_info.items():
         counts = vendor_plane_counts.get(plane_id, {"connected": 0, "total": 0})
-        node = build_plane_node(plane_id, plane_info, counts)
-        nodes.append(node)
+        vendor_display = info["vendor"].title()
+        type_label = PLANE_LABELS.get(info["plane_type"], info["plane_type"].replace("_", " ").title())
+        nodes.append({
+            "id": f"plane:{plane_id}",
+            "label": f"{vendor_display}, {type_label}\n({counts['connected']} connected / {counts['total']} total)",
+            "type": "fabric_plane",
+            "metadata": {
+                "plane_type": info["plane_type"],
+                "vendor": info["vendor"],
+                "connected": counts["connected"],
+                "total": counts["total"],
+            },
+        })
         created_plane_ids.add(plane_id)
 
-    # Fallback: create nodes for any planes referenced but not in DB (e.g. UNMAPPED)
+    # Fallback: create type-based nodes for any planes referenced but not in DB
     for sor_data in sor_systems.values():
         for pid in sor_data.get("planes", []):
             if pid not in created_plane_ids:
+                plane_type = pid.split(":", 1)[0] if ":" in pid else pid
+                type_label = PLANE_LABELS.get(plane_type, plane_type.replace("_", " ").title())
                 counts = vendor_plane_counts.get(pid, {"connected": 0, "total": 0})
-                node = build_plane_node(pid, plane_info, counts)
-                nodes.append(node)
+                nodes.append({
+                    "id": f"plane:{pid}",
+                    "label": f"{type_label}\n({counts['connected']} connected / {counts['total']} total)",
+                    "type": "fabric_plane",
+                    "metadata": {"plane_type": plane_type, "connected": counts["connected"], "total": counts["total"]},
+                })
                 created_plane_ids.add(pid)
 
     # Prioritize true SORs, then fill with top others (up to 20)

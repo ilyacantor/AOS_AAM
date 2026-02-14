@@ -31,7 +31,7 @@ def create_pipe(pipe_data: dict) -> dict:
         """, (
             pipe_id,
             pipe_data["display_name"],
-            pipe_data.get("fabric_plane"),  # None is valid — means unrouted
+            pipe_data.get("fabric_plane", "API_GATEWAY"),
             pipe_data["modality"],
             pipe_data["source_system"],
             pipe_data["transport_kind"],
@@ -61,35 +61,14 @@ def create_pipe(pipe_data: dict) -> dict:
 
 
 def get_pipe(pipe_id: str) -> Optional[dict]:
-    """Get a pipe from declared_pipes ONLY.
-
-    Use get_pipe_or_candidate() when you need the UI fallback that also
-    checks connection_candidates (e.g. /api/pipes/{id} where pipe_id may
-    actually be a candidate_id from list_candidates_as_pipes).
+    """
+    Get a pipe by ID.
+    CANONICAL: Pipes = Candidates, so check candidates first.
     """
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM declared_pipes WHERE pipe_id = ?", (pipe_id,))
-    row = cursor.fetchone()
-    conn.close()
-    if row:
-        return _row_to_pipe(row)
-    return None
-
-
-def get_pipe_or_candidate(pipe_id: str) -> Optional[dict]:
-    """Get a pipe by ID, falling back to connection_candidates.
-
-    This exists for UI compatibility — list_candidates_as_pipes() returns
-    candidate_ids as pipe_ids, so the UI may pass a candidate_id here.
-    Prefer get_pipe() in non-UI code paths.
-    """
-    result = get_pipe(pipe_id)
-    if result:
-        return result
-
-    conn = get_connection()
-    cursor = conn.cursor()
+    
+    # Check candidates first (canonical source)
     cursor.execute("""
         SELECT c.*, fp.plane_type as fabric_plane
         FROM connection_candidates c
@@ -97,18 +76,27 @@ def get_pipe_or_candidate(pipe_id: str) -> Optional[dict]:
         WHERE c.candidate_id = ?
     """, (pipe_id,))
     row = cursor.fetchone()
-    conn.close()
+    
     if row:
+        conn.close()
         return _candidate_to_pipe(row)
+    
+    # Fallback: check declared_pipes for backward compatibility
+    cursor.execute("SELECT * FROM declared_pipes WHERE pipe_id = ?", (pipe_id,))
+    row = cursor.fetchone()
+    conn.close()
+    
+    if row:
+        return _row_to_pipe(row)
     return None
 
 
-def list_candidates_as_pipes(source_system: Optional[str] = None, fabric_plane: Optional[str] = None, limit: Optional[int] = None) -> list[dict]:
+def list_pipes(source_system: Optional[str] = None, fabric_plane: Optional[str] = None, limit: Optional[int] = None) -> list[dict]:
     """
-    List candidates converted to pipe format for UI compatibility.
-
-    IMPORTANT: This reads connection_candidates, NOT declared_pipes.
-    Use list_declared_pipes() for actual pipes created during inference.
+    List pipes with optional filters.
+    
+    CANONICAL DEFINITION: Pipes = Candidates
+    This function queries connection_candidates (the source of truth).
     """
     conn = get_connection()
     cursor = conn.cursor()
@@ -231,48 +219,31 @@ def _candidate_to_pipe(row) -> dict:
     """
     Convert candidate row to pipe format for UI compatibility.
     CANONICAL: Candidates = Pipes
-
-    Uses actual plane type and endpoint data to infer transport and modality
-    instead of hardcoded defaults.
     """
-    from ..plane_resolution import (
-        infer_transport_from_plane_and_endpoints,
-        infer_modality_from_plane_and_category,
-        parse_plane_type,
-    )
-
     keys = row.keys()
-
-    # Extract fabric plane type: JOIN result → connected_via_plane → None
+    
+    # Extract fabric plane type: JOIN result → connected_via_plane → UNMAPPED
     fabric_plane = None
     if "fabric_plane" in keys and row["fabric_plane"]:
         fabric_plane = row["fabric_plane"].upper()
-    if not fabric_plane and "fabric_plane_id" in keys and row["fabric_plane_id"]:
-        fabric_plane = parse_plane_type(row["fabric_plane_id"])
     if not fabric_plane and "connected_via_plane" in keys and row["connected_via_plane"]:
         fabric_plane = row["connected_via_plane"].upper()
-
-    # Infer transport and modality from actual data — NOT hardcoded
-    endpoints = json.loads(row["known_endpoints"]) if row["known_endpoints"] else []
-    vendor_name = row["vendor_name"]
-    category = row["category"]
-
-    transport_kind = infer_transport_from_plane_and_endpoints(
-        fabric_plane, vendor_name, endpoints,
-    )
-    modality = infer_modality_from_plane_and_category(
-        fabric_plane, category, vendor_name,
-    )
-
+    if not fabric_plane:
+        fabric_plane = "UNMAPPED"
+    
+    # Map category to modality — iPaaS uses control plane, everything else is declared interface
+    category_lower = row["category"].lower() if row["category"] else ""
+    modality = "CONTROL_PLANE" if "ipaas" in category_lower else "DECLARED_INTERFACE"
+    
     return {
         "pipe_id": row["candidate_id"],  # Candidate ID = Pipe ID
         "display_name": row["display_name"],
         "fabric_plane": fabric_plane,
         "modality": modality,
-        "source_system": vendor_name,
-        "transport_kind": transport_kind,
-        "endpoint_ref": {"endpoints": endpoints},
-        "entity_scope": [category] if category else [],
+        "source_system": row["vendor_name"],
+        "transport_kind": "API",  # Default
+        "endpoint_ref": {"endpoints": json.loads(row["known_endpoints"]) if row["known_endpoints"] else []},
+        "entity_scope": [row["category"]] if row["category"] else [],
         "identity_keys": [],
         "change_semantics": "UNKNOWN",
         "provenance": {
@@ -296,10 +267,10 @@ def _row_to_pipe(row) -> dict:
     provenance = json.loads(row["provenance"]) if row["provenance"] else {}
     schema_info = json.loads(row["schema_info"]) if row["schema_info"] else None
     access_info = json.loads(row["access_info"]) if row["access_info"] else None
-
+    
     keys = row.keys()
-    fabric_plane = row["fabric_plane"] if "fabric_plane" in keys and row["fabric_plane"] else None
-
+    fabric_plane = row["fabric_plane"] if "fabric_plane" in keys and row["fabric_plane"] else "UNKNOWN"
+    
     return {
         "pipe_id": row["pipe_id"],
         "display_name": row["display_name"],
@@ -321,34 +292,5 @@ def _row_to_pipe(row) -> dict:
         "created_at": row["created_at"],
         "updated_at": row["updated_at"]
     }
-
-
-def list_declared_pipes(source_system: Optional[str] = None, fabric_plane: Optional[str] = None) -> list[dict]:
-    """List actual pipes from the declared_pipes table.
-
-    Unlike list_candidates_as_pipes() (which returns candidates), this reads
-    real pipes created during inference/matching.  Used by matching
-    (Strategy 1) and the DCL export.
-    """
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    conditions = []
-    params = []
-    if source_system:
-        conditions.append("source_system = ?")
-        params.append(source_system)
-    if fabric_plane:
-        conditions.append("UPPER(fabric_plane) = ?")
-        params.append(fabric_plane.upper())
-
-    where = " WHERE " + " AND ".join(conditions) if conditions else ""
-    cursor.execute(
-        f"SELECT * FROM declared_pipes{where} ORDER BY created_at DESC",
-        params,
-    )
-    rows = cursor.fetchall()
-    conn.close()
-    return [_row_to_pipe(row) for row in rows]
 
 

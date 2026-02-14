@@ -32,7 +32,28 @@ from ..services.export_service import build_reconciliation_csv
 
 _log = get_logger("routers.handoff")
 
+RAW_AOD_BODY_FILE = "aod_raw_body.json"
+
 router = APIRouter(prefix="/api/handoff/aod", tags=["AOD Handoff"])
+
+
+def _save_raw_aod_body(body: dict):
+    """Save the exact raw JSON body AOD sent, before any normalization."""
+    try:
+        summary = {
+            "run_id": body.get("run_id"),
+            "snapshot_name": body.get("snapshot_name"),
+            "top_level_keys": list(body.keys()),
+            "candidates_count": len(body.get("candidates", [])),
+            "fabric_planes_raw": body.get("fabric_planes", []),
+            "sors_raw": body.get("sors", []),
+            "systems_of_record_raw": body.get("systems_of_record", []),
+        }
+        with open(RAW_AOD_BODY_FILE, "w") as f:
+            json.dump(summary, f, indent=2, default=str)
+        _log.info("Saved raw AOD body summary to %s", RAW_AOD_BODY_FILE)
+    except Exception as e:
+        _log.error("Failed to save raw AOD body: %s", e)
 
 
 @router.post("/receive")
@@ -47,6 +68,9 @@ async def receive_aod_handoff(raw_request: Request):
     4. Logs the handoff for reconciliation
     """
     body = await raw_request.json()
+
+    # Save raw body for diagnostics BEFORE any normalization
+    _save_raw_aod_body(body)
 
     raw_planes = body.get("fabric_planes", [])
     _log.info("AOD raw fabric_planes field: count=%d, value=%s",
@@ -78,14 +102,7 @@ async def receive_aod_handoff(raw_request: Request):
     if raw_candidates:
         body["candidates"] = normalize_candidates(raw_candidates)
 
-    try:
-        request = AODHandoffRequest(**body)
-    except Exception as e:
-        _log.error("AOD payload validation failed: %s", e)
-        raise HTTPException(
-            status_code=422,
-            detail=f"AOD payload validation failed: {e}",
-        )
+    request = AODHandoffRequest(**body)
     _log.info(
         "Receive endpoint: run_id=%s, candidates=%d, fabric_planes=%d, sors=%d",
         request.run_id, len(request.candidates), len(request.fabric_planes), len(request.sors),
@@ -100,55 +117,42 @@ async def fetch_aod_data():
     if not payload:
         raise HTTPException(status_code=404, detail="No AOD data stored. Run AOD handoff first.")
 
-    # Apply the same normalization that /receive does — the cached payload
-    # may contain raw AOD values (wrong case, datetime strings, etc.)
-    raw_planes = payload.get("fabric_planes", [])
-    if raw_planes:
-        payload["fabric_planes"] = normalize_fabric_planes(raw_planes)
-    raw_sors = payload.get("sors", [])
-    if raw_sors:
-        payload["sors"] = normalize_sors(raw_sors)
-    raw_candidates = payload.get("candidates", [])
-    if raw_candidates:
-        payload["candidates"] = normalize_candidates(raw_candidates)
-
-    try:
-        request = AODHandoffRequest(**payload)
-    except Exception as e:
-        _log.error("Cached AOD payload failed validation on replay: %s", e)
-        raise HTTPException(
-            status_code=422,
-            detail=f"Cached AOD payload is invalid: {e}",
-        )
+    request = AODHandoffRequest(**payload)
     reset_aod_state()
     return process_handoff(request)
 
 
 @router.get("/debug/last-receive")
 async def debug_last_receive():
-    """Show what AAM stored from the last AOD handoff (from database, not files)."""
-    saved = load_aod_payload()
-    if not saved:
-        raise HTTPException(status_code=404, detail="No AOD handoff data in database. Trigger a /receive first.")
+    """Show exactly what AOD sent in the last /receive call (raw, pre-normalization).
 
-    saved_fp = saved.get("fabric_planes", [])
-    saved_sors = saved.get("sors", [])
-    saved_candidates = saved.get("candidates", [])
+    Use this to trace whether AOD is sending fabric_planes and sors,
+    and what field names it uses.
+    """
+    import os
+    if not os.path.exists(RAW_AOD_BODY_FILE):
+        raise HTTPException(status_code=404, detail="No raw AOD body saved yet. Trigger a /receive first.")
+    with open(RAW_AOD_BODY_FILE) as f:
+        raw = json.load(f)
+
+    saved = load_aod_payload()
+    saved_fp = saved.get("fabric_planes", []) if saved else []
+    saved_sors = saved.get("sors", []) if saved else []
 
     return {
-        "run_id": saved.get("run_id"),
-        "snapshot_name": saved.get("snapshot_name"),
-        "what_aam_stored": {
+        "what_aod_sent_raw": raw,
+        "what_aam_saved_after_normalization": {
             "fabric_planes_count": len(saved_fp),
             "fabric_planes": saved_fp,
             "sors_count": len(saved_sors),
             "sors": saved_sors,
-            "candidates_count": len(saved_candidates),
         },
         "diagnosis": {
-            "aam_has_fabric_planes": len(saved_fp) > 0,
-            "aam_has_sors": len(saved_sors) > 0,
-            "aam_has_candidates": len(saved_candidates) > 0,
+            "aod_sent_fabric_planes": len(raw.get("fabric_planes_raw", [])) > 0,
+            "aod_sent_sors": len(raw.get("sors_raw", [])) > 0,
+            "aod_used_alternate_key_systems_of_record": len(raw.get("systems_of_record_raw", [])) > 0,
+            "aam_has_fabric_planes_after_parse": len(saved_fp) > 0,
+            "aam_has_sors_after_parse": len(saved_sors) > 0,
         },
     }
 
@@ -270,19 +274,11 @@ async def download_reconciliation_json(aod_run_id: str):
     )
 
 
-# Fabric plane endpoints
-fabric_router = APIRouter(prefix="/api/handoff", tags=["Fabric Planes"])
+# Fabric-plane backfill endpoint
+fabric_router = APIRouter(prefix="/api/fabric-planes", tags=["Fabric Planes"])
 
 
-@fabric_router.get("/fabric-planes")
-async def list_stored_fabric_planes():
-    """List all stored fabric planes."""
-    from ..db.fabric_planes import get_fabric_planes
-    planes = get_fabric_planes()
-    return {"planes": planes, "count": len(planes)}
-
-
-@fabric_router.post("/fabric-planes/backfill")
+@fabric_router.post("/backfill")
 async def backfill_fabric_planes_from_candidates():
     """Backfill is disabled — AAM does not infer fabric planes from application categories.
 

@@ -24,9 +24,11 @@ from ..db import (
     list_handoff_logs,
     reset_aod_state,
 )
-from ..models import AODHandoffRequest, AODHandoffResponse, SORDeclaration, CandidateStatus, FabricPlane, Modality
+from ..models import AODHandoffRequest, AODHandoffResponse, SORDeclaration, CandidateStatus
 
 _log = get_logger("services.handoff")
+
+AOD_PAYLOAD_FILE = settings.AOD_PAYLOAD_FILE
 
 
 # ---- AOD payload normalization ----
@@ -37,16 +39,18 @@ def normalize_fabric_planes(raw_planes: list[dict]) -> list[dict]:
     for fp in raw_planes:
         pt = fp.get("plane_type") or fp.get("type") or fp.get("planeType") or ""
         vendor = fp.get("vendor") or fp.get("name") or ""
+        health_raw = fp.get("is_healthy")
+        if health_raw is None:
+            is_healthy = None  # AOD didn't declare — preserve uncertainty
+        else:
+            is_healthy = bool(health_raw)
         source = fp.get("source", "aod")
         pt_upper = PLANE_TYPE_ALIASES.get(pt, pt.upper().replace(" ", "_") if pt else "")
         if pt_upper and vendor:
-            entry: dict = {"plane_type": pt_upper, "vendor": vendor, "source": source}
-            # Only include is_healthy when AOD explicitly declared it;
-            # omitting the key lets Pydantic use the model default (True).
-            health_raw = fp.get("is_healthy")
-            if health_raw is not None:
-                entry["is_healthy"] = bool(health_raw)
-            normalized.append(entry)
+            normalized.append({
+                "plane_type": pt_upper, "vendor": vendor,
+                "is_healthy": is_healthy, "source": source,
+            })
     return normalized
 
 
@@ -57,47 +61,16 @@ def normalize_candidates(raw_candidates: list[dict]) -> list[dict]:
     send connected_via_plane in lowercase ("api_gateway") which would crash
     pydantic validation for the ENTIRE batch.  Normalize it here, same as
     we normalize plane_type on fabric planes.
-
-    Unknown enum values are stripped to None so one bad routing hint
-    doesn't reject the entire batch.
     """
-    valid_action_types = {"provision", "inventory_only"}
-    valid_planes = {e.value for e in FabricPlane}
-    valid_modalities = {e.value for e in Modality}
     for c in raw_candidates:
         cvp = c.get("connected_via_plane")
         if cvp and isinstance(cvp, str):
             normalized = PLANE_TYPE_ALIASES.get(cvp, cvp.upper().replace(" ", "_"))
-            if normalized in valid_planes:
-                c["connected_via_plane"] = normalized
-            else:
-                _log.warning("Unknown connected_via_plane '%s' for %s, stripping to null",
-                             cvp, c.get("asset_key", "?"))
-                c["connected_via_plane"] = None
-        elif cvp is not None:
-            # Empty string or non-string — strip it
-            c["connected_via_plane"] = None
+            c["connected_via_plane"] = normalized
         # Also handle preferred_modality if it's lowercase
         pm = c.get("preferred_modality")
         if pm and isinstance(pm, str):
-            normalized_pm = pm.upper().replace(" ", "_")
-            if normalized_pm in valid_modalities:
-                c["preferred_modality"] = normalized_pm
-            else:
-                _log.warning("Unknown preferred_modality '%s' for %s, stripping to null",
-                             pm, c.get("asset_key", "?"))
-                c["preferred_modality"] = None
-        elif pm is not None:
-            c["preferred_modality"] = None
-        # Normalize action_type — AOD may send "Provision", "PROVISION", etc.
-        at = c.get("action_type")
-        if at and isinstance(at, str):
-            at_lower = at.lower().strip()
-            if at_lower not in valid_action_types:
-                _log.warning("Unknown action_type '%s' for %s, defaulting to inventory_only",
-                             at, c.get("asset_key", "?"))
-                at_lower = "inventory_only"
-            c["action_type"] = at_lower
+            c["preferred_modality"] = pm.upper().replace(" ", "_")
     return raw_candidates
 
 
@@ -147,34 +120,21 @@ class CandidateRejection:
 
 
 def save_aod_payload(request: AODHandoffRequest):
-    """Cache the raw AOD payload in the database so /fetch can replay it.
-
-    Stored in aod_payload_cache (single-row table) which is NOT cleared
-    by reset_aod_state(), so the payload survives across resets.
-    """
-    from ..db import get_db
-    payload_json = json.dumps(request.model_dump(), default=str)
-    with get_db() as conn:
-        conn.execute(
-            "INSERT OR REPLACE INTO aod_payload_cache (id, payload, cached_at) VALUES (1, ?, ?)",
-            (payload_json, datetime.utcnow().isoformat()),
-        )
+    """Persist raw AOD payload to disk for replay after reset."""
+    try:
+        with open(AOD_PAYLOAD_FILE, "w") as f:
+            json.dump(request.model_dump(mode="json"), f)
+    except Exception as e:
+        _log.error("Failed to save AOD payload: %s", e)
 
 
 def load_aod_payload() -> Optional[dict]:
-    """Load the cached AOD payload from the database.
-
-    Reads from aod_payload_cache which survives reset_aod_state().
-    """
-    from ..db import get_connection
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT payload FROM aod_payload_cache WHERE id = 1")
-    row = cursor.fetchone()
-    conn.close()
-    if not row:
+    """Load last saved AOD payload from file."""
+    try:
+        with open(AOD_PAYLOAD_FILE, "r") as f:
+            return json.load(f)
+    except Exception:
         return None
-    return json.loads(row["payload"])
 
 
 def resolve_fabric_planes(request: AODHandoffRequest) -> tuple[dict, int]:

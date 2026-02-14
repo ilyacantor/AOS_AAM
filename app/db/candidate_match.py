@@ -15,14 +15,11 @@ from .candidates import _row_to_candidate
 # ============================================================================
 
 def update_candidate_match(candidate_id: str, pipe_id: str, score: float, reason: str,
-                           fabric_plane: str = None,
-                           fabric_plane_id: str = None) -> Optional[dict]:
+                           fabric_plane: str = None) -> Optional[dict]:
     """Update candidate with match information and propagate plane linkage.
 
-    When a candidate matches a pipe, both the type-level plane hint
-    (connected_via_plane, e.g. "API_GATEWAY") and the vendor-specific
-    composite ID (fabric_plane_id, e.g. "API_GATEWAY:aws api gateway")
-    are written back so the topology view resolves on the first lookup.
+    When a candidate matches a pipe, the pipe's fabric_plane (e.g. API_GATEWAY)
+    is written back to connected_via_plane so the topology view can resolve it.
     """
     conn = get_connection()
     cursor = conn.cursor()
@@ -33,10 +30,9 @@ def update_candidate_match(candidate_id: str, pipe_id: str, score: float, reason
         UPDATE connection_candidates
         SET matched_pipe_id = ?, match_score = ?, match_reason = ?,
             status = 'connected', updated_at = ?,
-            connected_via_plane = COALESCE(?, connected_via_plane),
-            fabric_plane_id = COALESCE(?, fabric_plane_id)
+            connected_via_plane = COALESCE(?, connected_via_plane)
         WHERE candidate_id = ?
-    """, (pipe_id, score, reason, now, fabric_plane, fabric_plane_id, candidate_id))
+    """, (pipe_id, score, reason, now, fabric_plane, candidate_id))
     
     affected = cursor.rowcount
     conn.commit()

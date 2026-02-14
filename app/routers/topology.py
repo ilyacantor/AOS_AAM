@@ -9,6 +9,7 @@ from ..db import (
     get_topology_data,
     get_topology_for_pipe,
     get_topology_for_fabric_plane,
+    list_pipes,
     list_candidates,
     get_canonical_stats,
 )

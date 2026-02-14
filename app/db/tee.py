@@ -8,7 +8,6 @@ from datetime import datetime
 from typing import Optional
 
 from .connection import get_connection
-from .drift import _row_to_drift_event
 
 # ============================================================================
 # TEE REQUEST OPERATIONS (v1 Practical Interface)

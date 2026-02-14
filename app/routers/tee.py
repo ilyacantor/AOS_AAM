@@ -7,7 +7,7 @@ from typing import Optional
 
 from ..db import (
     get_candidate,
-    get_pipe_or_candidate,
+    get_pipe,
     create_tee_request,
     list_tee_requests,
 )
@@ -52,7 +52,7 @@ async def create_tee_request_endpoint(request: TeeRequestCreate):
     if not pipe_id:
         raise HTTPException(status_code=400, detail="Either pipe_id or a matched candidate_id is required")
 
-    pipe = get_pipe_or_candidate(pipe_id)
+    pipe = get_pipe(pipe_id)
     if not pipe:
         raise HTTPException(status_code=404, detail="Pipe not found")
 
@@ -91,7 +91,7 @@ async def update_tee_status(tee_id: str, request: TeeVerificationRequest):
 
     response = dict(updated)
     if request.status == "verified":
-        pipe = get_pipe_or_candidate(tee_req["pipe_id"])
+        pipe = get_pipe(tee_req["pipe_id"])
         response["verification"] = {
             "method": request.verification_method,
             "evidence": request.verification_evidence,

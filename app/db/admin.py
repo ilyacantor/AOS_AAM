@@ -71,7 +71,7 @@ def get_pipe_stats() -> dict:
 
     cursor.execute("SELECT fabric_plane, COUNT(*) as cnt FROM declared_pipes GROUP BY fabric_plane")
     for row in cursor.fetchall():
-        plane = row["fabric_plane"] or "UNMAPPED"
+        plane = row["fabric_plane"] or "API_GATEWAY"
         stats["by_fabric_plane"][plane] = row["cnt"]
 
     cursor.execute("SELECT modality, COUNT(*) as cnt FROM declared_pipes GROUP BY modality")

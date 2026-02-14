@@ -21,7 +21,6 @@ def get_db():
     """Context manager for database connections with auto-commit/rollback."""
     conn = sqlite3.connect(DATABASE)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
     try:
         yield conn
         conn.commit()
@@ -36,7 +35,6 @@ def get_connection():
     """Get database connection with row factory (legacy — prefer get_db())."""
     conn = sqlite3.connect(DATABASE)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
 

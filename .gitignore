@@ -36,5 +36,4 @@ node_modules
 dist
 server/public
 vite.config.ts.*
-*.tar.gzaod_last_payload.json
-aod_raw_body.json
+*.tar.gz

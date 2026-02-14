@@ -10,7 +10,6 @@ def test_init_db_creates_all_tables(db):
 
     expected = sorted([
         "aod_handoff_log",
-        "aod_payload_cache",
         "aod_policy_manifest",
         "collector_runs",
         "collectors",
@@ -35,7 +34,7 @@ def test_create_and_get_candidate(db):
         "category": "crm",
     })
     assert result["candidate_id"]
-    assert result["status"] == "new"
+    assert result["status"] == "connected"
 
     fetched = db.get_candidate(result["candidate_id"])
     assert fetched is not None
@@ -62,7 +61,7 @@ def test_candidate_dedup_by_asset_key(db):
 
 
 def test_create_pipe_and_get(db):
-    """create_pipe writes to declared_pipes; list_candidates_as_pipes reads connection_candidates."""
+    """create_pipe writes to declared_pipes; list_pipes reads connection_candidates (canonical model)."""
     pipe = db.create_pipe({
         "display_name": "Test Pipe",
         "fabric_plane": "API_GATEWAY",
@@ -78,19 +77,19 @@ def test_create_pipe_and_get(db):
     assert fetched["display_name"] == "Test Pipe"
 
 
-def test_list_candidates_as_pipes(db):
-    """list_candidates_as_pipes() reads from connection_candidates, NOT declared_pipes."""
+def test_list_pipes_returns_candidates_as_pipes(db):
+    """list_pipes() reads from connection_candidates (pipes = candidates)."""
     db.create_candidate({
         "asset_key": "salesforce.com",
         "vendor_name": "salesforce",
         "display_name": "Salesforce",
         "category": "crm",
     })
-    pipes = db.list_candidates_as_pipes()
+    pipes = db.list_pipes()
     assert len(pipes) == 1
     assert pipes[0]["source_system"] == "salesforce"
-    # Strict mode: no plane linkage → None (UNMAPPED only at UI boundary)
-    assert pipes[0]["fabric_plane"] is None
+    # Strict mode: no plane linkage → UNMAPPED, not API_GATEWAY
+    assert pipes[0]["fabric_plane"] == "UNMAPPED"
 
 
 def test_strict_defaults_no_hallucination(db):

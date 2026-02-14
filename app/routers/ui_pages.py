@@ -15,8 +15,8 @@ from ..constants import (
 )
 from ..ui.styles import NAV_STYLE, UI_STYLE, NAV_HTML, ui_nav, aod_run_banner
 from ..db import (
-    list_candidates_as_pipes,
-    get_pipe_or_candidate,
+    list_pipes,
+    get_pipe,
     get_pipe_versions,
     get_drift_events,
     list_all_drift_events,
@@ -34,7 +34,7 @@ async def ui_pipes_list(
     filter: Optional[str] = Query("all")
 ):
     """Pipes Inventory Screen"""
-    all_pipes = list_candidates_as_pipes()
+    all_pipes = list_pipes()
     
     # Single filter for asset classes
     if filter == "all":
@@ -335,7 +335,7 @@ async def ui_pipes_list(
 @router.get("/ui/pipes/{pipe_id}", response_class=HTMLResponse, include_in_schema=False)
 async def ui_pipe_detail(pipe_id: str):
     """Pipe Detail Screen"""
-    pipe = get_pipe_or_candidate(pipe_id)
+    pipe = get_pipe(pipe_id)
     if not pipe:
         return HTMLResponse(content=f"""
 <!DOCTYPE html>

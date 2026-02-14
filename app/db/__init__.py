@@ -4,7 +4,7 @@ AAM Database Package — re-exports all domain functions for backward compatibil
 from .connection import get_db, get_connection  # noqa: F401
 from .schema import init_db  # noqa: F401
 from .candidates import create_candidate, get_candidate, list_candidates, update_candidate_status  # noqa: F401
-from .pipes import create_pipe, get_pipe, get_pipe_or_candidate, list_candidates_as_pipes, list_declared_pipes, get_pipe_versions, update_pipe_with_version  # noqa: F401
+from .pipes import create_pipe, get_pipe, list_pipes, get_pipe_versions, update_pipe_with_version  # noqa: F401
 from .drift import create_drift_event, get_drift_events, list_all_drift_events  # noqa: F401
 from .observations import create_observation, get_observations_for_candidate, get_unprocessed_observations, mark_observation_processed  # noqa: F401
 from .collectors import list_collectors, update_collector_last_run, create_collector_run, complete_collector_run, get_collector_run, list_collector_runs  # noqa: F401
