@@ -2040,11 +2040,17 @@ async def ui_reconcile(aod_run_id: str):
     snapshot = data.get("snapshot_name") or ""
     timestamp = data.get("handoff_timestamp", "")[:19] if data.get("handoff_timestamp") else "N/A"
     
-    # Overall status
-    all_match = recon["candidates_match"]
-    status_color = "var(--green-400)" if all_match else "var(--red-400)"
-    status_icon = "&#10003;" if all_match else "&#10007;"
-    status_text = "All Reconciled" if all_match else "Discrepancy Detected"
+    # Overall status — green only when counts match AND fabric linkage is healthy
+    all_healthy = recon.get("all_healthy", recon["candidates_match"])
+    status_color = "var(--green-400)" if all_healthy else "var(--red-400)"
+    status_icon = "&#10003;" if all_healthy else "&#10007;"
+    if all_healthy:
+        status_text = "All Reconciled"
+    elif not recon["candidates_match"]:
+        status_text = "Discrepancy Detected"
+    else:
+        unlinked = recon.get("unlinked", 0)
+        status_text = f"{unlinked} Unlinked Pipe{'s' if unlinked != 1 else ''}"
     
     # Fabric plane bars
     fabric_types = ALL_PLANE_TYPES
@@ -2112,7 +2118,8 @@ async def ui_reconcile(aod_run_id: str):
         """
     
     checks_html = check_row("AOD Candidates Stored", aod_sent["candidates_accepted"], aam.get("aod_origin_candidates", aam["candidates"]), recon["candidates_match"])
-    
+    checks_html += check_row("Fabric-Linked Pipes", aam.get("aod_origin_candidates", aam["candidates"]), recon.get("fabric_linked", 0), recon.get("linkage_healthy", True))
+
     discrepancy_html = ""
     if recon["discrepancy"] != 0:
         disc = recon["discrepancy"]
