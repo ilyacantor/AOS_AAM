@@ -60,6 +60,7 @@ def normalize_candidates(raw_candidates: list[dict]) -> list[dict]:
     pydantic validation for the ENTIRE batch.  Normalize it here, same as
     we normalize plane_type on fabric planes.
     """
+    valid_action_types = {"provision", "inventory_only"}
     for c in raw_candidates:
         cvp = c.get("connected_via_plane")
         if cvp and isinstance(cvp, str):
@@ -69,6 +70,15 @@ def normalize_candidates(raw_candidates: list[dict]) -> list[dict]:
         pm = c.get("preferred_modality")
         if pm and isinstance(pm, str):
             c["preferred_modality"] = pm.upper().replace(" ", "_")
+        # Normalize action_type — AOD may send "Provision", "PROVISION", etc.
+        at = c.get("action_type")
+        if at and isinstance(at, str):
+            at_lower = at.lower().strip()
+            if at_lower not in valid_action_types:
+                _log.warning("Unknown action_type '%s' for %s, defaulting to inventory_only",
+                             at, c.get("asset_key", "?"))
+                at_lower = "inventory_only"
+            c["action_type"] = at_lower
     return raw_candidates
 
 

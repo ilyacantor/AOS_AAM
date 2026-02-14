@@ -78,7 +78,14 @@ async def receive_aod_handoff(raw_request: Request):
     if raw_candidates:
         body["candidates"] = normalize_candidates(raw_candidates)
 
-    request = AODHandoffRequest(**body)
+    try:
+        request = AODHandoffRequest(**body)
+    except Exception as e:
+        _log.error("AOD payload validation failed: %s", e)
+        raise HTTPException(
+            status_code=422,
+            detail=f"AOD payload validation failed: {e}",
+        )
     _log.info(
         "Receive endpoint: run_id=%s, candidates=%d, fabric_planes=%d, sors=%d",
         request.run_id, len(request.candidates), len(request.fabric_planes), len(request.sors),
