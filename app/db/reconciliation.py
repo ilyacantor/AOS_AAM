@@ -271,6 +271,47 @@ def _compare_fabric_planes(cursor, aod_run_id: str) -> dict:
 # Sub-function 4: SOR line-item comparison
 # ---------------------------------------------------------------------------
 
+
+# "SaaS" is a parent category encompassing all SOR application types.
+# When Farm declares a vendor as "saas" and AAM finds "crm", that's
+# compatible — CRM IS a type of SaaS.  The reverse also holds.
+_SAAS_SUBTYPES = frozenset({
+    "crm", "erp", "hcm", "idp", "itsm",
+    "hr", "finance", "identity", "cmdb",
+})
+
+# Vendor name aliases — different names for the same product/company.
+# Maps alternative names → canonical name used in AAM candidates.
+_VENDOR_ALIASES: dict[str, str] = {
+    "quickbooks": "intuit",
+    "quick books": "intuit",
+    "google bigquery": "bigquery",
+    "google cloud bigquery": "bigquery",
+    "amazon eventbridge": "eventbridge",
+    "aws eventbridge": "eventbridge",
+    "amazon redshift": "redshift",
+    "aws redshift": "redshift",
+    "ms dynamics": "microsoft dynamics",
+    "dynamics 365": "microsoft dynamics",
+    "jira": "atlassian",
+    "bamboo hr": "bamboohr",
+}
+
+
+def _categories_compatible(expected: str, found: str) -> bool:
+    """Check if expected and found categories are compatible.
+
+    Treats "saas" as a parent category of all specific SOR types.
+    """
+    if expected == found:
+        return True
+    if expected == "saas" and found in _SAAS_SUBTYPES:
+        return True
+    if found == "saas" and expected in _SAAS_SUBTYPES:
+        return True
+    return False
+
+
 def _compare_sor_line_items(cursor, aod_run_id: str) -> dict:
     """Compare Farm SOR declarations and AOD SOR summary against AAM candidates."""
     from .sor_dispositions import get_sor_dispositions
@@ -334,6 +375,11 @@ def _compare_sor_line_items(cursor, aod_run_id: str) -> dict:
         nonlocal matched, category_mismatches, missing
         vk = vendor.lower()
         aam_data = aam_by_vendor.get(vk)
+        # Try vendor aliases if direct lookup misses
+        if not aam_data:
+            alias = _VENDOR_ALIASES.get(vk)
+            if alias:
+                aam_data = aam_by_vendor.get(alias)
         if not aam_data:
             missing += 1
             return {
@@ -346,7 +392,10 @@ def _compare_sor_line_items(cursor, aod_run_id: str) -> dict:
             }
         aam_cats = aam_data["categories"]
         aam_primary = max(aam_cats, key=aam_cats.get) if aam_cats else "unknown"
-        cat_match = expected_cat == aam_primary or expected_cat in aam_cats
+        cat_match = (
+            _categories_compatible(expected_cat, aam_primary)
+            or expected_cat in aam_cats
+        )
         if cat_match:
             matched += 1
             verdict = "ok"
