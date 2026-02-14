@@ -46,14 +46,6 @@ AOD (discovers what exists) → AAM (catalogs pipes, self-heals) → DCL (unifie
 - **AAM** catalogs connections as DeclaredPipes with behavioral metadata
 - **DCL** consumes DeclaredPipes to build unified business understanding
 
-### Component Boundaries
-
-| Component | Role | Boundary |
-|-----------|------|----------|
-| **AAM** | The Mesh | Owns Self-Healing and Repair |
-| **Farm** | The Verifier | Test Oracle only (no operations) |
-| **DCL** | The Brain | Metadata only (no raw data) |
-| **AOA** | The Orchestrator | Owns Execution and Infrastructure |
 
 ---
 
