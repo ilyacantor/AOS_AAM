@@ -107,8 +107,20 @@ def infer_fabric_plane_for_candidate(candidate: dict) -> tuple[Optional[str], fl
         if "bigquery" in ep_lower or "redshift" in ep_lower or "snowflake" in ep_lower:
             return "DATA_WAREHOUSE", 0.70, "evidence_signal"
 
-    # Step 5: No match → needs_operator_review
-    return None, 0.0, "needs_operator_review"
+    # Step 4.5: Category-aware default for known application types.
+    # This is a weak signal (0.40) — overridden by any match from steps 1-4.
+    # Data/analytics apps route through DATA_WAREHOUSE; SOR-category apps
+    # (CRM, ERP, HCM, etc.) typically connect via API_GATEWAY.
+    category = (candidate.get("category") or "").lower().strip()
+    if category in ("data", "analytics", "warehouse", "lake", "bi"):
+        return "DATA_WAREHOUSE", 0.40, "category_default"
+    if category in ("crm", "erp", "hcm", "idp", "itsm", "saas", "hr", "finance"):
+        return "API_GATEWAY", 0.40, "category_default"
+
+    # Step 5: No stronger signal found — default to API_GATEWAY.
+    # Confidence 0.0 flags this as a low-confidence default that needs
+    # operator review.  API_GATEWAY is the most common plane for SaaS apps.
+    return "API_GATEWAY", 0.0, "needs_operator_review"
 
 
 def find_matching_pipe(candidate: dict) -> tuple[Optional[str], float, str]:

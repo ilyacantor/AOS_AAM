@@ -20,19 +20,34 @@ def update_candidate_match(candidate_id: str, pipe_id: str, score: float, reason
 
     When a candidate matches a pipe, the pipe's fabric_plane (e.g. API_GATEWAY)
     is written back to connected_via_plane so the topology view can resolve it.
+    Also links fabric_plane_id to the corresponding fabric_planes row (if one
+    exists for this plane type) so DCL export and JOIN-based queries work.
     """
     conn = get_connection()
     cursor = conn.cursor()
 
     now = datetime.utcnow().isoformat()
 
+    # Look up matching fabric_planes row by plane_type so we can set
+    # fabric_plane_id (the FK used by DCL export and topology JOINs).
+    fabric_plane_id = None
+    if fabric_plane and fabric_plane != "UNMAPPED":
+        cursor.execute(
+            "SELECT plane_id FROM fabric_planes WHERE plane_type = ? LIMIT 1",
+            (fabric_plane,)
+        )
+        fp_row = cursor.fetchone()
+        if fp_row:
+            fabric_plane_id = fp_row[0]
+
     cursor.execute("""
         UPDATE connection_candidates
         SET matched_pipe_id = ?, match_score = ?, match_reason = ?,
             status = 'connected', updated_at = ?,
-            connected_via_plane = COALESCE(?, connected_via_plane)
+            connected_via_plane = COALESCE(?, connected_via_plane),
+            fabric_plane_id = COALESCE(?, fabric_plane_id)
         WHERE candidate_id = ?
-    """, (pipe_id, score, reason, now, fabric_plane, candidate_id))
+    """, (pipe_id, score, reason, now, fabric_plane, fabric_plane_id, candidate_id))
     
     affected = cursor.rowcount
     conn.commit()

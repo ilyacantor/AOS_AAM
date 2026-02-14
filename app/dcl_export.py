@@ -75,20 +75,28 @@ def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
             "candidates": []
         }
     
-    # Assign candidates to their fabric plane using fabric_plane_id
+    # Assign candidates to their fabric plane using fabric_plane_id,
+    # with fallback to connected_via_plane (set by inference).
     unlinked_candidates = []
     for candidate in candidates:
         fabric_plane_id = candidate.get("fabric_plane_id")
-        
+
         if fabric_plane_id and fabric_plane_id in planes_dict:
             # Direct linkage exists
             planes_dict[fabric_plane_id]["candidates"].append(candidate)
         else:
-            unlinked_candidates.append(candidate)
-    
-    # Unlinked candidates remain unlinked — we do NOT infer fabric planes
-    # from application categories.  If a candidate wasn't linked to a plane
-    # by AOD or by explicit infrastructure evidence, it stays unlinked.
+            # Fallback: group by connected_via_plane type (set by inference)
+            connected = (candidate.get("connected_via_plane") or "").upper()
+            placed = False
+            if connected and connected != "UNMAPPED":
+                for pid, data in planes_dict.items():
+                    if data["plane"]["plane_type"] == connected:
+                        data["candidates"].append(candidate)
+                        placed = True
+                        break
+            if not placed:
+                unlinked_candidates.append(candidate)
+
     for candidate in unlinked_candidates:
         _log.debug("Candidate %s (%s) has no fabric plane link — skipping DCL grouping",
                    candidate.get("vendor_name"), candidate.get("category"))
