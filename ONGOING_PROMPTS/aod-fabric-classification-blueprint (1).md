@@ -2,9 +2,10 @@
 
 ## Evidence-Based Pipe Discovery & Fabric Plane Assignment
 
-**Status:** Architectural Redesign Proposal  
-**Scope:** AOD Discovery Pipeline, Farm Test Oracle  
+**Status:** Architectural Redesign Proposal (not yet implemented)
+**Scope:** AOD Discovery Pipeline, Farm Test Oracle
 **Date:** February 2026
+**AAM readiness:** AAM already accepts `fabric_planes[]`, `sors[]`, and `connected_via_plane` per-candidate from AOD. Normalization layer strips unknown enum values gracefully. Evidence records (Tier 1/2/3) are not yet part of the handoff contract.
 
 ---
 
@@ -454,7 +455,10 @@ Farm's correctness validation must check:
 
 ### Sprint 5: AAM Handoff Enhancement
 
-- Pass evidence records along with pipe data in AOD → AAM handoff
+**Partially complete.** AAM already accepts `fabric_planes[]` (explicit plane declarations), `sors[]` (SOR declarations from Farm), `connected_via_plane` per candidate, and `action_type`/`execution_allowed` governance signals. The normalization layer handles case mismatches and unknown enum values gracefully.
+
+**Remaining:**
+- Pass evidence records (Tier 1/2/3 with source, confidence, timestamp) along with pipe data in AOD → AAM handoff
 - AAM uses evidence to assess connection reliability (Tier 1 evidence = pipe already exists and is healthy; Tier 3 = pipe is hypothetical)
 - Shadow assets discovered on-plane already have a natural connection path — AAM doesn't need to figure out how to connect, just whether to trust the existing pipe
 
