@@ -219,9 +219,12 @@ def _candidate_to_pipe(row) -> dict:
     """
     Convert candidate row to pipe format for UI compatibility.
     CANONICAL: Candidates = Pipes
+
+    Derives transport_kind, modality, and trust_labels from the inferred
+    fabric plane rather than hardcoding defaults.
     """
     keys = row.keys()
-    
+
     # Extract fabric plane type: JOIN result → connected_via_plane → UNMAPPED
     fabric_plane = None
     if "fabric_plane" in keys and row["fabric_plane"]:
@@ -230,29 +233,58 @@ def _candidate_to_pipe(row) -> dict:
         fabric_plane = row["connected_via_plane"].upper()
     if not fabric_plane:
         fabric_plane = "UNMAPPED"
-    
-    # Map category to modality — iPaaS uses control plane, everything else is declared interface
-    category_lower = row["category"].lower() if row["category"] else ""
-    modality = "CONTROL_PLANE" if "ipaas" in category_lower else "DECLARED_INTERFACE"
-    
+
+    # Derive transport_kind and modality from fabric plane
+    transport_kind = "API"
+    modality = "DECLARED_INTERFACE"
+    if fabric_plane == "EVENT_BUS":
+        transport_kind = "EVENT_STREAM"
+        modality = "PASSIVE_SUBSCRIPTION"
+    elif fabric_plane == "DATA_WAREHOUSE":
+        transport_kind = "TABLE"
+    elif fabric_plane == "IPAAS":
+        transport_kind = "WEBHOOK"
+        modality = "CONTROL_PLANE"
+
+    # Build trust labels from match_reason (routing_source info)
+    trust_labels = []
+    if "governance_status" in keys and row["governance_status"]:
+        trust_labels.append(row["governance_status"])
+    match_reason = row["match_reason"] if "match_reason" in keys and row["match_reason"] else ""
+    if "aod_explicit" in match_reason:
+        trust_labels.append("inferred:aod_explicit")
+    elif "infra_vendor_identity" in match_reason or "Vendor match, inferred" in match_reason:
+        trust_labels.append("inferred:vendor_identity")
+    elif "display_name_hint" in match_reason:
+        trust_labels.append("inferred:display_name_hint")
+    elif "evidence_signal" in match_reason:
+        trust_labels.append("inferred:evidence_signal")
+    elif "needs_operator_review" in match_reason:
+        trust_labels.append("needs_operator_review")
+
+    # Build provenance with lineage
+    provenance = {
+        "discovered_by": "aod",
+        "discovered_at": row["created_at"],
+        "aod_run_id": row["aod_run_id"] if "aod_run_id" in keys else None,
+    }
+    if match_reason:
+        provenance["routing_source"] = match_reason
+
     return {
         "pipe_id": row["candidate_id"],  # Candidate ID = Pipe ID
         "display_name": row["display_name"],
         "fabric_plane": fabric_plane,
         "modality": modality,
         "source_system": row["vendor_name"],
-        "transport_kind": "API",  # Default
+        "transport_kind": transport_kind,
         "endpoint_ref": {"endpoints": json.loads(row["known_endpoints"]) if row["known_endpoints"] else []},
         "entity_scope": [row["category"]] if row["category"] else [],
         "identity_keys": [],
         "change_semantics": "UNKNOWN",
-        "provenance": {
-            "discovered_by": "aod",
-            "discovered_at": row["created_at"],
-            "aod_run_id": row["aod_run_id"] if "aod_run_id" in keys else None
-        },
+        "provenance": provenance,
         "owner_signals": [],
-        "trust_labels": [row["governance_status"]] if "governance_status" in keys and row["governance_status"] else [],
+        "trust_labels": trust_labels,
         "schema_info": None,
         "freshness": None,
         "access": None,

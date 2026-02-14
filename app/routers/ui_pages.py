@@ -69,9 +69,16 @@ async def ui_pipes_list(
         owner_signals = p.get("owner_signals", [])
         pipe_fabric = p.get("fabric_plane", "UNMAPPED")
         fabric_color = fabric_plane_colors.get(pipe_fabric, "#64748b")
-        drift_info = drift_by_pipe.get(pipe_id, {"open": 0, "total": 0})
-        drift_status = f"{drift_info['open']} open" if drift_info['open'] > 0 else "OK"
-        drift_class = "badge-open" if drift_info['open'] > 0 else "badge-connected"
+        drift_info = drift_by_pipe.get(pipe_id)
+        if drift_info is None:
+            drift_status = "No data"
+            drift_class = "badge-deferred"
+        elif drift_info["open"] > 0:
+            drift_status = f"{drift_info['open']} open"
+            drift_class = "badge-open"
+        else:
+            drift_status = "Healthy"
+            drift_class = "badge-connected"
         
         rows_html += f"""
         <tr data-testid="pipe-row-{pipe_id}">
@@ -314,6 +321,7 @@ async def ui_pipes_list(
         document.getElementById('btn-export-dcl').addEventListener('click', async function() {{
             try {{
                 const res = await fetch('/api/export/dcl/declared-pipes');
+                if (!res.ok) throw new Error('Request failed: ' + res.status);
                 const data = await res.json();
                 const blob = new Blob([JSON.stringify(data, null, 2)], {{ type: 'application/json' }});
                 const url = URL.createObjectURL(blob);
@@ -530,6 +538,7 @@ async def ui_pipe_detail(pipe_id: str):
             this.textContent = 'Recomputing...';
             try {{
                 const res = await fetch('/api/aam/infer', {{ method: 'POST' }});
+                if (!res.ok) throw new Error('Request failed: ' + res.status);
                 const data = await res.json();
                 showToast('Recomputed: ' + data.pipes_created + ' pipes processed', 'success');
                 setTimeout(() => location.reload(), 1500);
@@ -823,6 +832,7 @@ async def ui_candidates_list(
             // Fetch pipes
             try {{
                 const res = await fetch('/api/pipes');
+                if (!res.ok) throw new Error('Request failed: ' + res.status);
                 const data = await res.json();
                 const pipes = data.pipes || [];
 
@@ -1682,6 +1692,7 @@ async def ui_topology():
             }}
 
             const response = await fetch(url);
+            if (!response.ok) throw new Error('Request failed: ' + response.status);
             let data = await response.json();
             
             // Apply SOR filter client-side
@@ -2718,7 +2729,10 @@ async def ui_reconcile(aod_run_id: str):
             headers: {{'Content-Type': 'application/json'}},
             body: JSON.stringify({{status: status, operator_notes: notes || ''}})
         }})
-        .then(r => r.json())
+        .then(r => {{
+            if (!r.ok) throw new Error('Request failed: ' + r.status);
+            return r.json();
+        }})
         .then(() => location.reload())
         .catch(e => alert('Error setting disposition: ' + e));
     }}

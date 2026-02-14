@@ -3,11 +3,10 @@ Drift event operations
 """
 import json
 import uuid
-import sqlite3
 from datetime import datetime
 from typing import Optional
 
-from .connection import get_connection
+from .connection import get_db
 
 # ============================================================================
 # DRIFT OPERATIONS
@@ -15,20 +14,16 @@ from .connection import get_connection
 
 def create_drift_event(pipe_id: str, drift_type: str, old_value: str, new_value: str, details: Optional[dict] = None) -> str:
     """Create a drift event"""
-    conn = get_connection()
-    cursor = conn.cursor()
-    
     drift_id = str(uuid.uuid4())
     now = datetime.utcnow().isoformat()
-    
-    cursor.execute("""
-        INSERT INTO drift_events (drift_id, pipe_id, drift_type, old_value, new_value, details, detected_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (drift_id, pipe_id, drift_type, old_value, new_value, json.dumps(details) if details else None, now))
-    
-    conn.commit()
-    conn.close()
-    
+
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO drift_events (drift_id, pipe_id, drift_type, old_value, new_value, details, detected_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (drift_id, pipe_id, drift_type, old_value, new_value, json.dumps(details) if details else None, now))
+
     return drift_id
 
 
@@ -63,29 +58,29 @@ def _row_to_drift_event(row) -> dict:
 
 def get_drift_events(pipe_id: str) -> list[dict]:
     """Get drift events for a pipe"""
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT * FROM drift_events WHERE pipe_id = ? ORDER BY detected_at DESC",
-        (pipe_id,)
-    )
-    rows = cursor.fetchall()
-    conn.close()
-    
+    with get_db() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM drift_events WHERE pipe_id = ? ORDER BY detected_at DESC",
+            (pipe_id,)
+        )
+        rows = cursor.fetchall()
+
     return [_row_to_drift_event(row) for row in rows]
 
 
 def list_all_drift_events(limit: Optional[int] = None) -> list[dict]:
     """List all drift events"""
-    conn = get_connection()
-    cursor = conn.cursor()
-    query = "SELECT * FROM drift_events ORDER BY detected_at DESC"
-    if limit:
-        query += f" LIMIT {limit}"
-    cursor.execute(query)
-    rows = cursor.fetchall()
-    conn.close()
-    
+    with get_db() as conn:
+        cursor = conn.cursor()
+        query = "SELECT * FROM drift_events ORDER BY detected_at DESC"
+        params = []
+        if limit:
+            query += " LIMIT ?"
+            params.append(limit)
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+
     return [_row_to_drift_event(row) for row in rows]
 
 

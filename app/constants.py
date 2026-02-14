@@ -4,11 +4,11 @@ AAM Shared Constants.
 Single source of truth for category sets and mappings used
 across handoff, topology, and reconciliation logic.
 
-DESIGN RULE: AAM never infers infrastructure (fabric planes) from
-application categories.  Knowing something is a "CRM" or "ERP" tells
-you nothing about which integration infrastructure the enterprise
-deployed.  Only AOD-discovered infrastructure evidence or explicit
-operator declarations create fabric plane records.
+DESIGN RULE (RACI v4): AAM owns Fabric Plane Inference (A/R).
+AOD provides evidence leads (hints). AAM uses vendor identity,
+display name hints, evidence leads, and endpoint signal analysis
+to infer fabric plane. Application categories alone are not
+sufficient, but combined with evidence they inform inference.
 """
 
 # SOR (System of Record) categories recognized by AAM

@@ -72,10 +72,10 @@ def get_canonical_stats(aod_run_id: Optional[str] = None) -> dict:
         cursor.execute("SELECT COUNT(*) FROM connection_candidates")
     total_candidates = cursor.fetchone()[0]
 
-    # PIPES WITH DRIFT: Declared pipes with open drift status
+    # PIPES WITH DRIFT: Candidates with open drift events
     cursor.execute("""
-        SELECT COUNT(*) FROM declared_pipes
-        WHERE drift_status = 'OPEN'
+        SELECT COUNT(DISTINCT d.pipe_id) FROM drift_events d
+        WHERE d.status = 'OPEN'
     """)
     pipes_with_drift = cursor.fetchone()[0]
 

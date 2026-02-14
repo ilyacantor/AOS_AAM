@@ -24,7 +24,10 @@ from .db import (
     get_pipe,
     list_pipes
 )
+from .logger import get_logger
 from .models import Modality, TransportKind, ChangeSemantics
+
+_log = get_logger("inference")
 
 
 def compute_schema_hash(schema: dict) -> str:
@@ -46,12 +49,13 @@ def infer_pipes_from_observations(observations: list[dict]) -> list[dict]:
     Takes a list of observations and produces DeclaredPipes.
     """
     pipes = []
-    
+
     for obs in observations:
         pipe = infer_single_pipe(obs)
         if pipe:
             pipes.append(pipe)
 
+    _log.info("infer_pipes_from_observations: observations_processed=%d pipes_created=%d", len(observations), len(pipes))
     return pipes
 
 
@@ -108,7 +112,14 @@ def infer_single_pipe(observation: dict) -> Optional[dict]:
     
     # Build display name
     display_name = build_display_name(source_system, entity_scope, endpoint_info)
-    
+
+    _log.info(
+        "infer_single_pipe: source_system=%s display_name=%s fabric_plane=%s modality=%s "
+        "transport_kind=%s change_semantics=%s entity_scope=%s identity_keys=%s trust_labels_count=%d",
+        source_system, display_name, fabric_plane, modality,
+        transport_kind, change_semantics, entity_scope, identity_keys, len(trust_labels),
+    )
+
     return {
         "pipe_id": str(uuid.uuid4()),
         "display_name": display_name,
@@ -143,78 +154,101 @@ def infer_fabric_plane(endpoint_info: dict, metadata: dict) -> str:
     """
     from .constants import INFRA_VENDOR_PLANE, ALL_PLANE_TYPES
 
+    _log.debug("infer_fabric_plane: url=%s vendor=%s", endpoint_info.get("url", ""), metadata.get("vendor", ""))
+
     url = endpoint_info.get("url", "").lower()
     vendor = metadata.get("vendor", "").lower()
     fabric = metadata.get("fabric_plane", "").upper()
 
     if fabric in ALL_PLANE_TYPES:
+        _log.debug("infer_fabric_plane: matched explicit metadata fabric_plane=%s", fabric)
         return fabric
 
     for infra_vendor, plane in INFRA_VENDOR_PLANE.items():
         if infra_vendor in vendor:
+            _log.debug("infer_fabric_plane: matched infra_vendor=%s plane=%s", infra_vendor, plane)
             return plane
 
     if any(x in url for x in ["kafka", "pubsub", "queue", "stream", "sns", "sqs"]):
+        _log.debug("infer_fabric_plane: matched url pattern rule=EVENT_BUS")
         return "EVENT_BUS"
     if any(x in url for x in ["warehouse", "bigquery", "snowflake", "redshift", "databricks", "synapse"]):
+        _log.debug("infer_fabric_plane: matched url pattern rule=DATA_WAREHOUSE")
         return "DATA_WAREHOUSE"
 
+    _log.debug("infer_fabric_plane: no rule matched, returning UNKNOWN")
     return "UNKNOWN"
 
 
 def infer_modality(endpoint_info: dict, metadata: dict) -> str:
     """Infer the modality based on endpoint and metadata"""
+    _log.debug("infer_modality: url=%s vendor=%s category=%s", endpoint_info.get("url", ""), metadata.get("vendor", ""), metadata.get("category", ""))
+
     url = endpoint_info.get("url", "").lower()
     vendor = metadata.get("vendor", "").lower()
     category = metadata.get("category", "").lower()
-    
+
     # Control plane indicators
     if any(x in url for x in ["admin", "management", "config", "settings"]):
+        _log.debug("infer_modality: matched url control_plane pattern, result=%s", Modality.CONTROL_PLANE.value)
         return Modality.CONTROL_PLANE.value
 
     # iPaaS typically uses control plane
     if category == "ipaas" or vendor in ["workato", "mulesoft", "boomi"]:
+        _log.debug("infer_modality: matched iPaaS rule, result=%s", Modality.CONTROL_PLANE.value)
         return Modality.CONTROL_PLANE.value
 
     # API endpoints are declared interfaces
     if any(x in url for x in ["api", "rest", "services", "sobjects"]):
+        _log.debug("infer_modality: matched api url pattern, result=%s", Modality.DECLARED_INTERFACE.value)
         return Modality.DECLARED_INTERFACE.value
 
     # Event/webhook patterns
     if any(x in url for x in ["events", "webhook", "stream", "subscribe"]):
+        _log.debug("infer_modality: matched event/webhook pattern, result=%s", Modality.PASSIVE_SUBSCRIPTION.value)
         return Modality.PASSIVE_SUBSCRIPTION.value
 
+    _log.debug("infer_modality: no rule matched, defaulting to %s", Modality.DECLARED_INTERFACE.value)
     return Modality.DECLARED_INTERFACE.value
 
 
 def infer_transport_kind(endpoint_info: dict) -> str:
     """Infer transport kind from endpoint info"""
+    _log.debug("infer_transport_kind: url=%s method=%s", endpoint_info.get("url", ""), endpoint_info.get("method", "GET"))
+
     url = endpoint_info.get("url", "").lower()
     method = endpoint_info.get("method", "GET").upper()
-    
+
     if any(x in url for x in ["webhook", "callback", "hook"]):
+        _log.debug("infer_transport_kind: matched webhook pattern, result=%s", TransportKind.WEBHOOK.value)
         return TransportKind.WEBHOOK.value
 
     if any(x in url for x in ["event", "stream", "subscribe", "queue"]):
+        _log.debug("infer_transport_kind: matched event_stream pattern, result=%s", TransportKind.EVENT_STREAM.value)
         return TransportKind.EVENT_STREAM.value
 
     if any(x in url for x in ["table", "query", "sql", "database"]):
+        _log.debug("infer_transport_kind: matched table pattern, result=%s", TransportKind.TABLE.value)
         return TransportKind.TABLE.value
 
     if any(x in url for x in ["file", "download", "export", "csv", "xlsx"]):
+        _log.debug("infer_transport_kind: matched file pattern, result=%s", TransportKind.FILE.value)
         return TransportKind.FILE.value
 
+    _log.debug("infer_transport_kind: no rule matched, defaulting to %s", TransportKind.API.value)
     return TransportKind.API.value
 
 
 def infer_entity_scope(entity_hints: list[str], endpoint_info: dict) -> list[str]:
     """Infer entity scope from hints and endpoint"""
+    _log.debug("infer_entity_scope: entity_hints=%s url=%s", entity_hints, endpoint_info.get("url", ""))
+
     scope = list(entity_hints) if entity_hints else []
-    
+
     # Extract entities from URL path
     url = endpoint_info.get("url", "")
     parts = url.split("/")
-    
+
     for part in parts:
         if part and len(part) > 2:
             # Skip common path segments
@@ -224,13 +258,18 @@ def infer_entity_scope(entity_hints: list[str], endpoint_info: dict) -> list[str
                     entity = part.replace("_", " ").replace("-", " ").title()
                     if entity not in scope:
                         scope.append(entity)
-    
-    return scope[:5]  # Limit to 5 entities
+
+    result = scope[:5]  # Limit to 5 entities
+    _log.debug("infer_entity_scope: result=%s", result)
+    return result
 
 
 def infer_identity_keys(schema: Optional[dict], entity_scope: list[str]) -> list[str]:
     """Infer identity keys from schema fields with deep analysis"""
+    _log.debug("infer_identity_keys: schema_fields=%s entity_scope=%s", list(schema.keys()) if schema else None, entity_scope)
+
     if not schema:
+        _log.debug("infer_identity_keys: no schema, defaulting to ['id']")
         return ["id"]
 
     keys = []
@@ -295,24 +334,30 @@ def infer_identity_keys(schema: Optional[dict], entity_scope: list[str]) -> list
         if not keys:
             keys.append("id")  # Default assumption
 
+    _log.debug("infer_identity_keys: result=%s", keys)
     return keys
 
 
 def infer_change_semantics(endpoint_info: dict, schema: Optional[dict]) -> str:
     """Infer how data changes over time"""
+    _log.debug("infer_change_semantics: url=%s method=%s schema_fields=%s", endpoint_info.get("url", ""), endpoint_info.get("method", "GET"), list(schema.keys()) if schema else None)
+
     url = endpoint_info.get("url", "").lower()
     method = endpoint_info.get("method", "GET").upper()
 
     # CDC indicators in URL
     if any(x in url for x in ["cdc", "changes", "delta", "incremental", "replication"]):
+        _log.debug("infer_change_semantics: matched cdc url pattern, result=%s", ChangeSemantics.CDC_UPSERT.value)
         return ChangeSemantics.CDC_UPSERT.value
 
     # Append-only indicators (events, logs, activities)
     if any(x in url for x in ["events", "log", "audit", "history", "activities", "feed", "stream"]):
+        _log.debug("infer_change_semantics: matched append_only url pattern, result=%s", ChangeSemantics.APPEND_ONLY.value)
         return ChangeSemantics.APPEND_ONLY.value
 
     # Snapshot indicators
     if any(x in url for x in ["snapshot", "full", "dump", "export", "bulk", "all"]):
+        _log.debug("infer_change_semantics: matched snapshot url pattern, result=%s", ChangeSemantics.SNAPSHOT.value)
         return ChangeSemantics.SNAPSHOT.value
 
     # Check schema for timestamp fields that suggest CDC
@@ -342,12 +387,16 @@ def infer_change_semantics(endpoint_info: dict, schema: Optional[dict]) -> str:
         )
 
         if has_modified and has_created:
+            _log.debug("infer_change_semantics: matched schema modified+created rule, result=%s", ChangeSemantics.CDC_UPSERT.value)
             return ChangeSemantics.CDC_UPSERT.value
         if has_version:
+            _log.debug("infer_change_semantics: matched schema version rule, result=%s", ChangeSemantics.CDC_UPSERT.value)
             return ChangeSemantics.CDC_UPSERT.value
         if has_deleted and has_modified:
+            _log.debug("infer_change_semantics: matched schema deleted+modified rule, result=%s", ChangeSemantics.CDC_UPSERT.value)
             return ChangeSemantics.CDC_UPSERT.value
         if has_created and not has_modified:
+            _log.debug("infer_change_semantics: matched schema created-only rule, result=%s", ChangeSemantics.APPEND_ONLY.value)
             return ChangeSemantics.APPEND_ONLY.value
 
         # Check for immutable record patterns (IDs only, no timestamps)
@@ -356,19 +405,24 @@ def infer_change_semantics(endpoint_info: dict, schema: Optional[dict]) -> str:
             for k in schema_keys_lower if k not in ["created", "modified", "updated"]
         )
         if id_only and len(schema_keys_lower) <= 3:
+            _log.debug("infer_change_semantics: matched schema id-only rule, result=%s", ChangeSemantics.SNAPSHOT.value)
             return ChangeSemantics.SNAPSHOT.value
 
     # POST methods often indicate append-only patterns
     if method == "POST" and any(x in url for x in ["create", "insert", "add"]):
+        _log.debug("infer_change_semantics: matched POST create pattern, result=%s", ChangeSemantics.APPEND_ONLY.value)
         return ChangeSemantics.APPEND_ONLY.value
 
+    _log.debug("infer_change_semantics: no rule matched, result=%s", ChangeSemantics.UNKNOWN.value)
     return ChangeSemantics.UNKNOWN.value
 
 
 def build_lineage_hints(observation: dict) -> list[str]:
     """Build lineage hints from observation metadata"""
+    _log.debug("build_lineage_hints: source_system=%s collector_id=%s", observation.get("source_system", ""), observation.get("collector_id", ""))
+
     hints = []
-    
+
     metadata = observation.get("metadata", {})
     endpoint_info = observation.get("endpoint_info", {})
     
@@ -383,14 +437,17 @@ def build_lineage_hints(observation: dict) -> list[str]:
     
     if observation.get("candidate_id"):
         hints.append(f"candidate:{observation['candidate_id'][:8]}")
-    
+
+    _log.debug("build_lineage_hints: result=%s", hints)
     return hints
 
 
 def infer_ownership_signals(metadata: dict, source_system: str) -> list[str]:
     """Infer ownership signals from metadata"""
+    _log.debug("infer_ownership_signals: source_system=%s metadata_keys=%s", source_system, list(metadata.keys()))
+
     signals = []
-    
+
     if source_system:
         signals.append(f"system:{source_system}")
     
@@ -401,7 +458,8 @@ def infer_ownership_signals(metadata: dict, source_system: str) -> list[str]:
     for key in ["owner", "team", "department", "group"]:
         if key in metadata:
             signals.append(f"{key}:{metadata[key]}")
-    
+
+    _log.debug("infer_ownership_signals: result=%s", signals)
     return signals
 
 
@@ -417,6 +475,8 @@ def build_trust_labels(observation: dict, modality: str, change_semantics: str) 
     - quality_*: Data quality indicators
     - source_*: Origin information
     """
+    _log.debug("build_trust_labels: modality=%s change_semantics=%s source_system=%s", modality, change_semantics, observation.get("source_system", ""))
+
     labels = []
     metadata = observation.get("metadata", {})
     schema_sample = observation.get("schema_sample")
@@ -498,6 +558,7 @@ def build_trust_labels(observation: dict, modality: str, change_semantics: str) 
     if any(x in url for x in ["realtime", "live", "stream"]):
         labels.append("quality:realtime")
 
+    _log.debug("build_trust_labels: result=%s", labels)
     return labels
 
 

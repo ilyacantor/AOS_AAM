@@ -280,14 +280,14 @@ fabric_router = APIRouter(prefix="/api/fabric-planes", tags=["Fabric Planes"])
 
 @fabric_router.post("/backfill")
 async def backfill_fabric_planes_from_candidates():
-    """Backfill is disabled — AAM does not infer fabric planes from application categories.
+    """Backfill fabric plane assignments by running inference on unmatched candidates.
 
-    Fabric planes only come from AOD-discovered infrastructure evidence or
-    explicit operator declarations.  Use POST /api/adapters/{plane}/connect
-    to register known infrastructure.
+    RACI v4: AAM owns fabric plane inference. This endpoint triggers the
+    inference cascade on any candidates that lack a fabric plane assignment.
     """
+    from ..routers.collectors import infer_pipes
+    result = await infer_pipes()
     return {
-        "message": "Backfill disabled: AAM does not infer infrastructure from application categories. "
-                   "Fabric planes come from AOD discovery or operator declarations only.",
-        "created": 0
+        "message": "Backfill via inference cascade",
+        "created": result.get("pipes_created", 0) if isinstance(result, dict) else 0,
     }

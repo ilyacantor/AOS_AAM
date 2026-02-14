@@ -216,6 +216,8 @@ class AODHandoffResponse(BaseModel):
     rejected_reasons: list[dict] = Field(default_factory=list)
     handoff_id: str
     processed_at: datetime = Field(default_factory=datetime.utcnow)
+    plane_store_errors: list = Field(default_factory=list)
+    sor_store_errors: list = Field(default_factory=list)
 
 
 class AODPolicyManifest(BaseModel):

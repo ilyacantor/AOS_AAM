@@ -155,7 +155,7 @@ def load_aod_payload() -> Optional[dict]:
         return None
 
 
-def resolve_fabric_planes(request: AODHandoffRequest) -> tuple[dict, int]:
+def resolve_fabric_planes(request: AODHandoffRequest) -> tuple[dict, int, list]:
     """
     Store explicit fabric planes that AOD sent.
 
@@ -163,11 +163,12 @@ def resolve_fabric_planes(request: AODHandoffRequest) -> tuple[dict, int]:
     infer infrastructure from candidate metadata.  AOD owns fabric-plane
     detection; AAM only allocates assets to planes AOD discovered.
 
-    Returns (fabric_plane_map, planes_stored) where fabric_plane_map
-    maps vendor-lowercase → plane_id.
+    Returns (fabric_plane_map, planes_stored, errors) where fabric_plane_map
+    maps vendor-lowercase → plane_id and errors is a list of error strings.
     """
     fabric_plane_map: dict[str, str] = {}
     fabric_planes_stored = 0
+    errors: list[str] = []
 
     for plane in request.fabric_planes or []:
         try:
@@ -177,9 +178,11 @@ def resolve_fabric_planes(request: AODHandoffRequest) -> tuple[dict, int]:
             fabric_plane_map[plane.vendor.lower()] = plane_id
             fabric_planes_stored += 1
         except Exception as e:
-            _log.error("Failed to store fabric plane %s: %s", plane.vendor, e)
+            msg = f"Failed to store fabric plane {plane.vendor}: {e}"
+            _log.error(msg)
+            errors.append(msg)
 
-    return fabric_plane_map, fabric_planes_stored
+    return fabric_plane_map, fabric_planes_stored, errors
 
 
 def link_candidate_to_plane(
@@ -331,6 +334,7 @@ def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
 
     # 1a. Store authoritative SOR declarations from Farm (if provided)
     sors_stored = 0
+    sor_store_errors: list[str] = []
     if request.sors:
         for sor in request.sors:
             try:
@@ -340,11 +344,13 @@ def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
                 _log.info("Stored SOR declaration: %s / %s (confidence=%s, source=%s)",
                           sor.domain, sor.vendor, sor.confidence, sor.source)
             except Exception as e:
-                _log.error("Failed to store SOR declaration %s/%s: %s", sor.domain, sor.vendor, e)
+                msg = f"Failed to store SOR declaration {sor.domain}/{sor.vendor}: {e}"
+                _log.error(msg)
+                sor_store_errors.append(msg)
         _log.info("SOR declarations stored: %d", sors_stored)
 
     # 1b. Resolve fabric planes
-    fabric_plane_map, fabric_planes_stored = resolve_fabric_planes(request)
+    fabric_plane_map, fabric_planes_stored, plane_store_errors = resolve_fabric_planes(request)
     _log.info("Fabric planes resolved: %d stored", fabric_planes_stored)
 
     # 2. Process candidates with typed error classification
@@ -477,4 +483,6 @@ def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
         rejected_reasons=rejected_dicts,
         handoff_id=handoff_log["handoff_id"],
         processed_at=datetime.utcnow(),
+        plane_store_errors=plane_store_errors,
+        sor_store_errors=sor_store_errors,
     )

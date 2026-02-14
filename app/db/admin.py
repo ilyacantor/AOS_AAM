@@ -22,7 +22,7 @@ def reset_aod_state():
     idempotency checks — a stale log entry would short-circuit re-ingestion.
     """
     # Tables whose rows are repopulated on each handoff
-    repopulated_tables = [
+    ALLOWED_TABLES = frozenset({
         "drift_events",
         "pipe_versions",
         "declared_pipes",
@@ -35,12 +35,13 @@ def reset_aod_state():
         "sor_dispositions",
         "aod_policy_manifest",
         "aod_handoff_log",
-    ]
+    })
 
     with get_db() as conn:
         cursor = conn.cursor()
         counts = {}
-        for table in repopulated_tables:
+        for table in ALLOWED_TABLES:
+            assert table in ALLOWED_TABLES, f"Disallowed table: {table}"
             cursor.execute(f"SELECT COUNT(*) FROM {table}")
             counts[table] = cursor.fetchone()[0]
             cursor.execute(f"DELETE FROM {table}")
@@ -55,7 +56,11 @@ def clear_all_data():
 
 
 def get_pipe_stats() -> dict:
-    """Get statistics about pipes by fabric_plane and modality"""
+    """Get statistics about pipes by fabric_plane and modality.
+
+    Queries connection_candidates (the single source of truth) instead of
+    declared_pipes.
+    """
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -66,21 +71,35 @@ def get_pipe_stats() -> dict:
         "by_source_system": {}
     }
 
-    cursor.execute("SELECT COUNT(*) FROM declared_pipes")
+    cursor.execute("SELECT COUNT(*) FROM connection_candidates")
     stats["total_pipes"] = cursor.fetchone()[0]
 
-    cursor.execute("SELECT fabric_plane, COUNT(*) as cnt FROM declared_pipes GROUP BY fabric_plane")
+    # Fabric plane comes from connected_via_plane or fabric_planes JOIN
+    cursor.execute("""
+        SELECT COALESCE(UPPER(fp.plane_type), UPPER(c.connected_via_plane), 'UNMAPPED') as plane,
+               COUNT(*) as cnt
+        FROM connection_candidates c
+        LEFT JOIN fabric_planes fp ON c.fabric_plane_id = fp.plane_id
+        GROUP BY plane
+    """)
     for row in cursor.fetchall():
-        plane = row["fabric_plane"] or "API_GATEWAY"
-        stats["by_fabric_plane"][plane] = row["cnt"]
+        stats["by_fabric_plane"][row[0] or "UNMAPPED"] = row[1]
 
-    cursor.execute("SELECT modality, COUNT(*) as cnt FROM declared_pipes GROUP BY modality")
+    cursor.execute("""
+        SELECT COALESCE(c.category, 'unknown') as cat, COUNT(*) as cnt
+        FROM connection_candidates c
+        GROUP BY cat
+    """)
     for row in cursor.fetchall():
-        stats["by_modality"][row["modality"]] = row["cnt"]
+        stats["by_modality"][row[0]] = row[1]
 
-    cursor.execute("SELECT source_system, COUNT(*) as cnt FROM declared_pipes GROUP BY source_system")
+    cursor.execute("""
+        SELECT vendor_name, COUNT(*) as cnt
+        FROM connection_candidates
+        GROUP BY vendor_name
+    """)
     for row in cursor.fetchall():
-        stats["by_source_system"][row["source_system"]] = row["cnt"]
+        stats["by_source_system"][row[0]] = row[1]
 
     conn.close()
     return stats
