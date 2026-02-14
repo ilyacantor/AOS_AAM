@@ -231,32 +231,48 @@ def _candidate_to_pipe(row) -> dict:
     """
     Convert candidate row to pipe format for UI compatibility.
     CANONICAL: Candidates = Pipes
+
+    Uses actual plane type and endpoint data to infer transport and modality
+    instead of hardcoded defaults.
     """
+    from ..plane_resolution import (
+        infer_transport_from_plane_and_endpoints,
+        infer_modality_from_plane_and_category,
+        parse_plane_type,
+    )
+
     keys = row.keys()
-    
-    # Extract fabric plane type: JOIN result → connected_via_plane → UNMAPPED
+
+    # Extract fabric plane type: JOIN result → connected_via_plane → None
     fabric_plane = None
     if "fabric_plane" in keys and row["fabric_plane"]:
         fabric_plane = row["fabric_plane"].upper()
+    if not fabric_plane and "fabric_plane_id" in keys and row["fabric_plane_id"]:
+        fabric_plane = parse_plane_type(row["fabric_plane_id"])
     if not fabric_plane and "connected_via_plane" in keys and row["connected_via_plane"]:
         fabric_plane = row["connected_via_plane"].upper()
-    # Leave fabric_plane as None when unresolved — sentinel strings are
-    # only added at the UI boundary (topology_service / templates).
-    # This prevents "UNMAPPED" from leaking into DB writes or export data.
-    
-    # Map category to modality — iPaaS uses control plane, everything else is declared interface
-    category_lower = row["category"].lower() if row["category"] else ""
-    modality = "CONTROL_PLANE" if "ipaas" in category_lower else "DECLARED_INTERFACE"
-    
+
+    # Infer transport and modality from actual data — NOT hardcoded
+    endpoints = json.loads(row["known_endpoints"]) if row["known_endpoints"] else []
+    vendor_name = row["vendor_name"]
+    category = row["category"]
+
+    transport_kind = infer_transport_from_plane_and_endpoints(
+        fabric_plane, vendor_name, endpoints,
+    )
+    modality = infer_modality_from_plane_and_category(
+        fabric_plane, category, vendor_name,
+    )
+
     return {
         "pipe_id": row["candidate_id"],  # Candidate ID = Pipe ID
         "display_name": row["display_name"],
         "fabric_plane": fabric_plane,
         "modality": modality,
-        "source_system": row["vendor_name"],
-        "transport_kind": "API",  # Default
-        "endpoint_ref": {"endpoints": json.loads(row["known_endpoints"]) if row["known_endpoints"] else []},
-        "entity_scope": [row["category"]] if row["category"] else [],
+        "source_system": vendor_name,
+        "transport_kind": transport_kind,
+        "endpoint_ref": {"endpoints": endpoints},
+        "entity_scope": [category] if category else [],
         "identity_keys": [],
         "change_semantics": "UNKNOWN",
         "provenance": {

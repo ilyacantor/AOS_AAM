@@ -244,11 +244,19 @@ async def download_reconciliation_json(aod_run_id: str):
     )
 
 
-# Fabric-plane backfill endpoint
-fabric_router = APIRouter(prefix="/api/fabric-planes", tags=["Fabric Planes"])
+# Fabric plane endpoints
+fabric_router = APIRouter(prefix="/api/handoff", tags=["Fabric Planes"])
 
 
-@fabric_router.post("/backfill")
+@fabric_router.get("/fabric-planes")
+async def list_stored_fabric_planes():
+    """List all stored fabric planes."""
+    from ..db.fabric_planes import get_fabric_planes
+    planes = get_fabric_planes()
+    return {"planes": planes, "count": len(planes)}
+
+
+@fabric_router.post("/fabric-planes/backfill")
 async def backfill_fabric_planes_from_candidates():
     """Backfill is disabled — AAM does not infer fabric planes from application categories.
 

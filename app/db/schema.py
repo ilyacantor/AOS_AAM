@@ -35,8 +35,8 @@ def init_db():
             match_reason TEXT,
             deferred_reason TEXT,
             -- AOD Handoff Fields --
-            execution_allowed INTEGER DEFAULT 1,
-            action_type TEXT DEFAULT 'provision',
+            execution_allowed INTEGER DEFAULT NULL,
+            action_type TEXT DEFAULT NULL,
             blocking_findings TEXT,
             connected_via_plane TEXT,
             aod_run_id TEXT,
@@ -283,6 +283,7 @@ def init_db():
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_drift_pipe ON drift_events(pipe_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_collector_runs_collector ON collector_runs(collector_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_drift_status ON drift_events(status)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_candidates_fabric_plane ON connection_candidates(fabric_plane_id)")
     
     # Insert default mock collector
     cursor.execute("""
