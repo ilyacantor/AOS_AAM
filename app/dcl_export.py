@@ -44,7 +44,6 @@ class DCLExportResponse(BaseModel):
     aod_run_id: Optional[str] = None
     timestamp: str
     fabric_planes: List[DCLFabricPlane]
-    unlinked_connections: List[DCLConnectionSchema] = []
     total_connections: int
     source: str = "aam"
 
@@ -90,27 +89,38 @@ def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
     # Unlinked candidates remain unlinked — we do NOT infer fabric planes
     # from application categories.  If a candidate wasn't linked to a plane
     # by AOD or by explicit infrastructure evidence, it stays unlinked.
-    # They ARE still exported so DCL can report them as unpiped connections.
-    if unlinked_candidates:
-        _log.info("%d candidates have no fabric plane link — exporting as unlinked_connections",
-                  len(unlinked_candidates))
-
+    for candidate in unlinked_candidates:
+        _log.debug("Candidate %s (%s) has no fabric plane link — skipping DCL grouping",
+                   candidate.get("vendor_name"), candidate.get("category"))
+    
     # Build fabric plane objects for DCL
     fabric_planes_output = []
     total_connections = 0
-
+    
     for plane_id, data in planes_dict.items():
         plane = data["plane"]
         candidates_list = data["candidates"]
-
+        
         if not candidates_list:
             # Skip empty fabric planes
             continue
-
+        
         connections = []
         for candidate in candidates_list:
-            connections.append(_candidate_to_dcl_connection(candidate))
-
+            connection = DCLConnectionSchema(
+                pipe_id=candidate.get("candidate_id", ""),
+                source_name=candidate.get("display_name", "Unknown"),
+                vendor=candidate.get("vendor_name", "Unknown"),
+                category=candidate.get("category", "other"),
+                governance_status=candidate.get("governance_status"),
+                fields=[],  # Schema column names — populated after observation/enrichment
+                health="unknown",
+                last_sync=candidate.get("updated_at"),
+                asset_key=candidate.get("asset_key", ""),
+                aod_asset_id=candidate.get("aod_asset_id"),
+            )
+            connections.append(connection)
+        
         fabric_plane_obj = DCLFabricPlane(
             plane_type=plane["plane_type"],
             vendor=plane["vendor"],
@@ -120,32 +130,11 @@ def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
         )
         fabric_planes_output.append(fabric_plane_obj)
         total_connections += len(connections)
-
-    # Serialize unlinked candidates for DCL visibility
-    unlinked_output = [_candidate_to_dcl_connection(c) for c in unlinked_candidates]
-    total_connections += len(unlinked_output)
-
+    
     return DCLExportResponse(
         aod_run_id=aod_run_id,
         timestamp=datetime.utcnow().isoformat() + "Z",
         fabric_planes=fabric_planes_output,
-        unlinked_connections=unlinked_output,
         total_connections=total_connections,
         source="aam"
-    )
-
-
-def _candidate_to_dcl_connection(candidate: dict) -> DCLConnectionSchema:
-    """Convert a candidate dict to a DCLConnectionSchema."""
-    return DCLConnectionSchema(
-        pipe_id=candidate.get("candidate_id", ""),
-        source_name=candidate.get("display_name", "Unknown"),
-        vendor=candidate.get("vendor_name", "Unknown"),
-        category=candidate.get("category", "other"),
-        governance_status=candidate.get("governance_status"),
-        fields=[],  # Schema column names — populated after observation/enrichment
-        health="unknown",
-        last_sync=candidate.get("updated_at"),
-        asset_key=candidate.get("asset_key", ""),
-        aod_asset_id=candidate.get("aod_asset_id"),
     )

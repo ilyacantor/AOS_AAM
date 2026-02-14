@@ -577,13 +577,6 @@ def get_aod_reconciliation(aod_run_id: str) -> dict:
         + duplicates["total_groups"]
     )
 
-    candidates_match = handoff_row[1] == aod_origin_stored
-    unlinked_count = aod_origin_stored - fabric_linked
-    # Linkage is healthy only when every AOD-origin candidate maps to a plane.
-    # When no candidates exist we treat linkage as healthy (nothing to link).
-    linkage_healthy = unlinked_count == 0 if aod_origin_stored > 0 else True
-    linkage_pct = round((fabric_linked / aod_origin_stored) * 100, 1) if aod_origin_stored > 0 else 100.0
-
     return {
         "aod_run_id": aod_run_id,
         "snapshot_name": summary["snapshot_name"],
@@ -603,13 +596,8 @@ def get_aod_reconciliation(aod_run_id: str) -> dict:
             "top_vendors": summary["top_vendors"],
         },
         "reconciliation": {
-            "candidates_match": candidates_match,
+            "candidates_match": handoff_row[1] == aod_origin_stored,
             "discrepancy": handoff_row[1] - aod_origin_stored,
-            "fabric_linked": fabric_linked,
-            "unlinked": unlinked_count,
-            "linkage_coverage_pct": linkage_pct,
-            "linkage_healthy": linkage_healthy,
-            "all_healthy": candidates_match and linkage_healthy and issues_count == 0,
         },
         "deep_checks": {
             "vendor_matching": vendor_check,
