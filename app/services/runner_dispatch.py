@@ -43,12 +43,28 @@ _TRANSPORT_ADAPTER = {
     TransportKind.WEBHOOK: "webhook",
 }
 
-_seq_counter = 0
+_seq_counter: Optional[int] = None
+
+
+def _init_seq_counter() -> int:
+    """Initialize sequence counter from the max existing job number in the DB."""
+    try:
+        jobs = list_runner_jobs(limit=1)
+        if jobs:
+            last_id = jobs[0].get("job_id", "")
+            parts = last_id.rsplit("_", 1)
+            if len(parts) == 2 and parts[1].isdigit():
+                return int(parts[1])
+    except Exception:
+        pass
+    return 0
 
 
 def _next_run_id(source_system: str) -> str:
     """Generate a unique run_id: run_{YYYYMMDD}_{system}_{seq:03d}"""
     global _seq_counter
+    if _seq_counter is None:
+        _seq_counter = _init_seq_counter()
     _seq_counter += 1
     date_str = datetime.utcnow().strftime("%Y%m%d")
     safe_system = source_system.lower().replace(" ", "_")[:20]

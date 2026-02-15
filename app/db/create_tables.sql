@@ -207,3 +207,30 @@ CREATE TABLE IF NOT EXISTS dcl_pushes (
     payload TEXT,
     notes TEXT
 );
+
+CREATE TABLE IF NOT EXISTS runner_jobs (
+    job_id TEXT PRIMARY KEY,
+    pipe_id TEXT NOT NULL,
+    status TEXT DEFAULT 'queued',
+    manifest TEXT,
+    dispatched_at TEXT,
+    started_at TEXT,
+    completed_at TEXT,
+    last_heartbeat TEXT,
+    rows_transferred INTEGER DEFAULT 0,
+    error_message TEXT,
+    dcl_response TEXT
+);
+
+CREATE TABLE IF NOT EXISTS dcl_ingested (
+    ingest_id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    pipe_id TEXT NOT NULL,
+    source_system TEXT,
+    row_count INTEGER DEFAULT 0,
+    payload_hash TEXT,
+    schema_hash TEXT,
+    payload TEXT,
+    ingested_at TEXT,
+    schema_version TEXT
+);

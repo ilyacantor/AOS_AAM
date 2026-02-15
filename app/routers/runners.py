@@ -45,13 +45,35 @@ async def dispatch_single(req: RunnerDispatchRequest):
 
 @router.post("/dispatch-batch")
 async def dispatch_multiple(req: RunnerBatchDispatchRequest):
-    """Dispatch runner jobs for multiple pipes."""
+    """Dispatch runner jobs for multiple pipes, then execute each inline."""
     if not req.pipe_ids:
         raise HTTPException(status_code=400, detail="pipe_ids is required")
     results = dispatch_batch(req.pipe_ids, req.trigger)
+
+    completed = 0
+    failed = 0
+    errors = 0
+    for r in results:
+        if r.get("status") == "error":
+            errors += 1
+            continue
+        try:
+            exec_result = await execute_job_inline(r["job_id"])
+            r.update(exec_result)
+            if exec_result.get("status") == "completed":
+                completed += 1
+            else:
+                failed += 1
+        except Exception as exc:
+            r["status"] = "failed"
+            r["error"] = str(exc)
+            failed += 1
+
     return {
-        "dispatched": len([r for r in results if r.get("status") == "queued"]),
-        "errors": len([r for r in results if r.get("status") == "error"]),
+        "dispatched": completed + failed,
+        "completed": completed,
+        "failed": failed,
+        "errors": errors,
         "jobs": results,
     }
 

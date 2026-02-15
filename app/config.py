@@ -31,7 +31,7 @@ class Settings:
         )
         # Base URL for self-referencing HTTP calls (Runner → DCL ingest)
         self.BASE_URL: str = os.environ.get(
-            "AAM_BASE_URL", "http://127.0.0.1:8000"
+            "AAM_BASE_URL", "http://127.0.0.1:5000"
         )
         # API key the Runner sends in x-api-key header to DCL
         # In production: resolved from vault. In v1: env var.
