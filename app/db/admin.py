@@ -3,6 +3,7 @@ Preset/seed data admin operations
 """
 import json
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 from . import supabase_client as sb
@@ -34,12 +35,16 @@ def reset_aod_state():
     The handoff log must be cleared because process_handoff() uses it for
     idempotency checks — a stale log entry would short-circuit re-ingestion.
     """
-    for table in ALLOWED_TABLES:
+    def _delete_table(table):
         pk = TABLE_PK_MAP[table]
         try:
             sb.delete(table, raw_params={pk: "not.is.null"})
         except Exception:
             pass  # table may already be empty
+
+    # Fire all 12 table deletes concurrently
+    with ThreadPoolExecutor(max_workers=len(ALLOWED_TABLES)) as pool:
+        pool.map(_delete_table, ALLOWED_TABLES)
 
     return {"reset": True, "tables_cleared": len(ALLOWED_TABLES)}
 

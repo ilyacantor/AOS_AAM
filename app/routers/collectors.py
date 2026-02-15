@@ -226,10 +226,13 @@ async def infer_pipes():
         sb.insert_many("declared_pipes", new_pipes)
     if new_versions:
         sb.insert_many("pipe_versions", new_versions)
-    # Candidate updates must be per-row (different values), but no re-fetch
+    # Fire all candidate updates concurrently (threaded) — 30 calls in
+    # parallel instead of 30 sequential calls.
+    update_pairs = []
     for upd in candidate_updates:
         cid = upd.pop("candidate_id")
-        sb.update("connection_candidates", upd, filters={"candidate_id": cid})
+        update_pairs.append(({"candidate_id": cid}, upd))
+    sb.update_many_concurrent("connection_candidates", update_pairs)
 
     total_pipes = pipes_from_obs + pipes_from_candidates
 

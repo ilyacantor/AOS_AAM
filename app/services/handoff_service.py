@@ -338,25 +338,72 @@ def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
     _log.info("Clearing previous run state before processing new handoff")
     reset_aod_state()
 
-    # 1a. Store authoritative SOR declarations from Farm (if provided)
+    # 1a. Store authoritative SOR declarations (batch insert — table already cleared)
     sors_stored = 0
     sor_store_errors: list[str] = []
     if request.sors:
+        from ..db import supabase_client as sb
+        from datetime import datetime as _dt
+        sor_rows = []
         for sor in request.sors:
-            try:
-                sor_dict = sor.model_dump()
-                store_sor_declaration(sor_dict, request.run_id)
-                sors_stored += 1
-                _log.info("Stored SOR declaration: %s / %s (confidence=%s, source=%s)",
-                          sor.domain, sor.vendor, sor.confidence, sor.source)
-            except Exception as e:
-                msg = f"Failed to store SOR declaration {sor.domain}/{sor.vendor}: {e}"
-                _log.error(msg)
-                sor_store_errors.append(msg)
+            domain = (sor.domain or "").upper()
+            vendor = sor.vendor or ""
+            now = _dt.utcnow().isoformat()
+            sor_rows.append({
+                "sor_id": f"sor:{domain.lower()}:{vendor.lower()}",
+                "domain": domain,
+                "vendor": vendor,
+                "category": (sor.category or "").lower(),
+                "confidence": (sor.confidence or "high").lower(),
+                "source": (sor.source or "farm").lower(),
+                "aod_run_id": request.run_id,
+                "created_at": now,
+                "updated_at": now,
+            })
+        try:
+            sb.insert_many("sor_declarations", sor_rows)
+            sors_stored = len(sor_rows)
+        except Exception as e:
+            msg = f"Failed to batch-store SOR declarations: {e}"
+            _log.error(msg)
+            sor_store_errors.append(msg)
         _log.info("SOR declarations stored: %d", sors_stored)
 
-    # 1b. Resolve fabric planes
-    fabric_plane_map, fabric_planes_stored, plane_store_errors = resolve_fabric_planes(request)
+    # 1b. Resolve fabric planes (batch insert — table already cleared)
+    fabric_plane_map: dict[str, str] = {}
+    fabric_planes_stored = 0
+    plane_store_errors: list[str] = []
+    if request.fabric_planes:
+        from ..db import supabase_client as sb
+        from datetime import datetime as _dt
+        plane_rows = []
+        for plane in request.fabric_planes:
+            pt = (plane.plane_type or "").upper()
+            plane_id = f"{pt}:{plane.vendor}"
+            now = _dt.utcnow().isoformat()
+            is_healthy = plane.is_healthy
+            if is_healthy is not None:
+                is_healthy = bool(is_healthy)
+            plane_rows.append({
+                "plane_id": plane_id,
+                "plane_type": pt,
+                "vendor": plane.vendor,
+                "display_name": f"{plane.vendor} {pt}",
+                "domain": None,
+                "managed_asset_count": 0,
+                "is_healthy": is_healthy,
+                "aod_run_id": request.run_id,
+                "created_at": now,
+                "updated_at": now,
+            })
+            fabric_plane_map[plane.vendor.lower()] = plane_id
+        try:
+            sb.insert_many("fabric_planes", plane_rows)
+            fabric_planes_stored = len(plane_rows)
+        except Exception as e:
+            msg = f"Failed to batch-store fabric planes: {e}"
+            _log.error(msg)
+            plane_store_errors.append(msg)
     _log.info("Fabric planes resolved: %d stored", fabric_planes_stored)
 
     # Pre-build plane lookup structures once (not per candidate)

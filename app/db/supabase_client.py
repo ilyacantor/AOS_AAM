@@ -6,6 +6,7 @@ All db modules use these instead of raw sqlite3 calls.
 """
 import os
 import httpx
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, Any
 from ..logger import get_logger
 
@@ -150,6 +151,36 @@ def delete(
     resp = client.delete(f"/{table}", params=params)
     _check_response(resp, f"delete {table}")
     return resp.json()
+
+
+def update_many_concurrent(
+    table: str,
+    updates: list[tuple[dict, dict]],
+    *,
+    max_workers: int = 10,
+) -> int:
+    """Fire many UPDATE calls concurrently (threaded).
+
+    Each entry in *updates* is (filter_dict, data_dict).
+    Returns the count of successful updates.
+    """
+    if not updates:
+        return 0
+
+    def _do_one(pair):
+        filt, data = pair
+        update(table, data, filters=filt)
+
+    ok = 0
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = [pool.submit(_do_one, pair) for pair in updates]
+        for fut in as_completed(futures):
+            try:
+                fut.result()
+                ok += 1
+            except Exception as exc:
+                _log.warning("concurrent update failed: %s", exc)
+    return ok
 
 
 def rpc(function_name: str, params: Optional[dict] = None) -> Any:
