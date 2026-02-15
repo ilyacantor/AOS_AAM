@@ -22,6 +22,7 @@ TABLE_PK_MAP = {
     "sor_dispositions": "disposition_id",
     "aod_policy_manifest": "policy_id",
     "aod_handoff_log": "handoff_id",
+    "runner_jobs": "job_id",
 }
 
 ALLOWED_TABLES = frozenset(TABLE_PK_MAP.keys())
