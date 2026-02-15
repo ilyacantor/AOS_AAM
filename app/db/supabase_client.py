@@ -1,71 +1,208 @@
 """
-Supabase REST API client for AAM.
+Supabase PostgreSQL client for AAM.
 
-Provides low-level CRUD helpers that wrap Supabase's PostgREST API.
-All db modules use these instead of raw sqlite3 calls.
+Uses psycopg2 with connection pooling via the Supabase session pooler.
+Provides low-level CRUD helpers that all db modules use.
 """
 import os
-import httpx
+import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, Any
+
+import psycopg2
+import psycopg2.pool
+import psycopg2.extras
 from ..logger import get_logger
 
 _log = get_logger("db.supabase")
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
-SUPABASE_API_KEY = os.environ.get("SUPABASE_API_KEY", "").strip()
+_PROJECT_REF = SUPABASE_URL.replace("https://", "").split(".")[0] if SUPABASE_URL else ""
+_DB_PASSWORD = os.environ.get("SUPABASE_DB_PASSWORD", "").strip()
 
-_REST_BASE = f"{SUPABASE_URL}/rest/v1"
+_DSN = (
+    f"host=aws-0-us-west-2.pooler.supabase.com "
+    f"port=5432 "
+    f"dbname=postgres "
+    f"user=postgres.{_PROJECT_REF} "
+    f"password={_DB_PASSWORD} "
+    f"sslmode=require "
+    f"connect_timeout=10"
+)
 
-_HEADERS = {
-    "apikey": SUPABASE_API_KEY,
-    "Authorization": f"Bearer {SUPABASE_API_KEY}",
-    "Content-Type": "application/json",
-    "Prefer": "return=representation",
-}
-
-_client: Optional[httpx.Client] = None
+_pool: Optional[psycopg2.pool.ThreadedConnectionPool] = None
 
 
-def _get_client() -> httpx.Client:
-    global _client
-    if _client is None:
-        _client = httpx.Client(
-            base_url=_REST_BASE,
-            headers=_HEADERS,
-            timeout=30.0,
+def _get_pool() -> psycopg2.pool.ThreadedConnectionPool:
+    global _pool
+    if _pool is None or _pool.closed:
+        _pool = psycopg2.pool.ThreadedConnectionPool(
+            minconn=1,
+            maxconn=10,
+            dsn=_DSN,
         )
-    return _client
+        _log.info("PostgreSQL connection pool created (pooler: us-west-2)")
+    return _pool
 
 
-def _check_response(resp: httpx.Response, context: str = ""):
-    if resp.status_code >= 400:
-        detail = resp.text[:500]
-        _log.error("Supabase error [%s] %d: %s", context, resp.status_code, detail)
-        raise RuntimeError(f"Supabase {context}: {resp.status_code} — {detail}")
+def _get_conn():
+    """Get a connection from the pool with retry logic."""
+    pool = _get_pool()
+    try:
+        conn = pool.getconn()
+        conn.autocommit = True
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT 1")
+            cur.close()
+        except Exception:
+            pool.putconn(conn, close=True)
+            conn = pool.getconn()
+            conn.autocommit = True
+        return conn
+    except psycopg2.pool.PoolError:
+        global _pool
+        if _pool:
+            try:
+                _pool.closeall()
+            except Exception:
+                pass
+        _pool = None
+        pool = _get_pool()
+        conn = pool.getconn()
+        conn.autocommit = True
+        return conn
+
+
+def _put_conn(conn):
+    try:
+        _get_pool().putconn(conn)
+    except Exception:
+        pass
+
+
+def _execute(query: str, params: tuple = (), *, fetch: bool = True) -> list[dict]:
+    conn = _get_conn()
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute(query, params)
+        if fetch and cur.description:
+            rows = cur.fetchall()
+            return [dict(r) for r in rows]
+        return []
+    except Exception as e:
+        _log.error("SQL error: %s | query: %s", e, query[:200])
+        raise
+    finally:
+        _put_conn(conn)
 
 
 def insert(table: str, data: dict, *, on_conflict: Optional[str] = None) -> dict:
-    client = _get_client()
-    headers = dict(_HEADERS)
+    cols = list(data.keys())
+    vals = list(data.values())
+    placeholders = ", ".join(["%s"] * len(cols))
+    col_str = ", ".join(cols)
+
     if on_conflict:
-        headers["Prefer"] = "return=representation,resolution=merge-duplicates"
-        url = f"/{table}?on_conflict={on_conflict}"
+        update_cols = [c for c in cols if c != on_conflict]
+        update_str = ", ".join(f"{c} = EXCLUDED.{c}" for c in update_cols)
+        query = (
+            f"INSERT INTO {table} ({col_str}) VALUES ({placeholders}) "
+            f"ON CONFLICT ({on_conflict}) DO UPDATE SET {update_str} "
+            f"RETURNING *"
+        )
     else:
-        url = f"/{table}"
-    resp = client.post(url, json=data, headers=headers)
-    _check_response(resp, f"insert {table}")
-    rows = resp.json()
-    return rows[0] if isinstance(rows, list) and rows else rows
+        query = f"INSERT INTO {table} ({col_str}) VALUES ({placeholders}) RETURNING *"
+
+    rows = _execute(query, tuple(vals))
+    return rows[0] if rows else {}
 
 
 def insert_many(table: str, data: list[dict]) -> list[dict]:
     if not data:
         return []
-    client = _get_client()
-    resp = client.post(f"/{table}", json=data)
-    _check_response(resp, f"insert_many {table}")
-    return resp.json()
+    cols = list(data[0].keys())
+    col_str = ", ".join(cols)
+    placeholders = ", ".join(["%s"] * len(cols))
+
+    conn = _get_conn()
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        results = []
+        for row in data:
+            vals = tuple(row.get(c) for c in cols)
+            cur.execute(
+                f"INSERT INTO {table} ({col_str}) VALUES ({placeholders}) RETURNING *",
+                vals,
+            )
+            if cur.description:
+                results.extend([dict(r) for r in cur.fetchall()])
+        return results
+    except Exception as e:
+        _log.error("insert_many error: %s", e)
+        raise
+    finally:
+        _put_conn(conn)
+
+
+def _build_where(
+    filters: Optional[dict[str, Any]] = None,
+    eq_filters: Optional[list[tuple[str, Any]]] = None,
+    raw_params: Optional[dict[str, str]] = None,
+) -> tuple[str, list]:
+    """Build WHERE clause from filter dicts. Returns (clause_str, param_list)."""
+    conditions = []
+    params = []
+
+    if filters:
+        for col, val in filters.items():
+            conditions.append(f"{col} = %s")
+            params.append(val)
+
+    if eq_filters:
+        for col, val in eq_filters:
+            conditions.append(f"{col} = %s")
+            params.append(val)
+
+    if raw_params:
+        for col, expr in raw_params.items():
+            if expr == "eq.true":
+                conditions.append(f"{col} = %s")
+                params.append(True)
+            elif expr == "eq.false":
+                conditions.append(f"{col} = %s")
+                params.append(False)
+            elif expr.startswith("eq."):
+                conditions.append(f"{col} = %s")
+                params.append(expr[3:])
+            elif expr == "not.is.null":
+                conditions.append(f"{col} IS NOT NULL")
+            elif expr.startswith("is."):
+                val = expr[3:]
+                if val == "null":
+                    conditions.append(f"{col} IS NULL")
+                else:
+                    conditions.append(f"{col} = %s")
+                    params.append(val)
+            else:
+                conditions.append(f"{col} = %s")
+                params.append(expr)
+
+    if conditions:
+        return " WHERE " + " AND ".join(conditions), params
+    return "", params
+
+
+def _parse_order(order: Optional[str]) -> str:
+    """Convert PostgREST-style order (col.desc) to SQL ORDER BY."""
+    if not order:
+        return ""
+    parts = order.split(".")
+    col = parts[0]
+    direction = parts[1].upper() if len(parts) > 1 else "ASC"
+    if direction not in ("ASC", "DESC"):
+        direction = "ASC"
+    return f" ORDER BY {col} {direction}"
 
 
 def select(
@@ -79,31 +216,16 @@ def select(
     limit: Optional[int] = None,
     single: bool = False,
 ) -> list[dict] | dict | None:
-    client = _get_client()
-    params: dict[str, str] = {"select": columns}
-    if filters:
-        for col, val in filters.items():
-            params[col] = f"eq.{val}"
-    if eq_filters:
-        for col, val in eq_filters:
-            params[col] = f"eq.{val}"
-    if raw_params:
-        params.update(raw_params)
-    if order:
-        params["order"] = order
-    if limit:
-        params["limit"] = str(limit)
+    where_clause, params = _build_where(filters, eq_filters, raw_params)
+    order_clause = _parse_order(order)
+    limit_clause = f" LIMIT {limit}" if limit else ""
 
-    headers = dict(_HEADERS)
+    query = f"SELECT {columns} FROM {table}{where_clause}{order_clause}{limit_clause}"
+    rows = _execute(query, tuple(params))
+
     if single:
-        headers["Accept"] = "application/vnd.pgrst.object+json"
-
-    resp = client.get(f"/{table}", params=params, headers=headers)
-
-    if single and resp.status_code == 406:
-        return None
-    _check_response(resp, f"select {table}")
-    return resp.json()
+        return rows[0] if rows else None
+    return rows
 
 
 def update(
@@ -113,17 +235,16 @@ def update(
     filters: Optional[dict[str, Any]] = None,
     eq_filters: Optional[list[tuple[str, Any]]] = None,
 ) -> list[dict]:
-    client = _get_client()
-    params: dict[str, str] = {}
-    if filters:
-        for col, val in filters.items():
-            params[col] = f"eq.{val}"
-    if eq_filters:
-        for col, val in eq_filters:
-            params[col] = f"eq.{val}"
-    resp = client.patch(f"/{table}", json=data, params=params)
-    _check_response(resp, f"update {table}")
-    return resp.json()
+    set_cols = list(data.keys())
+    set_str = ", ".join(f"{c} = %s" for c in set_cols)
+    set_vals = list(data.values())
+
+    where_clause, where_params = _build_where(filters, eq_filters)
+    if not where_clause:
+        raise ValueError("update() requires filters")
+
+    query = f"UPDATE {table} SET {set_str}{where_clause} RETURNING *"
+    return _execute(query, tuple(set_vals + where_params))
 
 
 def delete(
@@ -134,23 +255,13 @@ def delete(
     raw_params: Optional[dict[str, str]] = None,
     delete_all: bool = False,
 ) -> list[dict]:
-    client = _get_client()
-    params: dict[str, str] = {}
-    if filters:
-        for col, val in filters.items():
-            params[col] = f"eq.{val}"
-    if eq_filters:
-        for col, val in eq_filters:
-            params[col] = f"eq.{val}"
-    if raw_params:
-        params.update(raw_params)
-    if not params and not delete_all:
+    where_clause, params = _build_where(filters, eq_filters, raw_params)
+
+    if not where_clause and not delete_all:
         raise ValueError("delete() requires filters or delete_all=True")
-    if not params and delete_all:
-        raise ValueError("delete_all requires raw_params with a valid PK filter")
-    resp = client.delete(f"/{table}", params=params)
-    _check_response(resp, f"delete {table}")
-    return resp.json()
+
+    query = f"DELETE FROM {table}{where_clause} RETURNING *"
+    return _execute(query, tuple(params))
 
 
 def update_many_concurrent(
@@ -184,16 +295,23 @@ def update_many_concurrent(
 
 
 def rpc(function_name: str, params: Optional[dict] = None) -> Any:
-    client = _get_client()
-    resp = client.post(f"/rpc/{function_name}", json=params or {})
-    _check_response(resp, f"rpc {function_name}")
-    return resp.json()
+    """Call a stored function/procedure."""
+    if params:
+        param_str = ", ".join(f"%s" for _ in params)
+        query = f"SELECT * FROM {function_name}({param_str})"
+        rows = _execute(query, tuple(params.values()))
+    else:
+        query = f"SELECT * FROM {function_name}()"
+        rows = _execute(query)
+    return rows
 
 
 def table_exists(table_name: str) -> bool:
     try:
-        client = _get_client()
-        resp = client.get(f"/{table_name}", params={"select": "*", "limit": "0"})
-        return resp.status_code < 400
+        rows = _execute(
+            "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name=%s)",
+            (table_name,),
+        )
+        return rows[0].get("exists", False) if rows else False
     except Exception:
         return False

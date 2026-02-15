@@ -68,8 +68,8 @@ def get_pipe_stats() -> dict:
         "by_source_system": {}
     }
 
-    candidates = sb.select("connection_candidates")
-    planes = sb.select("fabric_planes")
+    candidates = sb.select("connection_candidates") or []
+    planes = sb.select("fabric_planes") or []
 
     planes_dict = {p["plane_id"]: p for p in planes}
 
