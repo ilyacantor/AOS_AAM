@@ -35,17 +35,24 @@ def reset_aod_state():
     Preserves collectors (infrastructure config) only.
     The handoff log must be cleared because process_handoff() uses it for
     idempotency checks — a stale log entry would short-circuit re-ingestion.
+    
+    Uses a single connection with DELETE (fastest safe approach on Supabase pooler).
     """
-    def _delete_table(table):
-        pk = TABLE_PK_MAP[table]
-        try:
-            sb.delete(table, raw_params={pk: "not.is.null"})
-        except Exception:
-            pass  # table may already be empty
+    from psycopg2 import sql as psql
 
-    # Fire all 12 table deletes concurrently
-    with ThreadPoolExecutor(max_workers=len(ALLOWED_TABLES)) as pool:
-        pool.map(_delete_table, ALLOWED_TABLES)
+    conn = sb._get_conn()
+    try:
+        cur = conn.cursor()
+        for table in ALLOWED_TABLES:
+            try:
+                cur.execute(psql.SQL("DELETE FROM {}").format(sb._ident(table)))
+            except Exception:
+                pass
+    except Exception as e:
+        sb._put_conn(conn, broken=True)
+        raise
+    finally:
+        sb._put_conn(conn)
 
     return {"reset": True, "tables_cleared": len(ALLOWED_TABLES)}
 

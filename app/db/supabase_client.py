@@ -63,36 +63,47 @@ def _get_pool() -> psycopg2.pool.ThreadedConnectionPool:
 
 def _get_conn():
     """Get a connection from the pool with retry logic."""
-    pool = _get_pool()
-    try:
-        conn = pool.getconn()
-        conn.autocommit = True
+    for attempt in range(2):
+        pool = _get_pool()
         try:
-            cur = conn.cursor()
-            cur.execute("SELECT 1")
-            cur.close()
-        except Exception:
-            pool.putconn(conn, close=True)
             conn = pool.getconn()
             conn.autocommit = True
-        return conn
-    except psycopg2.pool.PoolError:
-        global _pool
-        if _pool:
+            if conn.closed:
+                pool.putconn(conn, close=True)
+                continue
             try:
-                _pool.closeall()
+                cur = conn.cursor()
+                cur.execute("SELECT 1")
+                cur.close()
             except Exception:
-                pass
-        _pool = None
-        pool = _get_pool()
-        conn = pool.getconn()
-        conn.autocommit = True
-        return conn
+                try:
+                    pool.putconn(conn, close=True)
+                except Exception:
+                    pass
+                continue
+            return conn
+        except (psycopg2.pool.PoolError, psycopg2.OperationalError):
+            global _pool
+            if _pool:
+                try:
+                    _pool.closeall()
+                except Exception:
+                    pass
+            _pool = None
+            continue
+    pool = _get_pool()
+    conn = pool.getconn()
+    conn.autocommit = True
+    return conn
 
 
-def _put_conn(conn):
+def _put_conn(conn, *, broken: bool = False):
     try:
-        _get_pool().putconn(conn)
+        pool = _get_pool()
+        if broken or conn.closed:
+            pool.putconn(conn, close=True)
+        else:
+            pool.putconn(conn)
     except Exception:
         pass
 
@@ -106,6 +117,23 @@ def _execute_composed(query: sql.Composed, params: tuple = (), *, fetch: bool = 
             rows = cur.fetchall()
             return [dict(r) for r in rows]
         return []
+    except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+        _log.warning("Connection error (retrying): %s", e)
+        _put_conn(conn, broken=True)
+        conn = _get_conn()
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(query, params)
+            if fetch and cur.description:
+                rows = cur.fetchall()
+                return [dict(r) for r in rows]
+            return []
+        except Exception as e2:
+            _log.error("SQL error on retry: %s", e2)
+            _put_conn(conn, broken=True)
+            raise
+        finally:
+            _put_conn(conn)
     except Exception as e:
         _log.error("SQL error: %s", e)
         raise
@@ -315,7 +343,7 @@ def update_many_concurrent(
     *,
     max_workers: int = 10,
 ) -> int:
-    """Fire many UPDATE calls concurrently (threaded).
+    """Batch UPDATE using a single connection for speed.
 
     Each entry in *updates* is (filter_dict, data_dict).
     Returns the count of successful updates.
@@ -323,19 +351,37 @@ def update_many_concurrent(
     if not updates:
         return 0
 
-    def _do_one(pair):
-        filt, data = pair
-        update(table, data, filters=filt)
-
+    _validate_ident(table)
+    conn = _get_conn()
     ok = 0
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = [pool.submit(_do_one, pair) for pair in updates]
-        for fut in as_completed(futures):
+    try:
+        cur = conn.cursor()
+        for filt, data in updates:
+            set_parts = []
+            params = []
+            for col, val in data.items():
+                set_parts.append(sql.SQL("{} = %s").format(_ident(col)))
+                params.append(val)
+            where_parts = []
+            for col, val in filt.items():
+                where_parts.append(sql.SQL("{} = %s").format(_ident(col)))
+                params.append(val)
+            query = sql.SQL("UPDATE {} SET {} WHERE {}").format(
+                _ident(table),
+                sql.SQL(", ").join(set_parts),
+                sql.SQL(" AND ").join(where_parts),
+            )
             try:
-                fut.result()
+                cur.execute(query, tuple(params))
                 ok += 1
             except Exception as exc:
-                _log.warning("concurrent update failed: %s", exc)
+                _log.warning("batch update failed for one row: %s", exc)
+    except Exception as exc:
+        _log.error("update_many_concurrent error: %s", exc)
+        _put_conn(conn, broken=True)
+        raise
+    finally:
+        _put_conn(conn)
     return ok
 
 
