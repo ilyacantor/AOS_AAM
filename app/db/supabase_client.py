@@ -54,7 +54,7 @@ def _get_pool() -> psycopg2.pool.ThreadedConnectionPool:
     if _pool is None or _pool.closed:
         _pool = psycopg2.pool.ThreadedConnectionPool(
             minconn=1,
-            maxconn=10,
+            maxconn=30,
             dsn=_DSN,
         )
         _log.info("PostgreSQL connection pool created (pooler: us-west-2)")

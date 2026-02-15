@@ -169,16 +169,19 @@ def dispatch_batch(
 ) -> list[dict]:
     """Dispatch runner jobs for multiple pipes using bulk insert.
     
-    Builds all manifests first, then bulk-inserts to DB in one call.
+    Bulk-fetches all pipes in one query, builds manifests, then bulk-inserts.
     Returns list of job summaries with job_ids ready for execution.
     """
+    all_pipes = list_pipes()
+    pipe_map = {p["pipe_id"]: p for p in all_pipes}
+
     manifests = []
     results = []
     errors = []
 
     for pid in pipe_ids:
         try:
-            pipe = get_pipe(pid)
+            pipe = pipe_map.get(pid)
             if not pipe:
                 errors.append({"pipe_id": pid, "status": "error", "error": f"Pipe {pid} not found"})
                 continue

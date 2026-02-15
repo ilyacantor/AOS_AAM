@@ -32,7 +32,11 @@ def _resolve_dcl_url() -> str:
 
 
 def _prepare_job(job_id: str) -> dict:
-    """Blocking: read manifest from DB, mark running, build payload. Returns prep dict."""
+    """Blocking: read manifest from DB, build payload. Returns prep dict.
+    
+    Skips redundant status updates — the background worker already marks
+    jobs 'running' atomically via _claim_queued_jobs.
+    """
     job = get_runner_job(job_id)
     if not job:
         raise ValueError(f"Job {job_id} not found")
@@ -43,7 +47,8 @@ def _prepare_job(job_id: str) -> dict:
     pipe_id = source.get("pipe_id", "unknown")
     system = source.get("system", "unknown")
 
-    update_runner_status(job_id, "running")
+    if job.get("status") != "running":
+        update_runner_status(job_id, "running")
 
     extracted_data = _generate_simulated_data(source)
     transform = manifest.get("transform")
@@ -51,8 +56,6 @@ def _prepare_job(job_id: str) -> dict:
         extracted_data = _apply_schema_map(extracted_data, transform["schema_map"])
 
     schema_hash = compute_schema_hash(extracted_data)
-
-    update_runner_status(job_id, "pushing")
 
     provenance = manifest.get("provenance", {})
     run_ts = provenance.get("run_timestamp", datetime.utcnow().isoformat())

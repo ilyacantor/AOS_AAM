@@ -21,11 +21,14 @@ _worker_task: Optional[asyncio.Task] = None
 _running = False
 
 
-def _claim_queued_jobs(limit: int = 50) -> list[str]:
+def _claim_queued_jobs(limit: int) -> list[str]:
     """Atomically claim queued jobs by updating them to 'running' and returning their IDs.
 
     Uses UPDATE ... RETURNING to prevent duplicate execution across restarts.
     """
+    if limit <= 0:
+        return []
+
     from ..db import supabase_client as sb
     from psycopg2 import sql as psql
 
@@ -69,20 +72,24 @@ async def stop_worker():
 
 
 async def _worker_loop():
-    """Main loop: poll for queued jobs and execute with bounded concurrency."""
-    sem = asyncio.Semaphore(WORKER_CONCURRENCY)
+    """Main loop: poll for queued jobs and execute with bounded concurrency.
+    
+    Only claims as many jobs as we have capacity for (WORKER_CONCURRENCY - active).
+    This prevents marking hundreds of jobs 'running' that can't execute yet.
+    """
     active_jobs: set = set()
 
     while _running:
         try:
-            claimed_ids = await asyncio.to_thread(_claim_queued_jobs, 50)
-            new_ids = [jid for jid in claimed_ids if jid not in active_jobs]
+            capacity = WORKER_CONCURRENCY - len(active_jobs)
+            if capacity > 0:
+                claimed_ids = await asyncio.to_thread(_claim_queued_jobs, capacity)
 
-            if new_ids:
-                _log.info("Worker claimed %d queued jobs", len(new_ids))
-                for job_id in new_ids:
-                    active_jobs.add(job_id)
-                    asyncio.create_task(_run_with_semaphore(sem, job_id, active_jobs))
+                if claimed_ids:
+                    _log.info("Worker claimed %d jobs (%d active)", len(claimed_ids), len(active_jobs))
+                    for job_id in claimed_ids:
+                        active_jobs.add(job_id)
+                        asyncio.create_task(_run_job(job_id, active_jobs))
 
             await asyncio.sleep(POLL_INTERVAL_S)
         except asyncio.CancelledError:
@@ -92,12 +99,11 @@ async def _worker_loop():
             await asyncio.sleep(POLL_INTERVAL_S)
 
 
-async def _run_with_semaphore(sem: asyncio.Semaphore, job_id: str, active_jobs: set):
-    """Execute a single job under semaphore control."""
+async def _run_job(job_id: str, active_jobs: set):
+    """Execute a single job. No semaphore needed — capacity is enforced by claim limit."""
     try:
-        async with sem:
-            _log.info("Worker executing job %s", job_id)
-            await execute_job_inline(job_id)
+        _log.info("Worker executing job %s", job_id)
+        await execute_job_inline(job_id)
     except Exception as exc:
         _log.error("Worker job %s failed: %s", job_id, exc)
         try:
