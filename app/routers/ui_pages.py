@@ -1710,6 +1710,17 @@ async def ui_topology():
         .sb-btn:disabled {{ opacity: 0.4; cursor: not-allowed; }}
         .sb-btn-accent {{ border-color: rgba(251, 146, 60, 0.3); color: #fb923c; }}
         .sb-btn-accent:hover {{ background: rgba(251, 146, 60, 0.1); }}
+        .sb-btn-runner {{ border-color: rgba(34, 197, 94, 0.3); color: #4ade80; }}
+        .sb-btn-runner:hover {{ background: rgba(34, 197, 94, 0.1); }}
+        .dispatch-pill {{
+            display: inline-block; padding: 1px 7px; border-radius: 8px;
+            font-size: 0.62rem; font-weight: 600; letter-spacing: 0.3px;
+        }}
+        .dispatch-pill.queued {{ background: rgba(148,163,184,0.2); color: #94a3b8; }}
+        .dispatch-pill.running {{ background: rgba(59,130,246,0.2); color: #60a5fa; animation: pulse-blue 1.5s infinite; }}
+        .dispatch-pill.completed {{ background: rgba(34,197,94,0.2); color: #4ade80; }}
+        .dispatch-pill.failed {{ background: rgba(248,113,113,0.2); color: #f87171; }}
+        @keyframes pulse-blue {{ 0%,100% {{ opacity:1; }} 50% {{ opacity:0.6; }} }}
         .sb-select {{
             width: 100%; padding: 3px 6px; font-size: 0.7rem;
             background: rgba(15, 23, 42, 0.6); border: 1px solid var(--slate-700);
@@ -1753,6 +1764,8 @@ async def ui_topology():
                 <button class="sb-btn sb-btn-accent" onclick="fetchAodData()" id="fetch-aod-btn">Fetch AOD Data</button>
                 <button class="sb-btn" id="btn-run-inference">Run Inference</button>
                 <button class="sb-btn" id="btn-export-dcl">Export to DCL</button>
+                <button class="sb-btn sb-btn-runner" onclick="dispatchAllRunners()" id="btn-dispatch-all" data-testid="btn-dispatch-all">Dispatch Runner</button>
+                <span id="dispatch-all-status" style="display:none;font-size:0.68rem;margin-top:2px;"></span>
             </div>
             <div class="sb-section">
                 <div class="sb-title">View</div>
@@ -2207,6 +2220,59 @@ async def ui_topology():
                 showToast('Export failed: ' + e.message, 'error');
             }}
         }});
+
+        async function dispatchAllRunners() {{
+            const btn = document.getElementById('btn-dispatch-all');
+            const statusEl = document.getElementById('dispatch-all-status');
+            btn.disabled = true;
+            btn.textContent = 'Dispatching...';
+            statusEl.style.display = 'inline-block';
+            statusEl.innerHTML = '<span class="dispatch-pill queued">Queued</span>';
+
+            try {{
+                const pipesRes = await fetch('/api/pipes');
+                const pipesData = await pipesRes.json();
+                const pipeIds = (pipesData.pipes || []).map(p => p.pipe_id).filter(Boolean);
+
+                if (pipeIds.length === 0) {{
+                    showToast('No pipes to dispatch', 'warning');
+                    btn.disabled = false;
+                    btn.textContent = 'Dispatch Runner';
+                    statusEl.style.display = 'none';
+                    return;
+                }}
+
+                statusEl.innerHTML = '<span class="dispatch-pill running">Running ' + pipeIds.length + '</span>';
+
+                const res = await fetch('/api/runners/dispatch-batch', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{ pipe_ids: pipeIds, trigger: 'manual' }})
+                }});
+                const data = await res.json();
+
+                if (res.ok) {{
+                    const dispatched = data.dispatched || 0;
+                    const errors = data.errors || 0;
+                    const rows = (data.jobs || []).reduce((s, j) => s + (j.rows_transferred || 0), 0);
+                    if (errors === 0) {{
+                        statusEl.innerHTML = '<span class="dispatch-pill completed">Done (' + rows + 'r)</span>';
+                        showToast('Dispatched ' + dispatched + ' runners, ' + rows + ' rows', 'success');
+                    }} else {{
+                        statusEl.innerHTML = '<span class="dispatch-pill failed">' + errors + ' failed</span>';
+                        showToast(dispatched + ' dispatched, ' + errors + ' errors', 'error');
+                    }}
+                }} else {{
+                    statusEl.innerHTML = '<span class="dispatch-pill failed">Failed</span>';
+                    showToast('Dispatch failed: ' + (data.detail || res.status), 'error');
+                }}
+            }} catch (e) {{
+                statusEl.innerHTML = '<span class="dispatch-pill failed">Error</span>';
+                showToast('Error: ' + e.message, 'error');
+            }}
+            btn.disabled = false;
+            btn.textContent = 'Dispatch Runner';
+        }}
 
         // Initialize
         loadTopology();
