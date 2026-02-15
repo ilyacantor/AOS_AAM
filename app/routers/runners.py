@@ -16,6 +16,7 @@ from ..services.runner_dispatch import dispatch_pipe, dispatch_batch
 from ..services.runner_execute import execute_job_inline
 from ..db.runner_jobs import (
     get_runner_job,
+    get_runner_progress,
     list_runner_jobs,
     update_runner_status,
     update_heartbeat,
@@ -76,6 +77,12 @@ async def dispatch_multiple(req: RunnerBatchDispatchRequest):
         "errors": errors,
         "jobs": results,
     }
+
+
+@router.get("/progress")
+async def runner_progress():
+    """Live progress monitor for batch dispatch — shows counts by status."""
+    return get_runner_progress()
 
 
 @router.get("/jobs")

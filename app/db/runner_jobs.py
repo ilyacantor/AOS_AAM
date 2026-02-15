@@ -75,6 +75,54 @@ def get_runner_job(job_id: str) -> Optional[dict]:
     return row
 
 
+def get_runner_progress() -> dict:
+    """Get aggregate progress counts for all runner jobs.
+    Returns counts by status, plus timing info for the current batch."""
+    from psycopg2 import sql as psql
+    from . import supabase_client as sb2
+
+    query = psql.SQL(
+        "SELECT status, COUNT(*) as cnt, "
+        "MIN(dispatched_at) as earliest, MAX(completed_at) as latest, "
+        "SUM(COALESCE(rows_transferred, 0)) as total_rows "
+        "FROM {} GROUP BY status ORDER BY status"
+    ).format(sb2._ident("runner_jobs"))
+
+    rows = sb2._execute_composed(query)
+
+    by_status = {}
+    total = 0
+    total_rows = 0
+    earliest = None
+    latest = None
+    for r in rows:
+        s = r["status"]
+        c = int(r["cnt"])
+        by_status[s] = c
+        total += c
+        total_rows += int(r["total_rows"] or 0)
+        e = r.get("earliest")
+        l = r.get("latest")
+        if e and (earliest is None or str(e) < str(earliest)):
+            earliest = str(e)
+        if l and (latest is None or str(l) > str(latest)):
+            latest = str(l)
+
+    done = by_status.get("completed", 0) + by_status.get("failed", 0) + by_status.get("timed_out", 0)
+    pct = round(done / total * 100, 1) if total else 0
+
+    return {
+        "total_jobs": total,
+        "by_status": by_status,
+        "done": done,
+        "remaining": total - done,
+        "percent_complete": pct,
+        "total_rows_transferred": total_rows,
+        "earliest_dispatch": earliest,
+        "latest_completion": latest,
+    }
+
+
 def list_runner_jobs(
     pipe_id: Optional[str] = None,
     status: Optional[str] = None,
