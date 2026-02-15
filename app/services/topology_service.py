@@ -167,7 +167,7 @@ def build_topology_summary() -> dict:
         type_label = PLANE_LABELS.get(info["plane_type"], info["plane_type"].replace("_", " ").title())
         nodes.append({
             "id": f"plane:{plane_id}",
-            "label": f"{vendor_display}, {type_label}\n({counts['connected']} connected / {counts['total']} total)",
+            "label": f"{vendor_display}, {type_label}\n({counts['connected']}/{counts['total']})",
             "type": "fabric_plane",
             "metadata": {
                 "plane_type": info["plane_type"],
@@ -187,7 +187,7 @@ def build_topology_summary() -> dict:
                 counts = vendor_plane_counts.get(pid, {"connected": 0, "total": 0})
                 nodes.append({
                     "id": f"plane:{pid}",
-                    "label": f"{type_label}\n({counts['connected']} connected / {counts['total']} total)",
+                    "label": f"{type_label}\n({counts['connected']}/{counts['total']})",
                     "type": "fabric_plane",
                     "metadata": {"plane_type": plane_type, "connected": counts["connected"], "total": counts["total"]},
                 })
@@ -211,10 +211,7 @@ def build_topology_summary() -> dict:
         sor_name = display_names.get(sor_key, sor_key)
         connected = sor_data.get("connected", 0)
         total = sor_data.get("total", 0)
-        if total > 0:
-            label = f"{sor_name}\n({connected}/{total} connected)"
-        else:
-            label = f"{sor_name}\n(0 candidates)"
+        label = f"{sor_name}\n({connected}/{total})"
 
         nodes.append({
             "id": f"sor:{sor_name}",
