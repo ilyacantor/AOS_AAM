@@ -93,7 +93,10 @@ async def lifespan(app):
     init_db()
     from .db import init_dcl_pushes_table
     init_dcl_pushes_table()
+    from .services.runner_worker import start_worker, stop_worker
+    await start_worker()
     yield
+    await stop_worker()
 
 
 app = FastAPI(

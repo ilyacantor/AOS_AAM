@@ -4,7 +4,6 @@ Runner API — dispatch jobs, list jobs, runner callback.
 RACI: AAM is A/R for Collector Run Execution (Row 43) and Track Collector Runs (Row 48).
 """
 import asyncio
-import httpx
 from fastapi import APIRouter, HTTPException, Header, Query
 from typing import Optional
 
@@ -29,8 +28,6 @@ _log = get_logger("routers.runners")
 
 router = APIRouter(prefix="/api/runners", tags=["Runners"])
 
-CONCURRENCY = 30
-
 
 @router.post("/dispatch")
 async def dispatch_single(req: RunnerDispatchRequest):
@@ -52,47 +49,25 @@ async def dispatch_single(req: RunnerDispatchRequest):
 
 @router.post("/dispatch-batch")
 async def dispatch_multiple(req: RunnerBatchDispatchRequest):
-    """Dispatch runner jobs for multiple pipes, then execute concurrently.
+    """Dispatch runner jobs for multiple pipes.
     
-    Phase 1: Bulk-insert all job records (single DB call).
-    Phase 2: Execute jobs in parallel with shared HTTP client.
+    Inserts all jobs as 'queued' and returns immediately.
+    The background worker picks them up and executes with Semaphore(5).
     """
     if not req.pipe_ids:
         raise HTTPException(status_code=400, detail="pipe_ids is required")
 
     results = dispatch_batch(req.pipe_ids, req.trigger)
-    _log.info("Bulk dispatch complete: %d jobs created", len([r for r in results if r.get("status") != "error"]))
-
     job_ids = [r["job_id"] for r in results if r.get("status") != "error"]
-    dispatch_errors = len([r for r in results if r.get("status") == "error"])
+    errors = [r for r in results if r.get("status") == "error"]
 
-    sem = asyncio.Semaphore(CONCURRENCY)
-
-    async with httpx.AsyncClient(timeout=30.0, limits=httpx.Limits(max_connections=CONCURRENCY, max_keepalive_connections=CONCURRENCY)) as shared_client:
-        async def _run_one(job_id: str) -> dict:
-            async with sem:
-                try:
-                    return await execute_job_inline(job_id, http_client=shared_client)
-                except Exception as exc:
-                    return {"job_id": job_id, "status": "failed", "error": str(exc)}
-
-        exec_results = await asyncio.gather(*[_run_one(jid) for jid in job_ids])
-
-    completed = sum(1 for r in exec_results if r.get("status") == "completed")
-    failed = sum(1 for r in exec_results if r.get("status") == "failed")
-
-    result_map = {r["job_id"]: r for r in exec_results}
-    for r in results:
-        jid = r.get("job_id")
-        if jid and jid in result_map:
-            r.update(result_map[jid])
+    _log.info("Batch dispatch: %d jobs queued, %d errors", len(job_ids), len(errors))
 
     return {
         "dispatched": len(job_ids),
-        "completed": completed,
-        "failed": failed,
-        "errors": dispatch_errors,
+        "errors": len(errors),
         "jobs": results,
+        "message": f"{len(job_ids)} jobs queued for background execution",
     }
 
 

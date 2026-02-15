@@ -2336,20 +2336,32 @@ async def ui_topology():
             }}
         }});
 
-        let _dispatchTimer = null;
-        let _dispatchStart = 0;
+        let _dispatchPollTimer = null;
 
-        function _startDispatchCounter(btn, count) {{
-            _dispatchStart = Date.now();
-            if (_dispatchTimer) clearInterval(_dispatchTimer);
-            _dispatchTimer = setInterval(() => {{
-                const sec = Math.floor((Date.now() - _dispatchStart) / 1000);
-                btn.textContent = 'Running ' + count + '... ' + sec + 's';
-            }}, 200);
+        function startDispatchPolling() {{
+            stopDispatchPolling();
+            _dispatchPollTimer = setInterval(async () => {{
+                await loadDispatchData();
+                if (_dpData) {{
+                    const hasActive = _dpData.some(j => j.status === 'queued' || j.status === 'running' || j.status === 'pushing');
+                    if (!hasActive) {{
+                        stopDispatchPolling();
+                        const statusEl = document.getElementById('dispatch-all-status');
+                        const done = _dpData.filter(j => j.status === 'completed').length;
+                        const failed = _dpData.filter(j => j.status === 'failed').length;
+                        const rows = _dpData.reduce((s, j) => s + (j.rows_transferred || 0), 0);
+                        if (failed === 0) {{
+                            statusEl.innerHTML = '<span class="dispatch-pill completed">Done (' + rows + 'r)</span>';
+                        }} else {{
+                            statusEl.innerHTML = '<span class="dispatch-pill failed">' + failed + ' failed</span>';
+                        }}
+                    }}
+                }}
+            }}, 2000);
         }}
 
-        function _stopDispatchCounter() {{
-            if (_dispatchTimer) {{ clearInterval(_dispatchTimer); _dispatchTimer = null; }}
+        function stopDispatchPolling() {{
+            if (_dispatchPollTimer) {{ clearInterval(_dispatchPollTimer); _dispatchPollTimer = null; }}
         }}
 
         async function dispatchAllRunners() {{
@@ -2373,36 +2385,25 @@ async def ui_topology():
                     return;
                 }}
 
-                statusEl.innerHTML = '<span class="dispatch-pill running">Running ' + pipeIds.length + '</span>';
-                _startDispatchCounter(btn, pipeIds.length);
-
                 const res = await fetch('/api/runners/dispatch-batch', {{
                     method: 'POST',
                     headers: {{ 'Content-Type': 'application/json' }},
                     body: JSON.stringify({{ pipe_ids: pipeIds, trigger: 'manual' }})
                 }});
                 const data = await res.json();
-                _stopDispatchCounter();
-
-                const elapsed = Math.floor((Date.now() - _dispatchStart) / 1000);
 
                 if (res.ok) {{
                     const dispatched = data.dispatched || 0;
                     const errors = data.errors || 0;
-                    const rows = (data.jobs || []).reduce((s, j) => s + (j.rows_transferred || 0), 0);
-                    if (errors === 0) {{
-                        statusEl.innerHTML = '<span class="dispatch-pill completed">Done (' + rows + 'r) ' + elapsed + 's</span>';
-                        showToast('Dispatched ' + dispatched + ' runners, ' + rows + ' rows in ' + elapsed + 's', 'success');
-                    }} else {{
-                        statusEl.innerHTML = '<span class="dispatch-pill failed">' + errors + ' failed (' + elapsed + 's)</span>';
-                        showToast(dispatched + ' dispatched, ' + errors + ' errors', 'error');
-                    }}
+                    statusEl.innerHTML = '<span class="dispatch-pill running">' + dispatched + ' queued</span>';
+                    showToast(dispatched + ' jobs queued for execution', 'success');
+                    openDispatchPanel();
+                    startDispatchPolling();
                 }} else {{
-                    statusEl.innerHTML = '<span class="dispatch-pill failed">Failed (' + elapsed + 's)</span>';
+                    statusEl.innerHTML = '<span class="dispatch-pill failed">Failed</span>';
                     showToast('Dispatch failed: ' + (data.detail || res.status), 'error');
                 }}
             }} catch (e) {{
-                _stopDispatchCounter();
                 statusEl.innerHTML = '<span class="dispatch-pill failed">Error</span>';
                 showToast('Error: ' + e.message, 'error');
             }}
@@ -2421,6 +2422,7 @@ async def ui_topology():
 
         function closeDispatchPanel() {{
             document.getElementById('dispatch-overlay').classList.remove('visible');
+            stopDispatchPolling();
         }}
 
         function setDpFilter(f, el) {{
@@ -2509,6 +2511,7 @@ async def ui_topology():
                 <button class="dp-filter-btn" onclick="setDpFilter('completed',this)" data-testid="dp-filter-completed">Completed</button>
                 <button class="dp-filter-btn" onclick="setDpFilter('failed',this)" data-testid="dp-filter-failed">Failed</button>
                 <button class="dp-filter-btn" onclick="setDpFilter('running',this)" data-testid="dp-filter-running">Running</button>
+                <button class="dp-filter-btn" onclick="setDpFilter('queued',this)" data-testid="dp-filter-queued">Queued</button>
             </div>
             <div class="dp-jobs">
                 <table>
