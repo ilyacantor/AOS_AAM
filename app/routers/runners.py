@@ -83,8 +83,9 @@ async def dispatch_multiple(req: RunnerBatchDispatchRequest):
 
     result_map = {r["job_id"]: r for r in exec_results}
     for r in results:
-        if r["job_id"] in result_map:
-            r.update(result_map[r["job_id"]])
+        jid = r.get("job_id")
+        if jid and jid in result_map:
+            r.update(result_map[jid])
 
     return {
         "dispatched": len(job_ids),

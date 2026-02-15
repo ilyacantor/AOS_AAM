@@ -49,12 +49,14 @@ _seq_counter: Optional[int] = None
 def _init_seq_counter() -> int:
     """Initialize sequence counter from the max existing job number in the DB."""
     try:
-        jobs = list_runner_jobs(limit=1)
-        if jobs:
-            last_id = jobs[0].get("job_id", "")
-            parts = last_id.rsplit("_", 1)
-            if len(parts) == 2 and parts[1].isdigit():
-                return int(parts[1])
+        from ..db import supabase_client as sb
+        from psycopg2 import sql as psql
+        query = psql.SQL(
+            "SELECT MAX(CAST(SUBSTRING(job_id FROM '([0-9]+)$') AS INTEGER)) as mx FROM {}"
+        ).format(sb._ident("runner_jobs"))
+        rows = sb._execute_composed(query)
+        if rows and rows[0].get("mx") is not None:
+            return int(rows[0]["mx"])
     except Exception:
         pass
     return 0
