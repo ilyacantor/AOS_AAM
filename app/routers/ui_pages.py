@@ -2383,9 +2383,9 @@ async def ui_reconcile(aod_run_id: str):
             
             source_badge = ""
             if source == "farm":
-                source_badge = '<span style="background: rgba(251,191,36,0.15); color: #fbbf24; padding: 2px 6px; border-radius: 3px; font-size: 0.7rem; font-weight: 600;">Farm</span>'
+                source_badge = '<span style="background: rgba(251,191,36,0.15); color: #fbbf24; padding: 2px 6px; border-radius: 3px; font-size: 0.7rem; font-weight: 600;">Declared</span>'
             else:
-                source_badge = '<span style="background: rgba(99,102,241,0.15); color: #a5b4fc; padding: 2px 6px; border-radius: 3px; font-size: 0.7rem; font-weight: 500;">AOD</span>'
+                source_badge = '<span style="background: rgba(99,102,241,0.15); color: #a5b4fc; padding: 2px 6px; border-radius: 3px; font-size: 0.7rem; font-weight: 500;">Inferred</span>'
             
             if verdict == "ok":
                 verdict_html = '<span style="color: var(--green-400);">&#10003; OK</span>'
