@@ -130,6 +130,7 @@ def delete(
     *,
     filters: Optional[dict[str, Any]] = None,
     eq_filters: Optional[list[tuple[str, Any]]] = None,
+    raw_params: Optional[dict[str, str]] = None,
     delete_all: bool = False,
 ) -> list[dict]:
     client = _get_client()
@@ -140,10 +141,12 @@ def delete(
     if eq_filters:
         for col, val in eq_filters:
             params[col] = f"eq.{val}"
+    if raw_params:
+        params.update(raw_params)
     if not params and not delete_all:
         raise ValueError("delete() requires filters or delete_all=True")
     if not params and delete_all:
-        params["candidate_id"] = "neq."
+        raise ValueError("delete_all requires raw_params with a valid PK filter")
     resp = client.delete(f"/{table}", params=params)
     _check_response(resp, f"delete {table}")
     return resp.json()

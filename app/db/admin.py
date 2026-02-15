@@ -8,20 +8,22 @@ from typing import Optional
 from . import supabase_client as sb
 
 
-ALLOWED_TABLES = frozenset({
-    "drift_events",
-    "pipe_versions",
-    "declared_pipes",
-    "observations",
-    "collector_runs",
-    "connection_candidates",
-    "tee_requests",
-    "fabric_planes",
-    "sor_declarations",
-    "sor_dispositions",
-    "aod_policy_manifest",
-    "aod_handoff_log",
-})
+TABLE_PK_MAP = {
+    "drift_events": "drift_id",
+    "pipe_versions": "version_id",
+    "declared_pipes": "pipe_id",
+    "observations": "observation_id",
+    "collector_runs": "run_id",
+    "connection_candidates": "candidate_id",
+    "tee_requests": "tee_id",
+    "fabric_planes": "plane_id",
+    "sor_declarations": "sor_id",
+    "sor_dispositions": "disposition_id",
+    "aod_policy_manifest": "policy_id",
+    "aod_handoff_log": "handoff_id",
+}
+
+ALLOWED_TABLES = frozenset(TABLE_PK_MAP.keys())
 
 
 def reset_aod_state():
@@ -37,7 +39,8 @@ def reset_aod_state():
         rows = sb.select(table)
         counts[table] = len(rows) if isinstance(rows, list) else 0
         if counts[table] > 0:
-            sb.delete(table, delete_all=True)
+            pk = TABLE_PK_MAP[table]
+            sb.delete(table, raw_params={pk: "not.is.null"})
 
     total_deleted = sum(counts.values())
     return {"reset": True, "tables_cleared": counts, "total_rows_deleted": total_deleted}

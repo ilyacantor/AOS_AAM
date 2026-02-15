@@ -61,4 +61,4 @@ def clear_sor_declarations(aod_run_id: Optional[str] = None):
     if aod_run_id:
         sb.delete("sor_declarations", filters={"aod_run_id": aod_run_id})
     else:
-        sb.delete("sor_declarations", delete_all=True)
+        sb.delete("sor_declarations", raw_params={"sor_id": "not.is.null"})
