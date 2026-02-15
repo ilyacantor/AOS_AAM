@@ -1,13 +1,10 @@
 """
 Fabric plane operations
 """
-import json
-import uuid
-import sqlite3
 from datetime import datetime
 from typing import Optional
 
-from .connection import get_connection
+from . import supabase_client as sb
 
 # ============================================================================
 # FABRIC PLANE OPERATIONS
@@ -15,99 +12,80 @@ from .connection import get_connection
 
 def store_fabric_plane(plane_data: dict, aod_run_id: str) -> dict:
     """Store a fabric plane from AOD"""
-    conn = get_connection()
-    cursor = conn.cursor()
-    
-    # Normalize plane_type to uppercase
     plane_data["plane_type"] = (plane_data.get("plane_type") or "").upper()
     plane_id = f"{plane_data['plane_type']}:{plane_data['vendor']}"
     now = datetime.utcnow().isoformat()
-    
-    # Upsert: delete if exists, then insert
-    cursor.execute("DELETE FROM fabric_planes WHERE plane_id = ?", (plane_id,))
-    
-    cursor.execute("""
-        INSERT INTO fabric_planes (
-            plane_id, plane_type, vendor, display_name, domain,
-            managed_asset_count, is_healthy, aod_run_id, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        plane_id,
-        plane_data["plane_type"],
-        plane_data["vendor"],
-        plane_data.get("display_name", f"{plane_data['vendor']} {plane_data['plane_type']}"),
-        plane_data.get("domain"),
-        plane_data.get("managed_asset_count", 0),
-        {True: 1, False: 0}.get(plane_data.get("is_healthy")),  # None if AOD didn't declare
-        aod_run_id,
-        now,
-        now
-    ))
-    
-    conn.commit()
-    conn.close()
-    
+
+    is_healthy = plane_data.get("is_healthy")
+    if is_healthy is not None:
+        is_healthy = bool(is_healthy)
+
+    sb.delete("fabric_planes", filters={"plane_id": plane_id})
+
+    sb.insert("fabric_planes", {
+        "plane_id": plane_id,
+        "plane_type": plane_data["plane_type"],
+        "vendor": plane_data["vendor"],
+        "display_name": plane_data.get("display_name", f"{plane_data['vendor']} {plane_data['plane_type']}"),
+        "domain": plane_data.get("domain"),
+        "managed_asset_count": plane_data.get("managed_asset_count", 0),
+        "is_healthy": is_healthy,
+        "aod_run_id": aod_run_id,
+        "created_at": now,
+        "updated_at": now,
+    })
+
     return {"plane_id": plane_id, "stored_at": now}
 
 
 def get_fabric_planes(aod_run_id: Optional[str] = None) -> list[dict]:
     """Get fabric planes, optionally filtered by AOD run"""
-    conn = get_connection()
-    cursor = conn.cursor()
-    
+    filters = {}
     if aod_run_id:
-        cursor.execute("SELECT * FROM fabric_planes WHERE aod_run_id = ?", (aod_run_id,))
-    else:
-        cursor.execute("SELECT * FROM fabric_planes ORDER BY updated_at DESC")
-    
-    rows = cursor.fetchall()
-    conn.close()
-    
+        filters["aod_run_id"] = aod_run_id
+
+    rows = sb.select(
+        "fabric_planes",
+        filters=filters if filters else None,
+        order="updated_at.desc",
+    )
+
     return [{
         "plane_id": row["plane_id"],
         "plane_type": row["plane_type"],
         "vendor": row["vendor"],
         "display_name": row["display_name"],
-        "domain": row["domain"],
-        "managed_asset_count": row["managed_asset_count"],
-        "is_healthy": bool(row["is_healthy"]),
-        "aod_run_id": row["aod_run_id"],
-        "created_at": row["created_at"],
-        "updated_at": row["updated_at"]
+        "domain": row.get("domain"),
+        "managed_asset_count": row.get("managed_asset_count"),
+        "is_healthy": row.get("is_healthy"),
+        "aod_run_id": row.get("aod_run_id"),
+        "created_at": row.get("created_at"),
+        "updated_at": row.get("updated_at"),
     } for row in rows]
 
 
 def find_fabric_plane_by_vendor(vendor: str, plane_type: Optional[str] = None) -> Optional[dict]:
     """Find a fabric plane by vendor (and optionally type)"""
-    conn = get_connection()
-    cursor = conn.cursor()
-    
+    filters = {"vendor": vendor}
     if plane_type:
-        cursor.execute("""
-            SELECT * FROM fabric_planes 
-            WHERE vendor = ? AND plane_type = ?
-            ORDER BY updated_at DESC LIMIT 1
-        """, (vendor, plane_type))
-    else:
-        cursor.execute("""
-            SELECT * FROM fabric_planes 
-            WHERE vendor = ?
-            ORDER BY updated_at DESC LIMIT 1
-        """, (vendor,))
-    
-    row = cursor.fetchone()
-    conn.close()
-    
-    if row:
+        filters["plane_type"] = plane_type
+
+    rows = sb.select(
+        "fabric_planes",
+        filters=filters,
+        order="updated_at.desc",
+        limit=1,
+    )
+
+    if rows:
+        row = rows[0]
         return {
             "plane_id": row["plane_id"],
             "plane_type": row["plane_type"],
             "vendor": row["vendor"],
             "display_name": row["display_name"],
-            "domain": row["domain"],
-            "managed_asset_count": row["managed_asset_count"],
-            "is_healthy": bool(row["is_healthy"])
+            "domain": row.get("domain"),
+            "managed_asset_count": row.get("managed_asset_count"),
+            "is_healthy": row.get("is_healthy"),
         }
     return None
-
-

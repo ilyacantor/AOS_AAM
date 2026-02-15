@@ -1,142 +1,99 @@
 """
 Collector operations
 """
-import json
 import uuid
-import sqlite3
 from datetime import datetime
 from typing import Optional
 
-from .connection import get_connection
+from . import supabase_client as sb
 
-# ============================================================================
-# COLLECTOR OPERATIONS
-# ============================================================================
 
 def list_collectors() -> list[dict]:
     """List all collectors"""
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM collectors ORDER BY name")
-    rows = cursor.fetchall()
-    conn.close()
-    
+    rows = sb.select("collectors", order="name.asc")
     return [{
-        "collector_id": row["collector_id"],
-        "name": row["name"],
-        "collector_type": row["collector_type"],
-        "description": row["description"],
-        "enabled": bool(row["enabled"]),
-        "last_run": row["last_run"],
-        "created_at": row["created_at"]
+        "collector_id": row.get("collector_id"),
+        "name": row.get("name"),
+        "collector_type": row.get("collector_type"),
+        "description": row.get("description"),
+        "enabled": row.get("enabled", False),
+        "last_run": row.get("last_run"),
+        "created_at": row.get("created_at")
     } for row in rows]
 
 
 def update_collector_last_run(collector_id: str):
     """Update collector's last run timestamp"""
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "UPDATE collectors SET last_run = ? WHERE collector_id = ?",
-        (datetime.utcnow().isoformat(), collector_id)
-    )
-    conn.commit()
-    conn.close()
+    now = datetime.utcnow().isoformat()
+    sb.update("collectors", {"last_run": now}, filters={"collector_id": collector_id})
 
-
-# ============================================================================
-# COLLECTOR RUN OPERATIONS (v1 Practical Interface)
-# ============================================================================
 
 def create_collector_run(collector_id: str) -> str:
     """Create a new collector run and return the run_id"""
-    conn = get_connection()
-    cursor = conn.cursor()
-    
     run_id = str(uuid.uuid4())
     now = datetime.utcnow().isoformat()
-    
-    cursor.execute("""
-        INSERT INTO collector_runs (run_id, collector_id, status, started_at)
-        VALUES (?, ?, ?, ?)
-    """, (run_id, collector_id, "running", now))
-    
-    conn.commit()
-    conn.close()
-    
+
+    sb.insert("collector_runs", {
+        "run_id": run_id,
+        "collector_id": collector_id,
+        "status": "running",
+        "started_at": now,
+    })
+
     return run_id
 
 
 def complete_collector_run(run_id: str, status: str, observations_count: int, error_message: Optional[str] = None) -> bool:
     """Complete a collector run with final status"""
-    conn = get_connection()
-    cursor = conn.cursor()
-    
     now = datetime.utcnow().isoformat()
-    
-    cursor.execute("""
-        UPDATE collector_runs 
-        SET status = ?, completed_at = ?, observations_count = ?, error_message = ?
-        WHERE run_id = ?
-    """, (status, now, observations_count, error_message, run_id))
-    
-    affected = cursor.rowcount
-    conn.commit()
-    conn.close()
-    
-    return affected > 0
+
+    result = sb.update("collector_runs", {
+        "status": status,
+        "completed_at": now,
+        "observations_count": observations_count,
+        "error_message": error_message,
+    }, filters={"run_id": run_id})
+
+    return len(result) > 0
 
 
 def get_collector_run(run_id: str) -> Optional[dict]:
     """Get a collector run by ID"""
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM collector_runs WHERE run_id = ?", (run_id,))
-    row = cursor.fetchone()
-    conn.close()
-    
+    row = sb.select("collector_runs", filters={"run_id": run_id}, single=True)
+
     if row:
         return {
-            "run_id": row["run_id"],
-            "collector_id": row["collector_id"],
-            "status": row["status"],
-            "started_at": row["started_at"],
-            "completed_at": row["completed_at"],
-            "observations_count": row["observations_count"],
-            "error_message": row["error_message"]
+            "run_id": row.get("run_id"),
+            "collector_id": row.get("collector_id"),
+            "status": row.get("status"),
+            "started_at": row.get("started_at"),
+            "completed_at": row.get("completed_at"),
+            "observations_count": row.get("observations_count"),
+            "error_message": row.get("error_message")
         }
     return None
 
 
 def list_collector_runs(collector_id: Optional[str] = None, limit: Optional[int] = None) -> list[dict]:
     """List collector runs with optional collector filter"""
-    conn = get_connection()
-    cursor = conn.cursor()
-    
+    filters = {}
     if collector_id:
-        query = "SELECT * FROM collector_runs WHERE collector_id = ? ORDER BY started_at DESC"
-        params = [collector_id]
-    else:
-        query = "SELECT * FROM collector_runs ORDER BY started_at DESC"
-        params = []
-    
+        filters["collector_id"] = collector_id
+
+    kwargs = {"order": "started_at.desc"}
+    if filters:
+        kwargs["filters"] = filters
     if limit:
-        query += " LIMIT ?"
-        params.append(limit)
-    
-    cursor.execute(query, params)
-    
-    rows = cursor.fetchall()
-    conn.close()
-    
+        kwargs["limit"] = limit
+
+    rows = sb.select("collector_runs", **kwargs)
+
     return [{
-        "run_id": row["run_id"],
-        "collector_id": row["collector_id"],
-        "status": row["status"],
-        "started_at": row["started_at"],
-        "completed_at": row["completed_at"],
-        "observations_count": row["observations_count"],
-        "error_message": row["error_message"]
+        "run_id": row.get("run_id"),
+        "collector_id": row.get("collector_id"),
+        "status": row.get("status"),
+        "started_at": row.get("started_at"),
+        "completed_at": row.get("completed_at"),
+        "observations_count": row.get("observations_count"),
+        "error_message": row.get("error_message")
     } for row in rows]
-
-

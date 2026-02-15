@@ -2,16 +2,27 @@
 Preset/seed data admin operations
 """
 import json
-import uuid
-import sqlite3
-from datetime import datetime
+from collections import defaultdict
 from typing import Optional
 
-from .connection import get_connection, get_db
+from . import supabase_client as sb
 
-# ============================================================================
-# PRESET / SEED DATA OPERATIONS
-# ============================================================================
+
+ALLOWED_TABLES = frozenset({
+    "drift_events",
+    "pipe_versions",
+    "declared_pipes",
+    "observations",
+    "collector_runs",
+    "connection_candidates",
+    "tee_requests",
+    "fabric_planes",
+    "sor_declarations",
+    "sor_dispositions",
+    "aod_policy_manifest",
+    "aod_handoff_log",
+})
+
 
 def reset_aod_state():
     """
@@ -21,30 +32,12 @@ def reset_aod_state():
     The handoff log must be cleared because process_handoff() uses it for
     idempotency checks — a stale log entry would short-circuit re-ingestion.
     """
-    # Tables whose rows are repopulated on each handoff
-    ALLOWED_TABLES = frozenset({
-        "drift_events",
-        "pipe_versions",
-        "declared_pipes",
-        "observations",
-        "collector_runs",
-        "connection_candidates",
-        "tee_requests",
-        "fabric_planes",
-        "sor_declarations",
-        "sor_dispositions",
-        "aod_policy_manifest",
-        "aod_handoff_log",
-    })
-
-    with get_db() as conn:
-        cursor = conn.cursor()
-        counts = {}
-        for table in ALLOWED_TABLES:
-            assert table in ALLOWED_TABLES, f"Disallowed table: {table}"
-            cursor.execute(f"SELECT COUNT(*) FROM {table}")
-            counts[table] = cursor.fetchone()[0]
-            cursor.execute(f"DELETE FROM {table}")
+    counts = {}
+    for table in ALLOWED_TABLES:
+        rows = sb.select(table)
+        counts[table] = len(rows) if isinstance(rows, list) else 0
+        if counts[table] > 0:
+            sb.delete(table, delete_all=True)
 
     total_deleted = sum(counts.values())
     return {"reset": True, "tables_cleared": counts, "total_rows_deleted": total_deleted}
@@ -61,9 +54,6 @@ def get_pipe_stats() -> dict:
     Queries connection_candidates (the single source of truth) instead of
     declared_pipes.
     """
-    conn = get_connection()
-    cursor = conn.cursor()
-
     stats = {
         "total_pipes": 0,
         "by_fabric_plane": {},
@@ -71,37 +61,35 @@ def get_pipe_stats() -> dict:
         "by_source_system": {}
     }
 
-    cursor.execute("SELECT COUNT(*) FROM connection_candidates")
-    stats["total_pipes"] = cursor.fetchone()[0]
+    candidates = sb.select("connection_candidates")
+    planes = sb.select("fabric_planes")
 
-    # Fabric plane comes from connected_via_plane or fabric_planes JOIN
-    cursor.execute("""
-        SELECT COALESCE(UPPER(fp.plane_type), UPPER(c.connected_via_plane), 'UNMAPPED') as plane,
-               COUNT(*) as cnt
-        FROM connection_candidates c
-        LEFT JOIN fabric_planes fp ON c.fabric_plane_id = fp.plane_id
-        GROUP BY plane
-    """)
-    for row in cursor.fetchall():
-        stats["by_fabric_plane"][row[0] or "UNMAPPED"] = row[1]
+    planes_dict = {p["plane_id"]: p for p in planes}
 
-    cursor.execute("""
-        SELECT COALESCE(c.category, 'unknown') as cat, COUNT(*) as cnt
-        FROM connection_candidates c
-        GROUP BY cat
-    """)
-    for row in cursor.fetchall():
-        stats["by_modality"][row[0]] = row[1]
+    stats["total_pipes"] = len(candidates)
 
-    cursor.execute("""
-        SELECT vendor_name, COUNT(*) as cnt
-        FROM connection_candidates
-        GROUP BY vendor_name
-    """)
-    for row in cursor.fetchall():
-        stats["by_source_system"][row[0]] = row[1]
+    by_plane: dict[str, int] = defaultdict(int)
+    by_modality: dict[str, int] = defaultdict(int)
+    by_source: dict[str, int] = defaultdict(int)
 
-    conn.close()
+    for c in candidates:
+        fpid = c.get("fabric_plane_id")
+        if fpid and fpid in planes_dict:
+            plane_label = (planes_dict[fpid].get("plane_type") or "UNMAPPED").upper()
+        elif c.get("connected_via_plane"):
+            plane_label = c["connected_via_plane"].upper()
+        else:
+            plane_label = "UNMAPPED"
+        by_plane[plane_label] += 1
+
+        cat = c.get("category") or "unknown"
+        by_modality[cat] += 1
+
+        vendor = c.get("vendor_name") or "unknown"
+        by_source[vendor] += 1
+
+    stats["by_fabric_plane"] = dict(by_plane)
+    stats["by_modality"] = dict(by_modality)
+    stats["by_source_system"] = dict(by_source)
+
     return stats
-
-

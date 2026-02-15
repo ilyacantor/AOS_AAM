@@ -6,15 +6,9 @@ model: candidates ARE pipes.  There is no separate ``declared_pipes`` table
 to read from — ``connection_candidates`` is the single source of truth.
 """
 import json
-import sqlite3
-from datetime import datetime
 from typing import Optional
 
-from .connection import get_connection
-
-# ============================================================================
-# SHARED CONSTANTS
-# ============================================================================
+from . import supabase_client as sb
 
 _PLANE_LABELS = {
     "IPAAS": "iPaaS",
@@ -33,10 +27,10 @@ _PLANE_COLORS = {
 }
 
 
-def _load_plane_lookups(cursor) -> tuple[dict, dict]:
+def _load_plane_lookups() -> tuple[dict, dict]:
     """Return (plane_info_by_id, type_to_first_plane_id) from fabric_planes table."""
-    cursor.execute("SELECT * FROM fabric_planes ORDER BY updated_at DESC")
-    db_planes = {row["plane_id"]: dict(row) for row in cursor.fetchall()}
+    rows = sb.select("fabric_planes", order="updated_at.desc")
+    db_planes = {row["plane_id"]: row for row in rows}
 
     type_to_plane: dict[str, str] = {}
     for pid, info in db_planes.items():
@@ -48,11 +42,10 @@ def _load_plane_lookups(cursor) -> tuple[dict, dict]:
 
 def _resolve_candidate_plane(candidate, db_planes: dict, type_to_plane: dict) -> str:
     """Resolve a candidate row to its vendor-specific fabric plane_id."""
-    fpid = candidate["fabric_plane_id"]
+    fpid = candidate.get("fabric_plane_id")
     if fpid and fpid in db_planes:
         return fpid
-    # Fall back to connected_via_plane type hint
-    connected = candidate["connected_via_plane"]
+    connected = candidate.get("connected_via_plane")
     if connected:
         plane_type = connected.upper()
         if plane_type in type_to_plane:
@@ -87,10 +80,6 @@ def _make_plane_node(plane_id: str, db_planes: dict) -> dict:
     }
 
 
-# ============================================================================
-# FULL TOPOLOGY  (/api/topology — "All Assets")
-# ============================================================================
-
 def get_topology_data() -> dict:
     """
     Full topology graph: every candidate (= pipe) as an individual node,
@@ -99,24 +88,14 @@ def get_topology_data() -> dict:
     Node types: pipe, fabric_plane, source_system
     Edge types: pipe_in_plane, pipe_from_source
     """
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    db_planes, type_to_plane = _load_plane_lookups(cursor)
+    db_planes, type_to_plane = _load_plane_lookups()
 
     nodes = []
     edges = []
     fabric_planes_found: set[str] = set()
     source_systems: set[str] = set()
 
-    # Candidates ARE pipes — this is the canonical model
-    cursor.execute("""
-        SELECT candidate_id, display_name, vendor_name, category, status,
-               matched_pipe_id, match_score, fabric_plane_id, connected_via_plane,
-               known_endpoints, preferred_modality
-        FROM connection_candidates
-    """)
-    candidates = cursor.fetchall()
+    candidates = sb.select("connection_candidates")
 
     for c in candidates:
         cid = c["candidate_id"]
@@ -126,9 +105,8 @@ def get_topology_data() -> dict:
         fabric_planes_found.add(plane_id)
         source_systems.add(vendor)
 
-        # Pipe node (candidate = pipe in canonical model)
         plane_type = plane_id.split(":")[0] if ":" in plane_id else plane_id
-        endpoints = json.loads(c["known_endpoints"]) if c["known_endpoints"] else []
+        endpoints = json.loads(c["known_endpoints"]) if c.get("known_endpoints") else []
         nodes.append({
             "id": f"pipe:{cid}",
             "type": "pipe",
@@ -137,14 +115,13 @@ def get_topology_data() -> dict:
                 "pipe_id": cid,
                 "fabric_plane": plane_type,
                 "source_system": vendor,
-                "modality": c["preferred_modality"] or "DECLARED_INTERFACE",
+                "modality": c.get("preferred_modality") or "DECLARED_INTERFACE",
                 "category": c["category"],
                 "status": c["status"],
                 "endpoints": endpoints,
             },
         })
 
-        # Edge: pipe → fabric plane
         edges.append({
             "id": f"edge:pipe_plane:{cid}",
             "source": f"pipe:{cid}",
@@ -153,7 +130,6 @@ def get_topology_data() -> dict:
             "metadata": {},
         })
 
-        # Edge: pipe → source system
         edges.append({
             "id": f"edge:pipe_source:{cid}",
             "source": f"pipe:{cid}",
@@ -162,11 +138,9 @@ def get_topology_data() -> dict:
             "metadata": {},
         })
 
-    # Fabric plane nodes
     for plane_id in fabric_planes_found:
         nodes.append(_make_plane_node(plane_id, db_planes))
 
-    # Source system nodes
     for source in source_systems:
         nodes.append({
             "id": f"source:{source}",
@@ -175,22 +149,14 @@ def get_topology_data() -> dict:
             "metadata": {"source_system": source},
         })
 
-    # Stats
-    cursor.execute("""
-        SELECT DISTINCT pipe_id FROM drift_events WHERE status = 'open'
-    """)
-    pipes_with_drift = set(row[0] for row in cursor.fetchall())
+    drift_rows = sb.select("drift_events", raw_params={"status": "eq.open"})
+    pipes_with_drift = set(row["pipe_id"] for row in drift_rows)
 
     from ..constants import SOR_CATEGORIES
-    sor_cats = list(SOR_CATEGORIES)
-    placeholders = ",".join("?" * len(sor_cats))
-    cursor.execute(
-        f"SELECT COUNT(*) FROM connection_candidates WHERE LOWER(category) IN ({placeholders})",
-        sor_cats,
+    sors_count = sum(
+        1 for c in candidates
+        if (c.get("category") or "").lower() in SOR_CATEGORIES
     )
-    sors_count = cursor.fetchone()[0]
-
-    conn.close()
 
     nodes_by_type: dict[str, int] = {}
     for n in nodes:
@@ -213,36 +179,27 @@ def get_topology_data() -> dict:
     return {"nodes": nodes, "edges": edges, "stats": stats}
 
 
-# ============================================================================
-# PIPE-CENTRIC TOPOLOGY  (/api/topology/pipe/{pipe_id})
-# ============================================================================
-
 def get_topology_for_pipe(pipe_id: str) -> dict:
     """Get topology centred on a specific pipe (= candidate)."""
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    db_planes, type_to_plane = _load_plane_lookups(cursor)
+    db_planes, type_to_plane = _load_plane_lookups()
 
     nodes = []
     edges = []
 
-    cursor.execute(
-        "SELECT * FROM connection_candidates WHERE candidate_id = ?",
-        (pipe_id,),
+    candidate = sb.select(
+        "connection_candidates",
+        filters={"candidate_id": pipe_id},
+        single=True,
     )
-    candidate = cursor.fetchone()
 
     if not candidate:
-        conn.close()
         return {"nodes": [], "edges": [], "stats": {}}
 
     vendor = candidate["vendor_name"]
     plane_id = _resolve_candidate_plane(candidate, db_planes, type_to_plane)
     plane_type = plane_id.split(":")[0] if ":" in plane_id else plane_id
 
-    # Pipe node (central)
-    endpoints = json.loads(candidate["known_endpoints"]) if candidate["known_endpoints"] else []
+    endpoints = json.loads(candidate["known_endpoints"]) if candidate.get("known_endpoints") else []
     nodes.append({
         "id": f"pipe:{pipe_id}",
         "type": "pipe",
@@ -251,7 +208,7 @@ def get_topology_for_pipe(pipe_id: str) -> dict:
             "pipe_id": pipe_id,
             "fabric_plane": plane_type,
             "source_system": vendor,
-            "modality": candidate["preferred_modality"] or "DECLARED_INTERFACE",
+            "modality": candidate.get("preferred_modality") or "DECLARED_INTERFACE",
             "category": candidate["category"],
             "status": candidate["status"],
             "endpoints": endpoints,
@@ -259,10 +216,8 @@ def get_topology_for_pipe(pipe_id: str) -> dict:
         },
     })
 
-    # Fabric plane node
     nodes.append(_make_plane_node(plane_id, db_planes))
 
-    # Source system node
     nodes.append({
         "id": f"source:{vendor}",
         "type": "source_system",
@@ -270,7 +225,6 @@ def get_topology_for_pipe(pipe_id: str) -> dict:
         "metadata": {"source_system": vendor},
     })
 
-    # Edges
     edges.append({
         "id": f"edge:pipe_plane:{pipe_id}",
         "source": f"pipe:{pipe_id}",
@@ -286,15 +240,12 @@ def get_topology_for_pipe(pipe_id: str) -> dict:
         "metadata": {},
     })
 
-    # Drift events
-    cursor.execute(
-        "SELECT drift_id, drift_type, severity, status, detected_at "
-        "FROM drift_events WHERE pipe_id = ? AND status = 'open'",
-        (pipe_id,),
+    drift_rows = sb.select(
+        "drift_events",
+        filters={"pipe_id": pipe_id},
+        raw_params={"status": "eq.open"},
     )
-    drift_events = [dict(d) for d in cursor.fetchall()]
-
-    conn.close()
+    drift_events = [dict(d) for d in drift_rows]
 
     return {
         "nodes": nodes,
@@ -308,28 +259,19 @@ def get_topology_for_pipe(pipe_id: str) -> dict:
     }
 
 
-# ============================================================================
-# PER-PLANE TOPOLOGY  (/api/topology/plane/{type})
-# ============================================================================
-
 def get_topology_for_fabric_plane(fabric_plane: str) -> dict:
     """Get topology for a specific fabric plane type — shows all candidates
     that route through that plane."""
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    db_planes, type_to_plane = _load_plane_lookups(cursor)
+    db_planes, type_to_plane = _load_plane_lookups()
 
     nodes = []
     edges = []
     source_systems: set[str] = set()
 
-    # Vendor-specific planes of this type
     vendor_planes = {
         pid: info for pid, info in db_planes.items() if info["plane_type"] == fabric_plane
     }
 
-    # Add plane nodes
     if vendor_planes:
         for pid in vendor_planes:
             node = _make_plane_node(pid, db_planes)
@@ -347,9 +289,7 @@ def get_topology_for_fabric_plane(fabric_plane: str) -> dict:
             },
         })
 
-    # Find candidates that resolve to this plane type
-    cursor.execute("SELECT * FROM connection_candidates")
-    all_candidates = cursor.fetchall()
+    all_candidates = sb.select("connection_candidates")
 
     pipe_count = 0
     for c in all_candidates:
@@ -363,7 +303,7 @@ def get_topology_for_fabric_plane(fabric_plane: str) -> dict:
         source_systems.add(vendor)
         pipe_count += 1
 
-        endpoints = json.loads(c["known_endpoints"]) if c["known_endpoints"] else []
+        endpoints = json.loads(c["known_endpoints"]) if c.get("known_endpoints") else []
         nodes.append({
             "id": f"pipe:{cid}",
             "type": "pipe",
@@ -372,7 +312,7 @@ def get_topology_for_fabric_plane(fabric_plane: str) -> dict:
                 "pipe_id": cid,
                 "fabric_plane": fabric_plane,
                 "source_system": vendor,
-                "modality": c["preferred_modality"] or "DECLARED_INTERFACE",
+                "modality": c.get("preferred_modality") or "DECLARED_INTERFACE",
                 "category": c["category"],
                 "status": c["status"],
                 "endpoints": endpoints,
@@ -394,7 +334,6 @@ def get_topology_for_fabric_plane(fabric_plane: str) -> dict:
             "metadata": {},
         })
 
-    # Source system nodes
     for source in source_systems:
         nodes.append({
             "id": f"source:{source}",
@@ -402,8 +341,6 @@ def get_topology_for_fabric_plane(fabric_plane: str) -> dict:
             "label": source,
             "metadata": {"source_system": source},
         })
-
-    conn.close()
 
     return {
         "nodes": nodes,

@@ -54,7 +54,6 @@ from .db import (
     get_topology_data,
     get_topology_for_pipe,
     get_topology_for_fabric_plane,
-    get_connection,
     create_handoff_log,
     get_handoff_log,
     list_handoff_logs,

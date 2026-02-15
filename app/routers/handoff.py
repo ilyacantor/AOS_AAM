@@ -10,7 +10,6 @@ from typing import Optional
 from ..logger import get_logger
 from ..config import settings
 from ..db import (
-    get_connection,
     save_policy_manifest,
     get_active_policy_manifest,
     list_policy_manifests,
