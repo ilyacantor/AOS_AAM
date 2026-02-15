@@ -29,6 +29,10 @@ class Settings:
         self.RUNNER_JOB_TIMEOUT_S: int = int(
             os.environ.get("AAM_RUNNER_JOB_TIMEOUT_S", "300")
         )
+        # Base URL for self-referencing HTTP calls (Runner → DCL ingest)
+        self.BASE_URL: str = os.environ.get(
+            "AAM_BASE_URL", "http://127.0.0.1:8000"
+        )
 
 
 settings = Settings()

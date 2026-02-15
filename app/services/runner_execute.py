@@ -2,25 +2,23 @@
 Inline v1 Runner Execution — executes a job manifest in-process.
 
 In production (v2+), this becomes a Docker container / serverless function.
-For v1, we simulate the Runner lifecycle in an async task:
+For v1, the Runner executes as an async task and pushes to DCL via HTTP:
   1. Accept manifest
   2. Mark job "running"
   3. (Simulated) Connect to source, extract data
-  4. Push to POST /api/dcl/ingest
-  5. Mark job "completed" via callback
+  4. POST to DCL /api/dcl/ingest with x-run-id + x-pipe-id + x-schema-hash
+  5. Status derived from DCL HTTP response (200 = completed, else = failed)
 
-Data bytes flow: Source → Runner → DCL.  AAM never sees the payload.
+Data bytes flow: Source → Runner → DCL (via HTTP).  AAM never sees the payload.
 """
-import asyncio
-import json
-import hashlib
+import httpx
 from datetime import datetime
 from typing import Optional
 
+from ..config import settings
 from ..logger import get_logger
 from ..db.runner_jobs import update_runner_status, get_runner_job
-from ..db.dcl_ingest import store_ingest, compute_schema_hash, get_previous_schema_hash
-from ..db import create_drift_event
+from ..db.dcl_ingest import compute_schema_hash
 
 _log = get_logger("services.runner_execute")
 
@@ -28,14 +26,17 @@ _log = get_logger("services.runner_execute")
 async def execute_job_inline(job_id: str) -> dict:
     """Execute a runner job inline (v1 in-process worker).
 
-    This simulates the full Runner lifecycle:
-    - Reads the manifest from the job record
-    - Marks status transitions (running → pushing → completed)
-    - Generates simulated data (in v2, this fetches from the real source)
-    - Stores in DCL via the same store_ingest path
-    - Detects schema drift
-
-    Returns a result dict with execution summary.
+    The Runner lifecycle:
+    1. Read manifest from runner_jobs
+    2. Mark status "running"
+    3. Resolve credentials (v1: no-op, v2: vault fetch)
+    4. Extract data from source (v1: simulated)
+    5. Apply schema_map transform
+    6. POST to DCL_INGEST_URL with headers:
+       - x-run-id: from manifest
+       - x-pipe-id: from manifest.source
+       - x-schema-hash: computed from payload structure
+    7. Status from DCL response: 200=completed, else=failed
     """
     job = get_runner_job(job_id)
     if not job:
@@ -52,70 +53,98 @@ async def execute_job_inline(job_id: str) -> dict:
     _log.info("Runner started job %s (pipe=%s, system=%s)", job_id, pipe_id, system)
 
     try:
-        # --- Step 2: Extract data (v1 = simulated) ---
-        # In production, the Runner would:
-        #   - Resolve credentials from vault
-        #   - Connect to source using adapter type
-        #   - Execute query from manifest
-        #   - Stream results
-        simulated_data = _generate_simulated_data(source)
+        # --- Step 2: Resolve credentials (v1 = no-op) ---
+        # In production: credentials_ref (vault://aam/secrets/xxx) is resolved
+        # just-in-time here — never stored in the manifest JSON.
+        cred_ref = source.get("credentials_ref")
+        if cred_ref and cred_ref.startswith("vault://"):
+            _log.info("Would resolve credential: %s (v1: skipped)", cred_ref)
 
-        # --- Step 3: Apply transform (schema normalization) ---
+        # --- Step 3: Extract data from source (v1 = simulated) ---
+        extracted_data = _generate_simulated_data(source)
+
+        # --- Step 4: Apply transform (schema normalization, Option A) ---
         transform = manifest.get("transform")
         if transform and transform.get("schema_map"):
-            simulated_data = _apply_schema_map(simulated_data, transform["schema_map"])
+            extracted_data = _apply_schema_map(extracted_data, transform["schema_map"])
 
-        # --- Step 4: Compute schema hash (Refinement C) ---
-        schema_hash = compute_schema_hash(simulated_data)
+        # --- Step 5: Compute schema hash (Refinement C) ---
+        schema_hash = compute_schema_hash(extracted_data)
 
-        # Schema drift detection
-        drift_detected = False
-        previous_hash = get_previous_schema_hash(pipe_id)
-        if previous_hash and previous_hash != schema_hash:
-            drift_detected = True
-            _log.warning("Schema drift: pipe %s hash %s → %s", pipe_id, previous_hash, schema_hash)
-            try:
-                create_drift_event({
-                    "pipe_id": pipe_id,
-                    "drift_type": "schema",
-                    "old_value": previous_hash,
-                    "new_value": schema_hash,
-                })
-            except Exception:
-                pass
-
-        # --- Step 5: Push to DCL (store_ingest) ---
+        # --- Step 6: Push to DCL via HTTP ---
         update_runner_status(job_id, "pushing")
 
-        record = store_ingest(
-            run_id=job_id,
-            pipe_id=pipe_id,
-            source_system=system,
-            data=simulated_data,
-            schema_hash=schema_hash,
-        )
-
-        # --- Step 6: Mark completed ---
-        update_runner_status(
-            job_id,
-            "completed",
-            rows_transferred=record["row_count"],
-            dcl_response=record,
-        )
-
-        _log.info(
-            "Runner completed job %s: %d rows, hash=%s, drift=%s",
-            job_id, record["row_count"], schema_hash, drift_detected,
-        )
-
-        return {
-            "job_id": job_id,
-            "status": "completed",
-            "rows_transferred": record["row_count"],
-            "ingest_id": record["ingest_id"],
-            "schema_hash": schema_hash,
-            "schema_drift_detected": drift_detected,
+        dcl_url = f"{settings.BASE_URL}{settings.DCL_INGEST_URL}"
+        payload = {
+            "meta": {
+                "source_system": system,
+                "pipe_id": pipe_id,
+                "run_timestamp": datetime.utcnow().isoformat(),
+                "schema_version": manifest.get("manifest_version", "1.0"),
+                "row_count": len(extracted_data),
+            },
+            "data": extracted_data,
         }
+        headers = {
+            "x-run-id": job_id,
+            "x-pipe-id": pipe_id,
+            "x-schema-hash": schema_hash,
+            "Content-Type": "application/json",
+        }
+
+        _log.info("Runner pushing %d rows to %s", len(extracted_data), dcl_url)
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(dcl_url, json=payload, headers=headers)
+
+        # --- Step 7: Status from DCL response ---
+        if resp.status_code == 200:
+            dcl_body = resp.json()
+            update_runner_status(
+                job_id,
+                "completed",
+                rows_transferred=dcl_body.get("rows_stored", len(extracted_data)),
+                dcl_response=dcl_body,
+            )
+            _log.info(
+                "Runner completed job %s: %d rows, hash=%s, drift=%s",
+                job_id,
+                dcl_body.get("rows_stored", 0),
+                schema_hash,
+                dcl_body.get("schema_drift_detected", False),
+            )
+            return {
+                "job_id": job_id,
+                "status": "completed",
+                "rows_transferred": dcl_body.get("rows_stored", 0),
+                "ingest_id": dcl_body.get("ingest_id"),
+                "schema_hash": schema_hash,
+                "schema_drift_detected": dcl_body.get("schema_drift_detected", False),
+            }
+        else:
+            error_detail = resp.text[:500]
+            _log.error(
+                "DCL rejected ingest for job %s: %d %s",
+                job_id, resp.status_code, error_detail,
+            )
+            update_runner_status(
+                job_id,
+                "failed",
+                error_message=f"DCL returned {resp.status_code}: {error_detail}",
+            )
+            return {
+                "job_id": job_id,
+                "status": "failed",
+                "error": f"DCL returned {resp.status_code}: {error_detail}",
+            }
+
+    except httpx.ConnectError as exc:
+        # DCL endpoint unreachable — fall back to direct store for v1
+        _log.warning(
+            "DCL endpoint unreachable (%s), falling back to direct store for job %s",
+            exc, job_id,
+        )
+        return await _fallback_direct_store(job_id, manifest, extracted_data, schema_hash)
 
     except Exception as exc:
         _log.error("Runner failed job %s: %s", job_id, exc)
@@ -127,6 +156,47 @@ async def execute_job_inline(job_id: str) -> dict:
         }
 
 
+async def _fallback_direct_store(
+    job_id: str,
+    manifest: dict,
+    data: list[dict],
+    schema_hash: str,
+) -> dict:
+    """Fallback when DCL HTTP endpoint is unreachable (dev/test only).
+
+    Stores directly via store_ingest, bypassing HTTP.
+    """
+    from ..db.dcl_ingest import store_ingest
+
+    source = manifest.get("source", {})
+    pipe_id = source.get("pipe_id", "unknown")
+    system = source.get("system", "unknown")
+
+    record = store_ingest(
+        run_id=job_id,
+        pipe_id=pipe_id,
+        source_system=system,
+        data=data,
+        schema_hash=schema_hash,
+    )
+    update_runner_status(
+        job_id,
+        "completed",
+        rows_transferred=record["row_count"],
+        dcl_response={**record, "fallback": True},
+    )
+    _log.info("Fallback store completed for job %s: %d rows", job_id, record["row_count"])
+    return {
+        "job_id": job_id,
+        "status": "completed",
+        "rows_transferred": record["row_count"],
+        "ingest_id": record["ingest_id"],
+        "schema_hash": schema_hash,
+        "schema_drift_detected": False,
+        "fallback": True,
+    }
+
+
 def _generate_simulated_data(source: dict) -> list[dict]:
     """Generate simulated extraction data for v1 testing.
 
@@ -135,7 +205,6 @@ def _generate_simulated_data(source: dict) -> list[dict]:
     system = source.get("system", "unknown").lower()
     now = datetime.utcnow().isoformat()
 
-    # Generate 5 representative rows based on source system type
     return [
         {
             "entity_id": f"{system}_entity_{i:03d}",
@@ -163,7 +232,6 @@ def _apply_schema_map(data: list[dict], schema_map: dict) -> list[dict]:
             if key in schema_map:
                 mapping = schema_map[key]
                 target_name = mapping.get("target", key)
-                # Apply scale if specified
                 if "scale" in mapping and isinstance(value, (int, float)):
                     value = value * mapping["scale"]
                 new_row[target_name] = value

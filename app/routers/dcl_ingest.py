@@ -30,12 +30,14 @@ router = APIRouter(prefix="/api/dcl", tags=["DCL Ingestion"])
 async def ingest_data(
     body: DCLIngestRequest,
     x_run_id: str = Header(..., alias="x-run-id"),
+    x_pipe_id: Optional[str] = Header(None, alias="x-pipe-id"),
     x_schema_hash: Optional[str] = Header(None, alias="x-schema-hash"),
 ):
     """Accept a data payload from a Runner.
 
     Headers:
         x-run-id: The run_id from the Job Manifest (required).
+        x-pipe-id: The pipe_id from the Job Manifest (optional, cross-validated).
         x-schema-hash: SHA-256 of the data structure (Refinement C).
 
     Validates run_id against runner_jobs, stores data, detects schema drift.
@@ -48,9 +50,17 @@ async def ingest_data(
             detail=f"Unknown run_id: {x_run_id}. Only authorized runner jobs may push data.",
         )
 
-    # Validate pipe_id matches manifest
+    # Validate pipe_id matches manifest (from body or header)
     manifest = job.get("manifest", {})
     expected_pipe = manifest.get("source", {}).get("pipe_id")
+
+    # Cross-validate x-pipe-id header against manifest if provided
+    if x_pipe_id and expected_pipe and x_pipe_id != expected_pipe:
+        raise HTTPException(
+            status_code=400,
+            detail=f"x-pipe-id header mismatch: manifest expects {expected_pipe}, got {x_pipe_id}",
+        )
+
     if expected_pipe and body.meta.pipe_id != expected_pipe:
         raise HTTPException(
             status_code=400,
