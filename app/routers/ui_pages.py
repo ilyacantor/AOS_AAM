@@ -1646,7 +1646,7 @@ async def ui_topology():
             </div>
             <div class="legend-item">
                 <div class="legend-shape"><svg viewBox="0 0 12 12"><rect x="1" y="1" width="10" height="10" fill="#f59e0b" stroke="#fbbf24" stroke-width="2"/></svg></div>
-                <span>SOR (Farm)</span>
+                <span>SOR</span>
             </div>
         </div>
 
@@ -1721,7 +1721,7 @@ async def ui_topology():
                     : nodeColors[n.type] || '#64748b';
                 let borderWidth = 1;
                 let borderColor = undefined;
-                if (n.metadata && n.metadata.is_authoritative) {{
+                if (n.metadata && n.metadata.origin === 'Declared') {{
                     color = '#f59e0b';
                     borderWidth = 3;
                     borderColor = '#fbbf24';
@@ -1733,7 +1733,7 @@ async def ui_topology():
                     color: borderColor ? {{ background: color, border: borderColor }} : color,
                     borderWidth: borderWidth,
                     size: n.type === 'fabric_plane' ? 30 : (n.type === 'pipe' ? 20 : 15),
-                    font: {{ color: '#ffffff', size: 12 }},
+                    font: {{ color: '#ffffff', size: 12, face: 'Quicksand, sans-serif' }},
                     title: buildTooltip(n),
                     nodeData: n
                 }};
@@ -1768,8 +1768,7 @@ async def ui_topology():
                 lines.push('Type: ' + (node.metadata.plane_type || 'unknown'));
                 if (node.metadata.connected !== undefined) lines.push('Connected: ' + node.metadata.connected + ' / ' + node.metadata.total);
             }} else if (node.type === 'source_system') {{
-                if (node.metadata.is_authoritative) lines.push('Farm-Authoritative SOR');
-                else if (node.metadata.is_sor) lines.push('SOR (candidate-derived)');
+                if (node.metadata.origin) lines.push('Origin: ' + node.metadata.origin);
                 if (node.metadata.domain) lines.push('Domain: ' + node.metadata.domain);
                 if (node.metadata.confidence) lines.push('Confidence: ' + node.metadata.confidence);
                 if (node.metadata.category) lines.push('Category: ' + node.metadata.category);
@@ -2309,7 +2308,7 @@ async def ui_reconcile(aod_run_id: str):
     sor_content = ""
     
     if not has_aod_sor:
-        sor_content += '<div style="color: var(--slate-400); font-size: 0.85rem; margin-bottom: 12px; padding: 8px; background: rgba(255,255,255,0.02); border-radius: 6px;">No SOR declarations found for this run. SORs are sent by Farm via AOD handoff.</div>'
+        sor_content += '<div style="color: var(--slate-400); font-size: 0.85rem; margin-bottom: 12px; padding: 8px; background: rgba(255,255,255,0.02); border-radius: 6px;">No SOR declarations found for this run. SORs are declared via AOD handoff.</div>'
     else:
         # Accuracy bar
         acc_color = "var(--green-400)" if sor_accuracy >= 80 else ("var(--orange-400)" if sor_accuracy >= 50 else "var(--red-400)")
