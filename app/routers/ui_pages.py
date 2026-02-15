@@ -218,8 +218,8 @@ async def ui_pipes_list(
         <h1>Pipes</h1>
         <p class="page-subtitle">All declared data pipes with metadata, health status, and ownership. These are your canonical integration endpoints.</p>
         
-        {aod_run_banner(extra_buttons='<button class="btn btn-sm" style="font-size: 0.75rem;" id="btn-run-inference" data-testid="btn-run-inference">Run Inference</button><button class="btn btn-sm" style="font-size: 0.75rem;" id="btn-export-dcl" data-testid="btn-export-dcl">Export to DCL</button>')}
-        
+        {aod_run_banner()}
+
         <div class="controls">
             <select id="filter" data-testid="filter" onchange="applyFilter()">{filter_options}</select>
         </div>
@@ -296,44 +296,6 @@ async def ui_pipes_list(
             window.location.href = '/ui/pipes' + (params.toString() ? '?' + params.toString() : '');
         }}
         
-        document.getElementById('btn-run-inference').addEventListener('click', async function() {{
-            this.disabled = true;
-            this.textContent = 'Running...';
-            try {{
-                const res = await fetch('/api/aam/infer', {{ method: 'POST' }});
-                const data = await res.json();
-                if (res.ok) {{
-                    let msg = 'Inference complete: ' + data.pipes_created + ' pipes created';
-                    if (data.from_candidates) msg += ' (' + data.from_candidates + ' from candidates)';
-                    if (data.candidates_unmatched) msg += ', ' + data.candidates_unmatched + ' unmatched';
-                    showToast(msg, data.pipes_created > 0 ? 'success' : 'warning');
-                    setTimeout(() => location.reload(), 1500);
-                }} else {{
-                    showToast('Error: ' + (data.detail || 'Failed'), 'error');
-                }}
-            }} catch (e) {{
-                showToast('Error: ' + e.message, 'error');
-            }}
-            this.disabled = false;
-            this.textContent = 'Run Inference';
-        }});
-
-        document.getElementById('btn-export-dcl').addEventListener('click', async function() {{
-            try {{
-                const res = await fetch('/api/export/dcl/declared-pipes');
-                if (!res.ok) throw new Error('Request failed: ' + res.status);
-                const data = await res.json();
-                const blob = new Blob([JSON.stringify(data, null, 2)], {{ type: 'application/json' }});
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = 'dcl-export-' + new Date().toISOString().slice(0,10) + '.json';
-                a.click();
-                showToast('Exported ' + data.pipe_count + ' pipes', 'success');
-            }} catch (e) {{
-                showToast('Export failed: ' + e.message, 'error');
-            }}
-        }});
     </script>
 </body>
 </html>
@@ -1566,6 +1528,7 @@ async def ui_topology():
 <body>
     {ui_nav("topology")}
     <div class="container">
+        {aod_run_banner(extra_buttons='<button class="btn btn-sm" style="font-size: 0.75rem;" id="btn-run-inference" data-testid="btn-run-inference">Run Inference</button><button class="btn btn-sm" style="font-size: 0.75rem;" id="btn-export-dcl" data-testid="btn-export-dcl">Export to DCL</button>')}
         <div class="topology-header">
             <h1>Topology</h1>
             <div class="inline-stats">
@@ -1656,6 +1619,7 @@ async def ui_topology():
             <div id="detail-content"></div>
         </div>
     </div>
+    <div id="toast" class="toast"></div>
 
     <script>
         let network = null;
@@ -1988,6 +1952,53 @@ async def ui_topology():
                 }}
             }}
         }}
+
+        function showToast(message, type) {{
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = 'toast ' + type;
+            toast.style.display = 'block';
+            setTimeout(() => toast.style.display = 'none', 3000);
+        }}
+
+        document.getElementById('btn-run-inference').addEventListener('click', async function() {{
+            this.disabled = true;
+            this.textContent = 'Running...';
+            try {{
+                const res = await fetch('/api/aam/infer', {{ method: 'POST' }});
+                const data = await res.json();
+                if (res.ok) {{
+                    let msg = 'Inference complete: ' + data.pipes_created + ' pipes created';
+                    if (data.from_candidates) msg += ' (' + data.from_candidates + ' from candidates)';
+                    if (data.candidates_unmatched) msg += ', ' + data.candidates_unmatched + ' unmatched';
+                    showToast(msg, data.pipes_created > 0 ? 'success' : 'warning');
+                    setTimeout(() => location.reload(), 1500);
+                }} else {{
+                    showToast('Error: ' + (data.detail || 'Failed'), 'error');
+                }}
+            }} catch (e) {{
+                showToast('Error: ' + e.message, 'error');
+            }}
+            this.disabled = false;
+            this.textContent = 'Run Inference';
+        }});
+
+        document.getElementById('btn-export-dcl').addEventListener('click', async function() {{
+            try {{
+                const res = await fetch('/api/export/dcl/declared-pipes');
+                if (!res.ok) throw new Error('Request failed: ' + res.status);
+                const data = await res.json();
+                const blob = new Blob([JSON.stringify(data, null, 2)], {{ type: 'application/json' }});
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'dcl-export-' + new Date().toISOString().slice(0,10) + '.json';
+                a.click();
+                showToast('Exported ' + data.pipe_count + ' pipes', 'success');
+            }} catch (e) {{
+                showToast('Export failed: ' + e.message, 'error');
+            }}
+        }});
 
         // Initialize
         loadTopology();
