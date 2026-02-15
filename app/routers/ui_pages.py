@@ -1820,26 +1820,44 @@ async def ui_topology():
 
     <script>
         var _fetchRunning = false;
+        var _fetchTimer = null;
+        var _fetchStart = 0;
         async function fetchAodData() {{
             if (_fetchRunning) return;
             _fetchRunning = true;
             var btn = document.getElementById('fetch-aod-btn');
-            btn.textContent = 'Fetching...';
+            _fetchStart = Date.now();
+            if (_fetchTimer) clearInterval(_fetchTimer);
+            _fetchTimer = setInterval(function() {{
+                var s = Math.floor((Date.now() - _fetchStart) / 1000);
+                btn.textContent = 'Fetching... ' + s + 's';
+            }}, 500);
+            btn.textContent = 'Fetching... 0s';
             btn.disabled = true;
             try {{
                 var res = await fetch('/api/handoff/aod/fetch', {{ method: 'POST' }});
                 var data = await res.json();
+                clearInterval(_fetchTimer);
+                _fetchTimer = null;
+                var elapsed = Math.floor((Date.now() - _fetchStart) / 1000);
                 if (res.ok) {{
-                    window.location.reload();
+                    btn.textContent = 'Fetched (' + elapsed + 's)';
+                    btn.disabled = false;
+                    _fetchRunning = false;
+                    showToast('Fetch complete in ' + elapsed + 's', 'success');
+                    setTimeout(() => location.reload(), 1200);
                 }} else {{
                     showToast(data.detail || 'Fetch failed', 'error');
-                    btn.textContent = 'Fetch AOD Data';
+                    btn.textContent = 'Failed (' + elapsed + 's)';
                     btn.disabled = false;
                     _fetchRunning = false;
                 }}
             }} catch(e) {{
+                clearInterval(_fetchTimer);
+                _fetchTimer = null;
+                var elapsed = Math.floor((Date.now() - _fetchStart) / 1000);
                 showToast('Fetch failed: ' + e.message, 'error');
-                btn.textContent = 'Fetch AOD Data';
+                btn.textContent = 'Failed (' + elapsed + 's)';
                 btn.disabled = false;
                 _fetchRunning = false;
             }}
@@ -2182,26 +2200,45 @@ async def ui_topology():
             setTimeout(() => toast.style.display = 'none', 3000);
         }}
 
+        var _inferTimer = null;
+        var _inferStart = 0;
         document.getElementById('btn-run-inference').addEventListener('click', async function() {{
-            this.disabled = true;
-            this.textContent = 'Running...';
+            var btn = this;
+            btn.disabled = true;
+            _inferStart = Date.now();
+            if (_inferTimer) clearInterval(_inferTimer);
+            _inferTimer = setInterval(function() {{
+                var s = Math.floor((Date.now() - _inferStart) / 1000);
+                btn.textContent = 'Running... ' + s + 's';
+            }}, 500);
+            btn.textContent = 'Running... 0s';
             try {{
                 const res = await fetch('/api/aam/infer', {{ method: 'POST' }});
                 const data = await res.json();
+                clearInterval(_inferTimer);
+                _inferTimer = null;
+                var elapsed = Math.floor((Date.now() - _inferStart) / 1000);
                 if (res.ok) {{
                     let msg = 'Inference complete: ' + data.pipes_created + ' pipes created';
                     if (data.from_candidates) msg += ' (' + data.from_candidates + ' from candidates)';
                     if (data.candidates_unmatched) msg += ', ' + data.candidates_unmatched + ' unmatched';
                     showToast(msg, data.pipes_created > 0 ? 'success' : 'warning');
-                    setTimeout(() => location.reload(), 1500);
+                    btn.textContent = 'Inferred (' + elapsed + 's)';
+                    btn.disabled = false;
+                    setTimeout(() => location.reload(), 1200);
                 }} else {{
                     showToast('Error: ' + (data.detail || 'Failed'), 'error');
+                    btn.textContent = 'Failed (' + elapsed + 's)';
+                    btn.disabled = false;
                 }}
             }} catch (e) {{
+                clearInterval(_inferTimer);
+                _inferTimer = null;
+                var elapsed = Math.floor((Date.now() - _inferStart) / 1000);
                 showToast('Error: ' + e.message, 'error');
+                btn.textContent = 'Failed (' + elapsed + 's)';
+                btn.disabled = false;
             }}
-            this.disabled = false;
-            this.textContent = 'Run Inference';
         }});
 
         document.getElementById('btn-export-dcl').addEventListener('click', async function() {{
