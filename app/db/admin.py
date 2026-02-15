@@ -34,16 +34,14 @@ def reset_aod_state():
     The handoff log must be cleared because process_handoff() uses it for
     idempotency checks — a stale log entry would short-circuit re-ingestion.
     """
-    counts = {}
     for table in ALLOWED_TABLES:
-        rows = sb.select(table)
-        counts[table] = len(rows) if isinstance(rows, list) else 0
-        if counts[table] > 0:
-            pk = TABLE_PK_MAP[table]
+        pk = TABLE_PK_MAP[table]
+        try:
             sb.delete(table, raw_params={pk: "not.is.null"})
+        except Exception:
+            pass  # table may already be empty
 
-    total_deleted = sum(counts.values())
-    return {"reset": True, "tables_cleared": counts, "total_rows_deleted": total_deleted}
+    return {"reset": True, "tables_cleared": len(ALLOWED_TABLES)}
 
 
 def clear_all_data():

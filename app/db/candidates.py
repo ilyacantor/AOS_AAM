@@ -64,6 +64,72 @@ def create_candidate(candidate_data: dict) -> dict:
     }
 
 
+def _build_row(candidate_data: dict) -> tuple[str, str, dict]:
+    """Build (candidate_id, now, row_dict) for insert — no I/O."""
+    candidate_id = str(uuid.uuid4())
+    now = datetime.utcnow().isoformat()
+
+    execution_allowed = candidate_data.get("execution_allowed")
+    if isinstance(execution_allowed, bool):
+        pass
+    elif execution_allowed is not None:
+        execution_allowed = bool(execution_allowed)
+
+    row = {
+        "candidate_id": candidate_id,
+        "asset_key": candidate_data["asset_key"],
+        "vendor_name": candidate_data["vendor_name"],
+        "display_name": candidate_data["display_name"],
+        "category": candidate_data["category"],
+        "governance_status": candidate_data.get("governance_status"),
+        "findings": json.dumps(candidate_data.get("findings", [])),
+        "sor_tagging": candidate_data.get("sor_tagging"),
+        "evidence_refs": json.dumps(candidate_data.get("evidence_refs", [])),
+        "signals_summary": candidate_data.get("signals_summary"),
+        "known_endpoints": json.dumps(candidate_data.get("known_endpoints", [])),
+        "preferred_modality": candidate_data.get("preferred_modality"),
+        "priority_score": candidate_data.get("priority_score"),
+        "status": candidate_data.get("status") or "new",
+        "execution_allowed": execution_allowed,
+        "action_type": candidate_data.get("action_type"),
+        "blocking_findings": json.dumps(candidate_data.get("blocking_findings", [])),
+        "connected_via_plane": candidate_data.get("connected_via_plane"),
+        "aod_run_id": candidate_data.get("aod_run_id"),
+        "aod_asset_id": candidate_data.get("aod_asset_id"),
+        "fabric_plane_id": candidate_data.get("fabric_plane_id"),
+        "created_at": now,
+        "updated_at": now,
+    }
+    return candidate_id, now, row
+
+
+def create_candidates_batch(candidates: list[dict]) -> list[dict]:
+    """Insert many candidates in one HTTP call via insert_many.
+
+    Assumes the table was already cleared (by reset_aod_state),
+    so per-row DELETE dedup is skipped.
+    """
+    if not candidates:
+        return []
+
+    rows = []
+    results = []
+    for cd in candidates:
+        candidate_id, now, row = _build_row(cd)
+        rows.append(row)
+        results.append({
+            "candidate_id": candidate_id,
+            "status": "connected",
+            "execution_allowed": cd.get("execution_allowed"),
+            "action_type": cd.get("action_type"),
+            "created_at": now,
+            "updated_at": now,
+        })
+
+    sb.insert_many("connection_candidates", rows)
+    return results
+
+
 def get_candidate(candidate_id: str) -> Optional[dict]:
     """Get a candidate by ID"""
     row = sb.select(
