@@ -74,7 +74,11 @@ async def execute_job_inline(job_id: str) -> dict:
         # --- Step 6: Push to DCL via HTTP ---
         update_runner_status(job_id, "pushing")
 
-        dcl_url = f"{settings.BASE_URL}{settings.DCL_INGEST_URL}"
+        dcl_ingest = settings.DCL_INGEST_URL
+        if dcl_ingest.startswith("http://") or dcl_ingest.startswith("https://"):
+            dcl_url = dcl_ingest
+        else:
+            dcl_url = f"{settings.BASE_URL}{dcl_ingest}"
 
         # --- Header mapping (exact DCL contract) ---
         #   x-run-id      ← manifest.run_id
