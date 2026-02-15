@@ -1739,6 +1739,83 @@ async def ui_topology():
         .node-details.visible {{ display: block; }}
         .node-details h3 {{ margin-bottom: 8px; color: var(--cyan-400); font-size: 0.85rem; }}
         .node-details .close-btn {{ position: absolute; top: 6px; right: 8px; background: none; border: none; color: var(--slate-400); cursor: pointer; font-size: 1rem; }}
+
+        .dispatch-overlay {{
+            position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+            z-index: 9000; display: none; justify-content: center; align-items: center;
+        }}
+        .dispatch-overlay.visible {{ display: flex; }}
+        .dispatch-panel {{
+            background: #0f172a; border: 1px solid var(--slate-700);
+            border-radius: 10px; width: 720px; max-width: 92vw;
+            max-height: 82vh; display: flex; flex-direction: column;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+        }}
+        .dp-header {{
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 14px 18px; border-bottom: 1px solid var(--slate-700);
+        }}
+        .dp-header h2 {{ font-size: 0.95rem; color: var(--slate-100); margin: 0; }}
+        .dp-header .dp-close {{
+            background: none; border: none; color: var(--slate-400);
+            cursor: pointer; font-size: 1.2rem; padding: 2px 6px;
+        }}
+        .dp-header .dp-close:hover {{ color: var(--slate-200); }}
+        .dp-summary {{
+            display: flex; gap: 12px; padding: 12px 18px;
+            border-bottom: 1px solid rgba(51,65,85,0.5);
+        }}
+        .dp-stat {{
+            display: flex; flex-direction: column; align-items: center;
+            padding: 8px 14px; border-radius: 6px;
+            background: rgba(30,41,59,0.8); min-width: 70px;
+        }}
+        .dp-stat .dp-val {{ font-size: 1.3rem; font-weight: 700; }}
+        .dp-stat .dp-lbl {{ font-size: 0.6rem; color: var(--slate-400); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }}
+        .dp-stat.completed .dp-val {{ color: #4ade80; }}
+        .dp-stat.failed .dp-val {{ color: #f87171; }}
+        .dp-stat.running .dp-val {{ color: #60a5fa; }}
+        .dp-stat.queued .dp-val {{ color: #94a3b8; }}
+        .dp-stat.total .dp-val {{ color: var(--cyan-400); }}
+        .dp-stat.rows .dp-val {{ color: #a78bfa; }}
+        .dp-jobs {{
+            flex: 1; overflow-y: auto; padding: 8px 18px 14px;
+        }}
+        .dp-jobs table {{
+            width: 100%; border-collapse: collapse; font-size: 0.7rem;
+        }}
+        .dp-jobs th {{
+            text-align: left; padding: 6px 8px; color: var(--slate-400);
+            border-bottom: 1px solid var(--slate-700); font-weight: 600;
+            font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.5px;
+            position: sticky; top: 0; background: #0f172a;
+        }}
+        .dp-jobs td {{
+            padding: 5px 8px; border-bottom: 1px solid rgba(51,65,85,0.3);
+            color: var(--slate-300);
+        }}
+        .dp-jobs tr:hover td {{ background: rgba(51,65,85,0.2); }}
+        .dp-status {{
+            display: inline-block; padding: 1px 7px; border-radius: 8px;
+            font-size: 0.6rem; font-weight: 600;
+        }}
+        .dp-status.completed {{ background: rgba(34,197,94,0.15); color: #4ade80; }}
+        .dp-status.failed {{ background: rgba(248,113,113,0.15); color: #f87171; }}
+        .dp-status.running {{ background: rgba(59,130,246,0.15); color: #60a5fa; }}
+        .dp-status.queued {{ background: rgba(148,163,184,0.15); color: #94a3b8; }}
+        .dp-status.pushing {{ background: rgba(167,139,250,0.15); color: #a78bfa; }}
+        .dp-error {{ color: #f87171; font-size: 0.6rem; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+        .dp-error:hover {{ white-space: normal; word-break: break-all; }}
+        .dp-filter {{
+            display: flex; gap: 6px; padding: 8px 18px 0;
+        }}
+        .dp-filter-btn {{
+            background: rgba(30,41,59,0.8); border: 1px solid var(--slate-700);
+            color: var(--slate-400); padding: 3px 10px; border-radius: 4px;
+            font-size: 0.62rem; cursor: pointer; font-family: inherit;
+        }}
+        .dp-filter-btn:hover {{ border-color: var(--slate-500); color: var(--slate-200); }}
+        .dp-filter-btn.active {{ border-color: var(--cyan-400); color: var(--cyan-400); background: rgba(34,211,238,0.08); }}
     </style>
 </head>
 <body>
@@ -1765,6 +1842,7 @@ async def ui_topology():
                 <button class="sb-btn" id="btn-run-inference">Run Inference</button>
                 <button class="sb-btn" id="btn-export-dcl">Export to DCL</button>
                 <button class="sb-btn sb-btn-runner" onclick="dispatchAllRunners()" id="btn-dispatch-all" data-testid="btn-dispatch-all">Dispatch Runner</button>
+                <button class="sb-btn" onclick="openDispatchPanel()" id="btn-view-dispatch" data-testid="btn-view-dispatch" style="font-size:0.72rem;">View Dispatch</button>
                 <span id="dispatch-all-status" style="display:none;font-size:0.68rem;margin-top:2px;"></span>
             </div>
             <div class="sb-section">
@@ -2311,9 +2389,114 @@ async def ui_topology():
             btn.textContent = 'Dispatch Runner';
         }}
 
+        // ── Dispatch Panel ──
+        let _dpFilter = 'all';
+        let _dpData = null;
+
+        function openDispatchPanel() {{
+            document.getElementById('dispatch-overlay').classList.add('visible');
+            loadDispatchData();
+        }}
+
+        function closeDispatchPanel() {{
+            document.getElementById('dispatch-overlay').classList.remove('visible');
+        }}
+
+        function setDpFilter(f, el) {{
+            _dpFilter = f;
+            document.querySelectorAll('.dp-filter-btn').forEach(b => b.classList.remove('active'));
+            el.classList.add('active');
+            renderDispatchJobs(_dpData);
+        }}
+
+        async function loadDispatchData() {{
+            const body = document.getElementById('dp-body');
+            body.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--slate-500);">Loading...</td></tr>';
+            try {{
+                const res = await fetch('/api/runners/jobs?limit=200');
+                const data = await res.json();
+                _dpData = data.jobs || [];
+                renderDispatchSummary(_dpData);
+                renderDispatchJobs(_dpData);
+            }} catch (e) {{
+                body.innerHTML = '<tr><td colspan="5" style="color:#f87171;">Error: ' + e.message + '</td></tr>';
+            }}
+        }}
+
+        function renderDispatchSummary(jobs) {{
+            const counts = {{ completed: 0, failed: 0, running: 0, queued: 0, pushing: 0 }};
+            let totalRows = 0;
+            jobs.forEach(j => {{
+                const s = j.status || 'queued';
+                if (counts[s] !== undefined) counts[s]++;
+                totalRows += j.rows_transferred || 0;
+            }});
+            document.getElementById('dp-total').textContent = jobs.length;
+            document.getElementById('dp-completed').textContent = counts.completed;
+            document.getElementById('dp-failed').textContent = counts.failed;
+            document.getElementById('dp-running').textContent = counts.running + counts.pushing;
+            document.getElementById('dp-rows').textContent = totalRows;
+        }}
+
+        function renderDispatchJobs(jobs) {{
+            const body = document.getElementById('dp-body');
+            let filtered = jobs;
+            if (_dpFilter !== 'all') {{
+                filtered = jobs.filter(j => (j.status || 'queued') === _dpFilter);
+            }}
+            if (filtered.length === 0) {{
+                body.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:16px;color:var(--slate-500);">No jobs</td></tr>';
+                return;
+            }}
+            body.innerHTML = filtered.map(j => {{
+                const s = j.status || 'queued';
+                const rows = j.rows_transferred || 0;
+                const err = j.error_message ? '<div class="dp-error" title="' + (j.error_message||'').replace(/"/g,'&quot;') + '">' + (j.error_message||'').substring(0,80) + '</div>' : '';
+                const pipeId = j.pipe_id || j.job_id || '';
+                const shortPipe = pipeId.length > 35 ? pipeId.substring(0,32) + '...' : pipeId;
+                const ts = j.completed_at || j.started_at || j.created_at || '';
+                const shortTs = ts ? new Date(ts).toLocaleTimeString() : '-';
+                return '<tr>' +
+                    '<td title="' + pipeId + '">' + shortPipe + '</td>' +
+                    '<td><span class="dp-status ' + s + '">' + s + '</span></td>' +
+                    '<td style="text-align:right;">' + rows + '</td>' +
+                    '<td>' + shortTs + '</td>' +
+                    '<td>' + err + '</td>' +
+                    '</tr>';
+            }}).join('');
+        }}
+
         // Initialize
         loadTopology();
     </script>
+
+    <div class="dispatch-overlay" id="dispatch-overlay" data-testid="dispatch-overlay" onclick="if(event.target===this)closeDispatchPanel()">
+        <div class="dispatch-panel">
+            <div class="dp-header">
+                <h2>Dispatch Details</h2>
+                <button class="dp-close" onclick="closeDispatchPanel()" data-testid="btn-close-dispatch">&times;</button>
+            </div>
+            <div class="dp-summary">
+                <div class="dp-stat total"><span class="dp-val" id="dp-total">-</span><span class="dp-lbl">Total</span></div>
+                <div class="dp-stat completed"><span class="dp-val" id="dp-completed">-</span><span class="dp-lbl">Done</span></div>
+                <div class="dp-stat failed"><span class="dp-val" id="dp-failed">-</span><span class="dp-lbl">Failed</span></div>
+                <div class="dp-stat running"><span class="dp-val" id="dp-running">-</span><span class="dp-lbl">Active</span></div>
+                <div class="dp-stat rows"><span class="dp-val" id="dp-rows">-</span><span class="dp-lbl">Rows</span></div>
+            </div>
+            <div class="dp-filter">
+                <button class="dp-filter-btn active" onclick="setDpFilter('all',this)" data-testid="dp-filter-all">All</button>
+                <button class="dp-filter-btn" onclick="setDpFilter('completed',this)" data-testid="dp-filter-completed">Completed</button>
+                <button class="dp-filter-btn" onclick="setDpFilter('failed',this)" data-testid="dp-filter-failed">Failed</button>
+                <button class="dp-filter-btn" onclick="setDpFilter('running',this)" data-testid="dp-filter-running">Running</button>
+            </div>
+            <div class="dp-jobs">
+                <table>
+                    <thead><tr><th>Pipe</th><th>Status</th><th style="text-align:right;">Rows</th><th>Time</th><th>Error</th></tr></thead>
+                    <tbody id="dp-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
 </body>
 </html>
 """)
