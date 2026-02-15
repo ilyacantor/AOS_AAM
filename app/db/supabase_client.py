@@ -5,15 +5,14 @@ Provides low-level CRUD helpers that wrap Supabase's PostgREST API.
 All db modules use these instead of raw sqlite3 calls.
 """
 import os
-import json
 import httpx
 from typing import Optional, Any
 from ..logger import get_logger
 
 _log = get_logger("db.supabase")
 
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
-SUPABASE_API_KEY = os.environ.get("SUPABASE_API_KEY", "")
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
+SUPABASE_API_KEY = os.environ.get("SUPABASE_API_KEY", "").strip()
 
 _REST_BASE = f"{SUPABASE_URL}/rest/v1"
 
@@ -49,7 +48,7 @@ def insert(table: str, data: dict, *, on_conflict: Optional[str] = None) -> dict
     client = _get_client()
     headers = dict(_HEADERS)
     if on_conflict:
-        headers["Prefer"] = f"return=representation,resolution=merge-duplicates"
+        headers["Prefer"] = "return=representation,resolution=merge-duplicates"
         url = f"/{table}?on_conflict={on_conflict}"
     else:
         url = f"/{table}"
@@ -144,7 +143,7 @@ def delete(
     if not params and not delete_all:
         raise ValueError("delete() requires filters or delete_all=True")
     if not params and delete_all:
-        params["id"] = "neq.IMPOSSIBLE_NEVER_MATCH"
+        params["candidate_id"] = "neq."
     resp = client.delete(f"/{table}", params=params)
     _check_response(resp, f"delete {table}")
     return resp.json()
@@ -157,20 +156,7 @@ def rpc(function_name: str, params: Optional[dict] = None) -> Any:
     return resp.json()
 
 
-def raw_sql(sql: str) -> Any:
-    """Execute raw SQL via Supabase's rpc endpoint.
-    Requires a 'exec_sql' function to be created in Supabase.
-    Falls back to direct REST calls if not available.
-    """
-    try:
-        return rpc("exec_sql", {"query": sql})
-    except Exception as e:
-        _log.warning("raw_sql via rpc failed: %s", e)
-        raise
-
-
 def table_exists(table_name: str) -> bool:
-    """Check if a table exists by trying a minimal select."""
     try:
         client = _get_client()
         resp = client.get(f"/{table_name}", params={"select": "*", "limit": "0"})
