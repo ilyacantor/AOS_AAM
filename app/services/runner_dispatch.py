@@ -15,7 +15,7 @@ from ..db import (
     get_pipe,
     list_pipes,
 )
-from ..db.runner_jobs import create_runner_job, update_runner_status, list_runner_jobs
+from ..db.runner_jobs import create_runner_job, create_runner_jobs_batch, update_runner_status, list_runner_jobs
 from ..models import (
     JobManifest,
     SourceSpec,
@@ -165,13 +165,42 @@ def dispatch_batch(
     pipe_ids: list[str],
     trigger: str = "manual",
 ) -> list[dict]:
-    """Dispatch runner jobs for multiple pipes.  Returns list of job summaries."""
+    """Dispatch runner jobs for multiple pipes using bulk insert.
+    
+    Builds all manifests first, then bulk-inserts to DB in one call.
+    Returns list of job summaries with job_ids ready for execution.
+    """
+    manifests = []
     results = []
+    errors = []
+
     for pid in pipe_ids:
         try:
-            result = dispatch_pipe(pid, trigger)
-            results.append(result)
+            pipe = get_pipe(pid)
+            if not pipe:
+                errors.append({"pipe_id": pid, "status": "error", "error": f"Pipe {pid} not found"})
+                continue
+            manifest = build_manifest(pipe, trigger)
+            manifests.append(manifest.model_dump())
+            results.append({
+                "job_id": manifest.run_id,
+                "run_id": manifest.run_id,
+                "pipe_id": pid,
+                "status": "queued",
+                "trigger": trigger,
+            })
         except Exception as exc:
-            _log.warning("Failed to dispatch pipe %s: %s", pid, exc)
-            results.append({"pipe_id": pid, "status": "error", "error": str(exc)})
-    return results
+            _log.warning("Failed to build manifest for pipe %s: %s", pid, exc)
+            errors.append({"pipe_id": pid, "status": "error", "error": str(exc)})
+
+    if manifests:
+        try:
+            create_runner_jobs_batch(manifests)
+            _log.info("Bulk-dispatched %d runner jobs", len(manifests))
+        except Exception as exc:
+            _log.error("Bulk insert failed: %s", exc)
+            for r in results:
+                r["status"] = "error"
+                r["error"] = f"Bulk insert failed: {exc}"
+
+    return results + errors

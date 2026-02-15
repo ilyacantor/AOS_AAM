@@ -3,6 +3,7 @@ Runner API — dispatch jobs, list jobs, runner callback.
 
 RACI: AAM is A/R for Collector Run Execution (Row 43) and Track Collector Runs (Row 48).
 """
+import asyncio
 from fastapi import APIRouter, HTTPException, Header, Query
 from typing import Optional
 
@@ -21,8 +22,13 @@ from ..db.runner_jobs import (
     update_runner_status,
     update_heartbeat,
 )
+from ..logger import get_logger
+
+_log = get_logger("routers.runners")
 
 router = APIRouter(prefix="/api/runners", tags=["Runners"])
+
+CONCURRENCY = 10
 
 
 @router.post("/dispatch")
@@ -46,35 +52,44 @@ async def dispatch_single(req: RunnerDispatchRequest):
 
 @router.post("/dispatch-batch")
 async def dispatch_multiple(req: RunnerBatchDispatchRequest):
-    """Dispatch runner jobs for multiple pipes, then execute each inline."""
+    """Dispatch runner jobs for multiple pipes, then execute concurrently.
+    
+    Phase 1: Bulk-insert all job records (single DB call).
+    Phase 2: Execute jobs in parallel batches of CONCURRENCY.
+    """
     if not req.pipe_ids:
         raise HTTPException(status_code=400, detail="pipe_ids is required")
-    results = dispatch_batch(req.pipe_ids, req.trigger)
 
-    completed = 0
-    failed = 0
-    errors = 0
+    results = dispatch_batch(req.pipe_ids, req.trigger)
+    _log.info("Bulk dispatch complete: %d jobs created", len([r for r in results if r.get("status") != "error"]))
+
+    job_ids = [r["job_id"] for r in results if r.get("status") != "error"]
+    dispatch_errors = len([r for r in results if r.get("status") == "error"])
+
+    sem = asyncio.Semaphore(CONCURRENCY)
+
+    async def _run_one(job_id: str) -> dict:
+        async with sem:
+            try:
+                return await execute_job_inline(job_id)
+            except Exception as exc:
+                return {"job_id": job_id, "status": "failed", "error": str(exc)}
+
+    exec_results = await asyncio.gather(*[_run_one(jid) for jid in job_ids])
+
+    completed = sum(1 for r in exec_results if r.get("status") == "completed")
+    failed = sum(1 for r in exec_results if r.get("status") == "failed")
+
+    result_map = {r["job_id"]: r for r in exec_results}
     for r in results:
-        if r.get("status") == "error":
-            errors += 1
-            continue
-        try:
-            exec_result = await execute_job_inline(r["job_id"])
-            r.update(exec_result)
-            if exec_result.get("status") == "completed":
-                completed += 1
-            else:
-                failed += 1
-        except Exception as exc:
-            r["status"] = "failed"
-            r["error"] = str(exc)
-            failed += 1
+        if r["job_id"] in result_map:
+            r.update(result_map[r["job_id"]])
 
     return {
-        "dispatched": completed + failed,
+        "dispatched": len(job_ids),
         "completed": completed,
         "failed": failed,
-        "errors": errors,
+        "errors": dispatch_errors,
         "jobs": results,
     }
 

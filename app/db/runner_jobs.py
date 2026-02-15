@@ -27,6 +27,25 @@ def create_runner_job(manifest_dict: dict) -> str:
     return job_id
 
 
+def create_runner_jobs_batch(manifests: list[dict]) -> list[str]:
+    """Bulk-insert runner jobs from a list of manifest dicts. Returns list of job_ids."""
+    if not manifests:
+        return []
+    now = datetime.utcnow().isoformat()
+    rows = []
+    for m in manifests:
+        rows.append({
+            "job_id": m["run_id"],
+            "pipe_id": m["source"]["pipe_id"],
+            "status": "queued",
+            "manifest": json.dumps(m, default=str),
+            "dispatched_at": now,
+            "rows_transferred": 0,
+        })
+    sb.insert_many("runner_jobs", rows)
+    return [m["run_id"] for m in manifests]
+
+
 def update_runner_status(
     job_id: str,
     status: str,
