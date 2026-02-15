@@ -2336,6 +2336,22 @@ async def ui_topology():
             }}
         }});
 
+        let _dispatchTimer = null;
+        let _dispatchStart = 0;
+
+        function _startDispatchCounter(btn, count) {{
+            _dispatchStart = Date.now();
+            if (_dispatchTimer) clearInterval(_dispatchTimer);
+            _dispatchTimer = setInterval(() => {{
+                const sec = Math.floor((Date.now() - _dispatchStart) / 1000);
+                btn.textContent = 'Running ' + count + '... ' + sec + 's';
+            }}, 200);
+        }}
+
+        function _stopDispatchCounter() {{
+            if (_dispatchTimer) {{ clearInterval(_dispatchTimer); _dispatchTimer = null; }}
+        }}
+
         async function dispatchAllRunners() {{
             const btn = document.getElementById('btn-dispatch-all');
             const statusEl = document.getElementById('dispatch-all-status');
@@ -2358,6 +2374,7 @@ async def ui_topology():
                 }}
 
                 statusEl.innerHTML = '<span class="dispatch-pill running">Running ' + pipeIds.length + '</span>';
+                _startDispatchCounter(btn, pipeIds.length);
 
                 const res = await fetch('/api/runners/dispatch-batch', {{
                     method: 'POST',
@@ -2365,23 +2382,27 @@ async def ui_topology():
                     body: JSON.stringify({{ pipe_ids: pipeIds, trigger: 'manual' }})
                 }});
                 const data = await res.json();
+                _stopDispatchCounter();
+
+                const elapsed = Math.floor((Date.now() - _dispatchStart) / 1000);
 
                 if (res.ok) {{
                     const dispatched = data.dispatched || 0;
                     const errors = data.errors || 0;
                     const rows = (data.jobs || []).reduce((s, j) => s + (j.rows_transferred || 0), 0);
                     if (errors === 0) {{
-                        statusEl.innerHTML = '<span class="dispatch-pill completed">Done (' + rows + 'r)</span>';
-                        showToast('Dispatched ' + dispatched + ' runners, ' + rows + ' rows', 'success');
+                        statusEl.innerHTML = '<span class="dispatch-pill completed">Done (' + rows + 'r) ' + elapsed + 's</span>';
+                        showToast('Dispatched ' + dispatched + ' runners, ' + rows + ' rows in ' + elapsed + 's', 'success');
                     }} else {{
-                        statusEl.innerHTML = '<span class="dispatch-pill failed">' + errors + ' failed</span>';
+                        statusEl.innerHTML = '<span class="dispatch-pill failed">' + errors + ' failed (' + elapsed + 's)</span>';
                         showToast(dispatched + ' dispatched, ' + errors + ' errors', 'error');
                     }}
                 }} else {{
-                    statusEl.innerHTML = '<span class="dispatch-pill failed">Failed</span>';
+                    statusEl.innerHTML = '<span class="dispatch-pill failed">Failed (' + elapsed + 's)</span>';
                     showToast('Dispatch failed: ' + (data.detail || res.status), 'error');
                 }}
             }} catch (e) {{
+                _stopDispatchCounter();
                 statusEl.innerHTML = '<span class="dispatch-pill failed">Error</span>';
                 showToast('Error: ' + e.message, 'error');
             }}
