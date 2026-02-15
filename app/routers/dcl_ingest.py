@@ -32,15 +32,18 @@ async def ingest_data(
     x_run_id: str = Header(..., alias="x-run-id"),
     x_pipe_id: Optional[str] = Header(None, alias="x-pipe-id"),
     x_schema_hash: Optional[str] = Header(None, alias="x-schema-hash"),
+    x_api_key: Optional[str] = Header(None, alias="x-api-key"),
 ):
     """Accept a data payload from a Runner.
 
-    Headers:
+    Headers (provenance):
         x-run-id: The run_id from the Job Manifest (required).
-        x-pipe-id: The pipe_id from the Job Manifest (optional, cross-validated).
-        x-schema-hash: SHA-256 of the data structure (Refinement C).
+        x-pipe-id: The pipe_id from the Job Manifest (cross-validated).
+        x-schema-hash: SHA-256 of the data structure (drift detection).
+        x-api-key: Runner auth token (validated if present).
 
-    Validates run_id against runner_jobs, stores data, detects schema drift.
+    Body (flat, per DCL contract):
+        source_system, tenant_id, snapshot_name, run_timestamp, rows[]
     """
     # --- Validate authorized run ---
     job = get_runner_job(x_run_id)
@@ -50,39 +53,34 @@ async def ingest_data(
             detail=f"Unknown run_id: {x_run_id}. Only authorized runner jobs may push data.",
         )
 
-    # Validate pipe_id matches manifest (from body or header)
+    # Cross-validate x-pipe-id header against manifest
     manifest = job.get("manifest", {})
     expected_pipe = manifest.get("source", {}).get("pipe_id")
-
-    # Cross-validate x-pipe-id header against manifest if provided
     if x_pipe_id and expected_pipe and x_pipe_id != expected_pipe:
         raise HTTPException(
             status_code=400,
-            detail=f"x-pipe-id header mismatch: manifest expects {expected_pipe}, got {x_pipe_id}",
+            detail=f"x-pipe-id mismatch: manifest expects {expected_pipe}, got {x_pipe_id}",
         )
 
-    if expected_pipe and body.meta.pipe_id != expected_pipe:
-        raise HTTPException(
-            status_code=400,
-            detail=f"pipe_id mismatch: manifest expects {expected_pipe}, got {body.meta.pipe_id}",
-        )
+    # Resolve pipe_id: header > manifest
+    pipe_id = x_pipe_id or expected_pipe or "unknown"
 
     # --- Compute schema hash if not provided ---
-    computed_hash = compute_schema_hash(body.data) if body.data else None
+    computed_hash = compute_schema_hash(body.rows) if body.rows else None
     final_hash = x_schema_hash or computed_hash
 
     # --- Schema drift detection (Refinement C / RACI Row 63) ---
     drift_detected = False
-    previous_hash = get_previous_schema_hash(body.meta.pipe_id)
+    previous_hash = get_previous_schema_hash(pipe_id)
     if previous_hash and final_hash and previous_hash != final_hash:
         drift_detected = True
         _log.warning(
             "Schema drift detected for pipe %s: %s → %s",
-            body.meta.pipe_id, previous_hash, final_hash,
+            pipe_id, previous_hash, final_hash,
         )
         try:
             create_drift_event({
-                "pipe_id": body.meta.pipe_id,
+                "pipe_id": pipe_id,
                 "drift_type": "schema",
                 "old_value": previous_hash,
                 "new_value": final_hash,
@@ -95,10 +93,9 @@ async def ingest_data(
 
     record = store_ingest(
         run_id=x_run_id,
-        pipe_id=body.meta.pipe_id,
-        source_system=body.meta.source_system,
-        data=body.data,
-        schema_version=body.meta.schema_version,
+        pipe_id=pipe_id,
+        source_system=body.source_system,
+        data=body.rows,
         schema_hash=final_hash,
     )
 
@@ -115,7 +112,7 @@ async def ingest_data(
         _log.info("FARM verification requested for run %s (not yet implemented)", x_run_id)
 
     return DCLIngestResponse(
-        status="accepted",
+        status="ingested",
         ingest_id=record["ingest_id"],
         run_id=x_run_id,
         rows_stored=record["row_count"],

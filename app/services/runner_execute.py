@@ -75,21 +75,33 @@ async def execute_job_inline(job_id: str) -> dict:
         update_runner_status(job_id, "pushing")
 
         dcl_url = f"{settings.BASE_URL}{settings.DCL_INGEST_URL}"
-        payload = {
-            "meta": {
-                "source_system": system,
-                "pipe_id": pipe_id,
-                "run_timestamp": datetime.utcnow().isoformat(),
-                "schema_version": manifest.get("manifest_version", "1.0"),
-                "row_count": len(extracted_data),
-            },
-            "data": extracted_data,
-        }
+
+        # --- Header mapping (exact DCL contract) ---
+        #   x-run-id      ← manifest.run_id
+        #   x-pipe-id     ← manifest.source.pipe_id
+        #   x-schema-hash ← SHA-256 of transformed field structure
+        #   x-api-key     ← resolved from vault/env (JIT, never stored in manifest)
         headers = {
-            "x-run-id": job_id,
+            "x-run-id": manifest.get("run_id", job_id),
             "x-pipe-id": pipe_id,
             "x-schema-hash": schema_hash,
+            "x-api-key": settings.DCL_API_KEY,
             "Content-Type": "application/json",
+        }
+
+        # --- Body mapping (flat, per DCL contract) ---
+        #   source_system  ← manifest.source.system
+        #   tenant_id      ← manifest.target.tenant_id
+        #   snapshot_name  ← manifest.target.snapshot_name
+        #   run_timestamp  ← manifest.provenance.run_timestamp
+        #   rows           ← the actual transformed data list
+        provenance = manifest.get("provenance", {})
+        payload = {
+            "source_system": system,
+            "tenant_id": target.get("tenant_id"),
+            "snapshot_name": target.get("snapshot_name"),
+            "run_timestamp": provenance.get("run_timestamp", datetime.utcnow().isoformat()),
+            "rows": extracted_data,
         }
 
         _log.info("Runner pushing %d rows to %s", len(extracted_data), dcl_url)
@@ -98,29 +110,45 @@ async def execute_job_inline(job_id: str) -> dict:
             resp = await client.post(dcl_url, json=payload, headers=headers)
 
         # --- Step 7: Status from DCL response ---
+        #   200 OK + status "ingested" → COMPLETED
+        #   Anything else             → FAILED
         if resp.status_code == 200:
             dcl_body = resp.json()
-            update_runner_status(
-                job_id,
-                "completed",
-                rows_transferred=dcl_body.get("rows_stored", len(extracted_data)),
-                dcl_response=dcl_body,
-            )
-            _log.info(
-                "Runner completed job %s: %d rows, hash=%s, drift=%s",
-                job_id,
-                dcl_body.get("rows_stored", 0),
-                schema_hash,
-                dcl_body.get("schema_drift_detected", False),
-            )
-            return {
-                "job_id": job_id,
-                "status": "completed",
-                "rows_transferred": dcl_body.get("rows_stored", 0),
-                "ingest_id": dcl_body.get("ingest_id"),
-                "schema_hash": schema_hash,
-                "schema_drift_detected": dcl_body.get("schema_drift_detected", False),
-            }
+            dcl_status = dcl_body.get("status", "")
+            if dcl_status == "ingested":
+                update_runner_status(
+                    job_id,
+                    "completed",
+                    rows_transferred=dcl_body.get("rows_stored", len(extracted_data)),
+                    dcl_response=dcl_body,
+                )
+                _log.info(
+                    "Runner completed job %s: %d rows, hash=%s, drift=%s",
+                    job_id,
+                    dcl_body.get("rows_stored", 0),
+                    schema_hash,
+                    dcl_body.get("schema_drift_detected", False),
+                )
+                return {
+                    "job_id": job_id,
+                    "status": "completed",
+                    "rows_transferred": dcl_body.get("rows_stored", 0),
+                    "ingest_id": dcl_body.get("ingest_id"),
+                    "schema_hash": schema_hash,
+                    "schema_drift_detected": dcl_body.get("schema_drift_detected", False),
+                }
+            else:
+                # 200 but unexpected status — treat as failure
+                update_runner_status(
+                    job_id,
+                    "failed",
+                    error_message=f"DCL returned unexpected status: {dcl_status}",
+                )
+                return {
+                    "job_id": job_id,
+                    "status": "failed",
+                    "error": f"DCL returned unexpected status: {dcl_status}",
+                }
         else:
             error_detail = resp.text[:500]
             _log.error(

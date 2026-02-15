@@ -545,24 +545,22 @@ class JobManifest(BaseModel):
 # DCL INGESTION MODELS
 # ============================================================================
 
-class DCLIngestMeta(BaseModel):
-    """Metadata header for a DCL ingestion payload"""
-    source_system: str
-    pipe_id: str
-    run_timestamp: str
-    schema_version: Optional[str] = None
-    row_count: Optional[int] = None
-
-
 class DCLIngestRequest(BaseModel):
-    """Payload shape for POST /api/dcl/ingest"""
-    meta: DCLIngestMeta
-    data: list[dict] = Field(default_factory=list)
+    """Payload shape for POST /api/dcl/ingest — flat body per DCL contract.
+
+    Headers carry provenance (x-run-id, x-pipe-id, x-schema-hash, x-api-key).
+    Body carries the data + context needed for storage.
+    """
+    source_system: str
+    tenant_id: Optional[str] = None
+    snapshot_name: Optional[str] = None
+    run_timestamp: str
+    rows: list[dict] = Field(default_factory=list)
 
 
 class DCLIngestResponse(BaseModel):
-    """Response from DCL after accepting an ingestion"""
-    status: str = "accepted"
+    """Response from DCL after ingesting a payload"""
+    status: str = "ingested"
     ingest_id: str
     run_id: str
     rows_stored: int

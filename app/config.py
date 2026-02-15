@@ -33,6 +33,11 @@ class Settings:
         self.BASE_URL: str = os.environ.get(
             "AAM_BASE_URL", "http://127.0.0.1:8000"
         )
+        # API key the Runner sends in x-api-key header to DCL
+        # In production: resolved from vault. In v1: env var.
+        self.DCL_API_KEY: str = os.environ.get(
+            "AAM_DCL_API_KEY", "aam-runner-v1-key"
+        )
 
 
 settings = Settings()
