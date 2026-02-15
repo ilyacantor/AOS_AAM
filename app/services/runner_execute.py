@@ -94,17 +94,15 @@ async def execute_job_inline(job_id: str) -> dict:
         }
 
         # --- Body mapping (flat, per DCL contract) ---
-        #   source_system  ← manifest.source.system
-        #   tenant_id      ← manifest.target.tenant_id
-        #   snapshot_name  ← manifest.target.snapshot_name
-        #   run_timestamp  ← manifest.provenance.run_timestamp
-        #   rows           ← the actual transformed data list
         provenance = manifest.get("provenance", {})
+        run_ts = provenance.get("run_timestamp", datetime.utcnow().isoformat())
         payload = {
             "source_system": system,
-            "tenant_id": target.get("tenant_id"),
-            "snapshot_name": target.get("snapshot_name"),
-            "run_timestamp": provenance.get("run_timestamp", datetime.utcnow().isoformat()),
+            "tenant_id": target.get("tenant_id") or "default",
+            "snapshot_name": target.get("snapshot_name") or f"snap_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}",
+            "run_timestamp": run_ts,
+            "schema_version": schema_hash[:16],
+            "row_count": len(extracted_data),
             "rows": extracted_data,
         }
 
