@@ -62,7 +62,7 @@ def _get_pool() -> psycopg2.pool.ThreadedConnectionPool:
 
 
 def _get_conn():
-    """Get a connection from the pool with retry logic."""
+    """Get a connection from the pool — no health-check round trip."""
     for attempt in range(2):
         pool = _get_pool()
         try:
@@ -70,16 +70,6 @@ def _get_conn():
             conn.autocommit = True
             if conn.closed:
                 pool.putconn(conn, close=True)
-                continue
-            try:
-                cur = conn.cursor()
-                cur.execute("SELECT 1")
-                cur.close()
-            except Exception:
-                try:
-                    pool.putconn(conn, close=True)
-                except Exception:
-                    pass
                 continue
             return conn
         except (psycopg2.pool.PoolError, psycopg2.OperationalError):
@@ -176,24 +166,41 @@ def insert_many(table: str, data: list[dict]) -> list[dict]:
     if not data:
         return []
     cols = list(data[0].keys())
-    col_ids = [_ident(c) for c in cols]
-    placeholders = sql.SQL(", ").join([sql.Placeholder()] * len(cols))
-    base_query = sql.SQL("INSERT INTO {} ({}) VALUES ({}) RETURNING *").format(
-        _ident(table),
-        sql.SQL(", ").join(col_ids),
-        placeholders,
-    )
+    col_ids = sql.SQL(", ").join(_ident(c) for c in cols)
+    template = sql.SQL("({})").format(sql.SQL(", ").join(sql.Placeholder() for _ in cols))
+    query_head = sql.SQL("INSERT INTO {} ({}) VALUES ").format(_ident(table), col_ids)
+
+    values_list = [tuple(row.get(c) for c in cols) for row in data]
 
     conn = _get_conn()
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        results = []
-        for row in data:
-            vals = tuple(row.get(c) for c in cols)
-            cur.execute(base_query, vals)
+        query_str = query_head.as_string(conn)
+        tpl_str = template.as_string(conn)
+        full_sql = query_str + ", ".join(
+            cur.mogrify(tpl_str, vals).decode() for vals in values_list
+        ) + " RETURNING *"
+        cur.execute(full_sql)
+        if cur.description:
+            return [dict(r) for r in cur.fetchall()]
+        return []
+    except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+        _log.warning("insert_many conn error (retrying): %s", e)
+        _put_conn(conn, broken=True)
+        conn = _get_conn()
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            query_str = query_head.as_string(conn)
+            tpl_str = template.as_string(conn)
+            full_sql = query_str + ", ".join(
+                cur.mogrify(tpl_str, vals).decode() for vals in values_list
+            ) + " RETURNING *"
+            cur.execute(full_sql)
             if cur.description:
-                results.extend([dict(r) for r in cur.fetchall()])
-        return results
+                return [dict(r) for r in cur.fetchall()]
+            return []
+        finally:
+            _put_conn(conn)
     except Exception as e:
         _log.error("insert_many error: %s", e)
         raise
@@ -356,6 +363,7 @@ def update_many_concurrent(
     ok = 0
     try:
         cur = conn.cursor()
+        stmts = []
         for filt, data in updates:
             set_parts = []
             params = []
@@ -371,11 +379,10 @@ def update_many_concurrent(
                 sql.SQL(", ").join(set_parts),
                 sql.SQL(" AND ").join(where_parts),
             )
-            try:
-                cur.execute(query, tuple(params))
-                ok += 1
-            except Exception as exc:
-                _log.warning("batch update failed for one row: %s", exc)
+            stmts.append(cur.mogrify(query.as_string(conn), tuple(params)).decode())
+        if stmts:
+            cur.execute("; ".join(stmts))
+            ok = len(stmts)
     except Exception as exc:
         _log.error("update_many_concurrent error: %s", exc)
         _put_conn(conn, broken=True)

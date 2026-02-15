@@ -32,22 +32,17 @@ def reset_aod_state():
     """
     Clear candidate/fabric/SOR data so a fresh handoff can repopulate it.
 
-    Preserves collectors (infrastructure config) only.
-    The handoff log must be cleared because process_handoff() uses it for
-    idempotency checks — a stale log entry would short-circuit re-ingestion.
-    
-    Uses a single connection with DELETE (fastest safe approach on Supabase pooler).
+    Uses a single multi-statement DELETE for one network round trip.
     """
     from psycopg2 import sql as psql
 
+    stmts = psql.SQL("; ").join(
+        psql.SQL("DELETE FROM {}").format(sb._ident(t)) for t in ALLOWED_TABLES
+    )
     conn = sb._get_conn()
     try:
         cur = conn.cursor()
-        for table in ALLOWED_TABLES:
-            try:
-                cur.execute(psql.SQL("DELETE FROM {}").format(sb._ident(table)))
-            except Exception:
-                pass
+        cur.execute(stmts)
     except Exception as e:
         sb._put_conn(conn, broken=True)
         raise
