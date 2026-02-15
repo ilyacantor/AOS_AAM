@@ -274,6 +274,34 @@ New table `farm_verifications`:
 
 ---
 
+## RACI Refinements (Post-Validation)
+
+Three hardening requirements from RACI review:
+
+### Refinement A: Runner Heartbeat / Dead-Letter (RACI Row 48)
+
+Risk: Runner crashes silently → AAM thinks job is "running" forever.
+Fix: `PUT /api/runners/callback/{run_id}` — Runner MUST call on success or failure.
+Stale job reaper: background sweep marks jobs "running" for >timeout_seconds as `timed_out`.
+Added to runner_jobs: `last_heartbeat` column (TEXT timestamp).
+
+### Refinement B: Secret-Reference-Only Manifests (RACI Row 82)
+
+Risk: Raw credentials persisted in runner_jobs.manifest JSON or logs.
+Fix: JobManifest.source.credentials_ref and target.auth_token_ref are ONLY vault URIs
+(`vault://aam/secrets/xxx`). Runner resolves at runtime via env var or vault API.
+The manifest stored in DB never contains plaintext secrets.
+
+### Refinement C: x-schema-hash Header on Ingest (RACI Row 63)
+
+Risk: Source schema changes silently between runs → stale data in DCL.
+Fix: Runner computes SHA-256 of the data structure (sorted field names + types)
+and sends as `x-schema-hash` header. DCL compares to previous run for same pipe.
+If mismatch → stores the data but flags a "schema_drift" event.
+Added to dcl_ingested: `schema_hash` column (TEXT).
+
+---
+
 ## Key Design Decisions
 
 1. **v1 = inline execution** — Runners execute in-process (asyncio tasks)
@@ -284,7 +312,7 @@ New table `farm_verifications`:
    the runner_jobs table. No in-flight modifications.
 
 3. **Credentials are references** — `vault://aam/secrets/xxx` strings only.
-   v1 resolves these from env vars / config. v2 integrates with real vault.
+   Runner resolves at runtime. Manifest in DB never has plaintext secrets.
 
 4. **DCL ingest validates run_id** — only data from authorized runner jobs
    is accepted. No open ingest endpoint.
@@ -295,3 +323,9 @@ New table `farm_verifications`:
 6. **Schema normalization at Runner** — Option A from the discussion.
    The transform.schema_map in the manifest tells the Runner how to
    map source fields to DCL semantic fields before pushing.
+
+7. **Schema drift detection at ingest** — x-schema-hash header compared
+   to previous run. Mismatch → drift event flagged, data still accepted.
+
+8. **Dead-letter reaper** — Jobs stuck in "running" past timeout_seconds
+   are marked "timed_out" by a periodic sweep.
