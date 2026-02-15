@@ -25,6 +25,7 @@ from ..db import (
     get_aod_reconciliation,
     list_tee_requests,
     list_handoff_logs,
+    get_latest_aod_run,
 )
 
 router = APIRouter(include_in_schema=False)
@@ -1413,7 +1414,23 @@ async def ui_drift_list(status: Optional[str] = Query(None)):
 
 @router.get("/ui/topology", response_class=HTMLResponse, include_in_schema=False)
 async def ui_topology():
-    """Topology Visualization Screen - Interactive graph of pipes, planes, and sources"""
+    """Topology Visualization Screen"""
+    latest_run = get_latest_aod_run()
+    if latest_run:
+        _snap = latest_run.get("snapshot_name") or "Unnamed"
+        _pipes = latest_run.get("candidates_accepted", 0)
+        _ts = (latest_run.get("handoff_timestamp") or "")[:10]
+        _rid = latest_run.get("aod_run_id", "")
+        _run_html = (
+            f'<div class="sb-val" style="color:#f0abfc;">{_snap}</div>'
+            f'<div class="sb-kpi"><span>{_pipes}</span> pipes</div>'
+            f'<div class="sb-dim">{_ts}</div>'
+        )
+        _recon_html = f'<a href="/ui/reconcile/{_rid}" class="sb-link">Reconcile</a>'
+    else:
+        _run_html = '<div class="sb-val" style="color:#fb923c;">No AOD data</div>'
+        _recon_html = ''
+
     return HTMLResponse(content=f"""
 <!DOCTYPE html>
 <html>
@@ -1423,205 +1440,164 @@ async def ui_topology():
     {UI_STYLE}
     <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
     <style>
-        #topology-container {{
-            width: 100%;
-            height: 600px;
+        .topo-page {{ padding: 0 12px 12px; }}
+        .topo-layout {{ display: flex; gap: 10px; height: calc(100vh - 60px); }}
+        .topo-sidebar {{
+            width: 176px; flex-shrink: 0;
+            display: flex; flex-direction: column;
+            background: rgba(30, 41, 59, 0.5);
             border: 1px solid var(--slate-700);
             border-radius: 8px;
-            background: rgba(15, 23, 42, 0.8);
+            overflow-y: auto;
         }}
-        .topology-controls {{
-            display: flex;
-            gap: 8px;
-            margin-bottom: 12px;
-            flex-wrap: wrap;
-            align-items: center;
+        .topo-sidebar::-webkit-scrollbar {{ width: 3px; }}
+        .topo-sidebar::-webkit-scrollbar-thumb {{ background: var(--slate-700); border-radius: 3px; }}
+        .topo-main {{ flex: 1; min-width: 0; position: relative; }}
+        #topology-container {{ width: 100%; height: 100%; border: 1px solid var(--slate-700); border-radius: 8px; background: rgba(15, 23, 42, 0.8); }}
+        .sb-section {{ padding: 8px 10px; }}
+        .sb-section + .sb-section {{ border-top: 1px solid rgba(51, 65, 85, 0.5); }}
+        .sb-title {{ font-size: 0.58rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--slate-500); margin-bottom: 5px; font-weight: 600; }}
+        .sb-val {{ font-weight: 600; font-size: 0.82rem; line-height: 1.25; word-break: break-word; color: var(--slate-200); }}
+        .sb-kpi {{ margin-top: 3px; font-size: 0.7rem; color: var(--slate-400); }}
+        .sb-kpi span {{ font-size: 1.15rem; font-weight: 700; color: var(--cyan-400); margin-right: 2px; }}
+        .sb-dim {{ font-size: 0.62rem; color: var(--slate-500); margin-top: 2px; }}
+        .sb-link {{ font-size: 0.68rem; color: var(--slate-400); display: inline-block; margin-top: 4px; }}
+        .sb-stats {{ display: flex; flex-direction: column; gap: 2px; }}
+        .sb-stat {{ font-size: 0.7rem; color: var(--slate-400); display: flex; justify-content: space-between; }}
+        .sb-stat span:last-child {{ color: var(--cyan-400); font-weight: 600; }}
+        .sb-btn {{
+            width: 100%; padding: 4px 8px; border-radius: 4px;
+            font-size: 0.7rem; font-weight: 500; cursor: pointer;
+            border: 1px solid var(--slate-700); background: transparent;
+            color: var(--slate-300); text-align: left;
+            transition: all 0.15s; font-family: inherit; margin-bottom: 2px;
         }}
-        .topology-header {{
-            display: flex;
-            align-items: baseline;
-            gap: 16px;
-            flex-wrap: wrap;
-            margin-bottom: 12px;
+        .sb-btn:hover {{ background: rgba(34, 211, 238, 0.08); border-color: rgba(34, 211, 238, 0.3); color: var(--cyan-400); }}
+        .sb-btn:disabled {{ opacity: 0.4; cursor: not-allowed; }}
+        .sb-btn-accent {{ border-color: rgba(251, 146, 60, 0.3); color: #fb923c; }}
+        .sb-btn-accent:hover {{ background: rgba(251, 146, 60, 0.1); }}
+        .sb-select {{
+            width: 100%; padding: 3px 6px; font-size: 0.7rem;
+            background: rgba(15, 23, 42, 0.6); border: 1px solid var(--slate-700);
+            border-radius: 4px; color: var(--slate-300);
+            font-family: inherit; cursor: pointer; margin-bottom: 3px;
         }}
-        .topology-header h1 {{
-            margin: 0;
-        }}
-        .topology-header .inline-stats {{
-            display: flex;
-            gap: 12px;
-            font-size: 0.8rem;
-            color: var(--slate-400);
-        }}
-        .topology-header .inline-stats span {{
-            color: var(--cyan-400);
-            font-weight: 600;
-        }}
-        .legend-below {{
-            display: flex;
-            gap: 16px;
-            flex-wrap: wrap;
-            margin-top: 12px;
-            padding: 10px 16px;
-            background: rgba(30, 41, 59, 0.6);
-            border-radius: 6px;
-            justify-content: center;
-        }}
-        .legend-item {{
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            font-size: 0.85rem;
-            color: var(--slate-300);
-        }}
-        .legend-shape {{
-            width: 18px;
-            height: 18px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }}
-        .legend-shape svg {{
-            width: 16px;
-            height: 16px;
-        }}
+        .sb-select:focus {{ outline: none; border-color: rgba(34, 211, 238, 0.4); }}
+        .sb-legend {{ display: flex; flex-direction: column; gap: 2px; }}
+        .sb-legend-item {{ display: flex; align-items: center; gap: 5px; font-size: 0.65rem; color: var(--slate-400); }}
+        .sb-legend-item svg {{ width: 10px; height: 10px; flex-shrink: 0; }}
         .node-details {{
-            position: absolute;
-            top: 100px;
-            right: 24px;
-            width: 300px;
-            background: rgba(30, 41, 59, 0.95);
-            border: 1px solid var(--slate-700);
-            border-radius: 8px;
-            padding: 16px;
-            display: none;
-            z-index: 100;
+            position: absolute; top: 10px; right: 10px; width: 260px;
+            background: rgba(30, 41, 59, 0.95); border: 1px solid var(--slate-700);
+            border-radius: 8px; padding: 12px; display: none; z-index: 100;
         }}
-        .node-details.visible {{
-            display: block;
-        }}
-        .node-details h3 {{
-            margin-bottom: 12px;
-            color: var(--cyan-400);
-        }}
-        .node-details .close-btn {{
-            position: absolute;
-            top: 8px;
-            right: 8px;
-            background: none;
-            border: none;
-            color: var(--slate-400);
-            cursor: pointer;
-            font-size: 1.2rem;
-        }}
-        .filter-group {{
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }}
-        .filter-group label {{
-            font-size: 0.85rem;
-            color: var(--slate-400);
-        }}
+        .node-details.visible {{ display: block; }}
+        .node-details h3 {{ margin-bottom: 8px; color: var(--cyan-400); font-size: 0.85rem; }}
+        .node-details .close-btn {{ position: absolute; top: 6px; right: 8px; background: none; border: none; color: var(--slate-400); cursor: pointer; font-size: 1rem; }}
     </style>
 </head>
 <body>
     {ui_nav("topology")}
-    <div class="container">
-        {aod_run_banner(extra_buttons='<button class="btn btn-sm" style="font-size: 0.75rem;" id="btn-run-inference" data-testid="btn-run-inference">Run Inference</button><button class="btn btn-sm" style="font-size: 0.75rem;" id="btn-export-dcl" data-testid="btn-export-dcl">Export to DCL</button>')}
-        <div class="topology-header">
-            <h1>Topology</h1>
-            <div class="inline-stats">
-                <div><span id="stat-pipes">-</span> Pipes</div>
-                <div><span id="stat-fabrics">-</span> Fabrics</div>
-                <div><span id="stat-sors">-</span> SORs</div>
-                <div><span id="stat-drift">-</span> Drift</div>
+    <div class="topo-page">
+    <div class="topo-layout">
+        <aside class="topo-sidebar">
+            <div class="sb-section">
+                <div class="sb-title">Run</div>
+                {_run_html}
+                {_recon_html}
             </div>
-        </div>
-
-        <div class="topology-controls">
-            <div class="filter-group">
-                <label>Filter:</label>
-                <select id="asset-filter" onchange="applyTopologyFilters()">
-                    <option value="all" selected>All</option>
-                    <option value="sors">SORs</option>
-                    <option value="fabrics">Fabrics</option>
+            <div class="sb-section">
+                <div class="sb-title">Topology</div>
+                <div class="sb-stats">
+                    <div class="sb-stat"><span>Fabrics</span> <span id="stat-fabrics">-</span></div>
+                    <div class="sb-stat"><span>SORs</span> <span id="stat-sors">-</span></div>
+                    <div class="sb-stat"><span>Drift</span> <span id="stat-drift">-</span></div>
+                </div>
+            </div>
+            <div class="sb-section">
+                <div class="sb-title">Actions</div>
+                <button class="sb-btn sb-btn-accent" onclick="fetchAodData()" id="fetch-aod-btn">Fetch AOD Data</button>
+                <button class="sb-btn" id="btn-run-inference">Run Inference</button>
+                <button class="sb-btn" id="btn-export-dcl">Export to DCL</button>
+            </div>
+            <div class="sb-section">
+                <div class="sb-title">View</div>
+                <select class="sb-select" id="asset-filter" onchange="applyTopologyFilters()">
+                    <option value="all" selected>All Assets</option>
+                    <option value="sors">SORs Only</option>
+                    <option value="fabrics">Fabrics Only</option>
                     <option value="API_GATEWAY">API Gateway</option>
                     <option value="IPAAS">iPaaS</option>
                     <option value="EVENT_BUS">Event Bus</option>
                     <option value="DATA_WAREHOUSE">Data Warehouse</option>
                 </select>
-            </div>
-            <div class="filter-group">
-                <label>Detail Level:</label>
-                <select id="detail-filter" onchange="applyTopologyFilters()">
-                    <option value="summary" selected>Summary View</option>
-                    <option value="all">All Assets (slow)</option>
+                <select class="sb-select" id="detail-filter" onchange="applyTopologyFilters()">
+                    <option value="summary" selected>Summary</option>
+                    <option value="all">All Nodes</option>
                 </select>
-            </div>
-            <div class="filter-group">
-                <label>Layout:</label>
-                <select id="layout-select" onchange="handleLayoutAction(this.value)">
+                <select class="sb-select" id="layout-select" onchange="handleLayoutAction(this.value)">
                     <option value="physics">Force-Directed</option>
                     <option value="hierarchical">Hierarchical</option>
                     <option value="circular">Circular</option>
-                    <option disabled>───────────</option>
+                    <option disabled>─────────</option>
                     <option value="_fit">Fit to Screen</option>
-                    <option value="_unlock">Unlock Positions</option>
+                    <option value="_unlock">Unlock Nodes</option>
                 </select>
+                <button class="sb-btn" onclick="resetView()" style="margin-top:1px;">Reset</button>
             </div>
-            <button class="btn" onclick="resetView()">Reset View</button>
-            <button class="btn btn-success" onclick="refreshData()">Refresh Data</button>
-        </div>
-
-        <div style="padding-right: 80px;">
-        <div id="topology-container"></div>
-        </div>
-
-        <div class="legend-below">
-            <div class="legend-item">
-                <div class="legend-shape"><svg viewBox="0 0 12 12"><polygon points="6,0 12,6 6,12 0,6" fill="#a78bfa"/></svg></div>
-                <span>Gateway</span>
+            <div class="sb-section">
+                <div class="sb-title">Legend</div>
+                <div class="sb-legend">
+                    <div class="sb-legend-item"><svg viewBox="0 0 12 12"><polygon points="6,0 12,6 6,12 0,6" fill="#a78bfa"/></svg> Gateway</div>
+                    <div class="sb-legend-item"><svg viewBox="0 0 12 12"><polygon points="6,0 12,6 6,12 0,6" fill="#22d3ee"/></svg> iPaaS</div>
+                    <div class="sb-legend-item"><svg viewBox="0 0 12 12"><polygon points="6,0 12,6 6,12 0,6" fill="#f97316"/></svg> Event Bus</div>
+                    <div class="sb-legend-item"><svg viewBox="0 0 12 12"><polygon points="6,0 12,6 6,12 0,6" fill="#10b981"/></svg> Warehouse</div>
+                    <div class="sb-legend-item"><svg viewBox="0 0 12 12"><circle cx="6" cy="6" r="5" fill="#60a5fa"/></svg> Pipe</div>
+                    <div class="sb-legend-item"><svg viewBox="0 0 12 12"><rect x="1" y="1" width="10" height="10" fill="#94a3b8"/></svg> Source</div>
+                    <div class="sb-legend-item"><svg viewBox="0 0 12 12"><polygon points="6,1 11,11 1,11" fill="#c084fc"/></svg> Candidate</div>
+                    <div class="sb-legend-item"><svg viewBox="0 0 12 12"><rect x="1" y="1" width="10" height="10" fill="#f59e0b" stroke="#fbbf24" stroke-width="2"/></svg> SOR</div>
+                </div>
             </div>
-            <div class="legend-item">
-                <div class="legend-shape"><svg viewBox="0 0 12 12"><polygon points="6,0 12,6 6,12 0,6" fill="#22d3ee"/></svg></div>
-                <span>iPaaS</span>
+        </aside>
+        <main class="topo-main">
+            <div id="topology-container"></div>
+            <div id="node-details" class="node-details">
+                <button class="close-btn" onclick="closeDetails()">&times;</button>
+                <h3 id="detail-title">Node Details</h3>
+                <div id="detail-content"></div>
             </div>
-            <div class="legend-item">
-                <div class="legend-shape"><svg viewBox="0 0 12 12"><polygon points="6,0 12,6 6,12 0,6" fill="#f97316"/></svg></div>
-                <span>Event Bus</span>
-            </div>
-            <div class="legend-item">
-                <div class="legend-shape"><svg viewBox="0 0 12 12"><polygon points="6,0 12,6 6,12 0,6" fill="#10b981"/></svg></div>
-                <span>Warehouse</span>
-            </div>
-            <div class="legend-item">
-                <div class="legend-shape"><svg viewBox="0 0 12 12"><circle cx="6" cy="6" r="5" fill="#60a5fa"/></svg></div>
-                <span>Pipe</span>
-            </div>
-            <div class="legend-item">
-                <div class="legend-shape"><svg viewBox="0 0 12 12"><rect x="1" y="1" width="10" height="10" fill="#94a3b8"/></svg></div>
-                <span>Source</span>
-            </div>
-            <div class="legend-item">
-                <div class="legend-shape"><svg viewBox="0 0 12 12"><polygon points="6,1 11,11 1,11" fill="#c084fc"/></svg></div>
-                <span>Candidate</span>
-            </div>
-            <div class="legend-item">
-                <div class="legend-shape"><svg viewBox="0 0 12 12"><rect x="1" y="1" width="10" height="10" fill="#f59e0b" stroke="#fbbf24" stroke-width="2"/></svg></div>
-                <span>SOR</span>
-            </div>
-        </div>
-
-        <div id="node-details" class="node-details">
-            <button class="close-btn" onclick="closeDetails()">&times;</button>
-            <h3 id="detail-title">Node Details</h3>
-            <div id="detail-content"></div>
-        </div>
+        </main>
+    </div>
     </div>
     <div id="toast" class="toast"></div>
 
     <script>
+        var _fetchRunning = false;
+        async function fetchAodData() {{
+            if (_fetchRunning) return;
+            _fetchRunning = true;
+            var btn = document.getElementById('fetch-aod-btn');
+            btn.textContent = 'Fetching...';
+            btn.disabled = true;
+            try {{
+                var res = await fetch('/api/handoff/aod/fetch', {{ method: 'POST' }});
+                var data = await res.json();
+                if (res.ok) {{
+                    window.location.reload();
+                }} else {{
+                    showToast(data.detail || 'Fetch failed', 'error');
+                    btn.textContent = 'Fetch AOD Data';
+                    btn.disabled = false;
+                    _fetchRunning = false;
+                }}
+            }} catch(e) {{
+                showToast('Fetch failed: ' + e.message, 'error');
+                btn.textContent = 'Fetch AOD Data';
+                btn.disabled = false;
+                _fetchRunning = false;
+            }}
+        }}
+
         let network = null;
         let allNodes = [];
         let allEdges = [];
@@ -1713,10 +1689,8 @@ async def ui_topology():
                 arrows: {{ to: {{ enabled: true, scaleFactor: 0.5 }} }}
             }}));
 
-            // Update stats
+            // Update sidebar stats
             if (data.stats) {{
-                // Canonical KPIs: Pipes (= candidates), Fabrics, SORs
-                document.getElementById('stat-pipes').textContent = data.stats.total_candidates || 0;
                 document.getElementById('stat-fabrics').textContent = data.stats.fabrics || 0;
                 document.getElementById('stat-sors').textContent = data.stats.sors || 0;
                 document.getElementById('stat-drift').textContent = data.stats.pipes_with_drift || 0;
@@ -1918,7 +1892,7 @@ async def ui_topology():
 
         function resetView() {{
             document.getElementById('asset-filter').value = 'all';
-            document.getElementById('detail-filter').value = 'full';
+            document.getElementById('detail-filter').value = 'summary';
             document.getElementById('layout-select').value = 'physics';
             _lastLayout = 'physics';
             physicsEnabled = true;
