@@ -27,6 +27,7 @@ from ..db import (
     list_handoff_logs,
     get_latest_aod_run,
 )
+from ..db.runner_jobs import list_runner_jobs
 
 router = APIRouter(include_in_schema=False)
 
@@ -59,6 +60,17 @@ async def ui_pipes_list(
             drift_by_pipe[pid]["total"] += 1
             if d.get("status") == "open":
                 drift_by_pipe[pid]["open"] += 1
+
+    # Fetch latest runner job status per pipe
+    try:
+        all_jobs = list_runner_jobs(limit=200)
+    except Exception:
+        all_jobs = []
+    latest_job_by_pipe = {}
+    for j in all_jobs:
+        pid = j.get("pipe_id")
+        if pid and pid not in latest_job_by_pipe:
+            latest_job_by_pipe[pid] = j
     
     fabric_plane_colors = {**PLANE_TYPE_COLORS, "UNMAPPED": "#ef4444"}
     
@@ -80,7 +92,27 @@ async def ui_pipes_list(
         else:
             drift_status = "Healthy"
             drift_class = "badge-connected"
-        
+
+        # Runner status pill
+        latest_job = latest_job_by_pipe.get(pipe_id)
+        if latest_job:
+            job_status = latest_job.get("status", "")
+            job_id = latest_job.get("job_id", "")
+            rows_done = latest_job.get("rows_transferred", 0)
+            runner_pill_map = {
+                "queued": ("Queued", "runner-queued"),
+                "dispatched": ("Dispatched", "runner-queued"),
+                "running": ("Running", "runner-running"),
+                "pushing": ("Pushing", "runner-running"),
+                "completed": (f"Done ({rows_done}r)", "runner-completed"),
+                "failed": ("Failed", "runner-failed"),
+                "timed_out": ("Timeout", "runner-failed"),
+            }
+            pill_text, pill_class = runner_pill_map.get(job_status, (job_status, "runner-queued"))
+            runner_cell = f'<span class="runner-pill {pill_class}" id="pill-{pipe_id}" title="{job_id}">{pill_text}</span>'
+        else:
+            runner_cell = f'<button class="btn btn-sm btn-run" data-pipe-id="{pipe_id}" id="btn-run-{pipe_id}" onclick="dispatchRunner(\'{pipe_id}\')">Run</button>'
+
         rows_html += f"""
         <tr data-testid="pipe-row-{pipe_id}">
             <td><span class="fabric-badge" style="background:{fabric_color}20;color:{fabric_color};border:1px solid {fabric_color}40;">{pipe_fabric}</span></td>
@@ -90,7 +122,7 @@ async def ui_pipes_list(
             <td>{', '.join(entity_scope[:3])}{'...' if len(entity_scope) > 3 else ''}</td>
             <td>{len(trust_labels)}</td>
             <td><span class="badge {drift_class}">{drift_status}</span></td>
-            <td>{', '.join(owner_signals[:2]) if owner_signals else '-'}</td>
+            <td class="runner-cell">{runner_cell}</td>
         </tr>
         """
     
@@ -211,6 +243,49 @@ async def ui_pipes_list(
         .modal-btn-confirm:hover {{
             background: #06b6d4;
         }}
+        .runner-pill {{
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+            white-space: nowrap;
+        }}
+        .runner-queued {{
+            background: rgba(148, 163, 184, 0.2);
+            color: #94a3b8;
+            border: 1px solid rgba(148, 163, 184, 0.3);
+        }}
+        .runner-running {{
+            background: rgba(59, 130, 246, 0.2);
+            color: #60a5fa;
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            animation: pulse-blue 1.5s infinite;
+        }}
+        .runner-completed {{
+            background: rgba(34, 197, 94, 0.2);
+            color: #4ade80;
+            border: 1px solid rgba(34, 197, 94, 0.3);
+        }}
+        .runner-failed {{
+            background: rgba(248, 113, 113, 0.2);
+            color: #f87171;
+            border: 1px solid rgba(248, 113, 113, 0.3);
+        }}
+        .btn-run {{
+            padding: 2px 12px !important;
+            font-size: 0.7rem !important;
+            border-radius: 12px;
+        }}
+        .runner-cell {{
+            min-width: 80px;
+            text-align: center;
+        }}
+        @keyframes pulse-blue {{
+            0%, 100% {{ opacity: 1; }}
+            50% {{ opacity: 0.6; }}
+        }}
     </style>
 </head>
 <body>
@@ -234,7 +309,7 @@ async def ui_pipes_list(
                     <th>Entity Scope</th>
                     <th>Trust Labels</th>
                     <th>Drift</th>
-                    <th>Owner</th>
+                    <th>Runner</th>
                 </tr>
             </thead>
             <tbody id="pipes-body">{rows_html}</tbody>
@@ -296,7 +371,90 @@ async def ui_pipes_list(
             if (filter && filter !== 'all') params.set('filter', filter);
             window.location.href = '/ui/pipes' + (params.toString() ? '?' + params.toString() : '');
         }}
-        
+
+        async function dispatchRunner(pipeId) {{
+            const btn = document.getElementById('btn-run-' + pipeId);
+            if (!btn) return;
+            btn.disabled = true;
+            btn.textContent = '...';
+
+            try {{
+                const res = await fetch('/api/runners/dispatch', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{ pipe_id: pipeId, trigger: 'manual' }})
+                }});
+                const data = await res.json();
+                if (!res.ok) {{
+                    showToast('Dispatch failed: ' + (data.detail || res.status), 'error');
+                    btn.disabled = false;
+                    btn.textContent = 'Run';
+                    return;
+                }}
+                // Replace button with status pill
+                const cell = btn.parentElement;
+                const jobId = data.job_id || '';
+                const status = data.status || 'queued';
+                updateRunnerPill(cell, pipeId, status, data.rows_transferred || 0, jobId);
+                showToast('Runner dispatched for ' + pipeId.substring(0, 8) + '...', 'success');
+
+                // If already completed/failed (inline v1), no need to poll
+                if (status === 'completed' || status === 'failed') return;
+
+                // Poll for status updates
+                pollRunnerStatus(pipeId, jobId);
+            }} catch (e) {{
+                showToast('Error: ' + e.message, 'error');
+                btn.disabled = false;
+                btn.textContent = 'Run';
+            }}
+        }}
+
+        function updateRunnerPill(cell, pipeId, status, rows, jobId) {{
+            const pillMap = {{
+                'queued':    ['Queued',    'runner-queued'],
+                'dispatched':['Dispatched','runner-queued'],
+                'running':   ['Running',   'runner-running'],
+                'pushing':   ['Pushing',   'runner-running'],
+                'completed': ['Done (' + rows + 'r)', 'runner-completed'],
+                'failed':    ['Failed',    'runner-failed'],
+                'timed_out': ['Timeout',   'runner-failed'],
+            }};
+            const [text, cls] = pillMap[status] || [status, 'runner-queued'];
+            cell.innerHTML = '<span class="runner-pill ' + cls + '" id="pill-' + pipeId + '" title="' + jobId + '">' + text + '</span>';
+        }}
+
+        async function pollRunnerStatus(pipeId, jobId) {{
+            const terminal = ['completed', 'failed', 'timed_out'];
+            let attempts = 0;
+            const maxAttempts = 30;
+
+            const poll = async () => {{
+                attempts++;
+                if (attempts > maxAttempts) return;
+                try {{
+                    const res = await fetch('/api/runners/jobs/' + jobId);
+                    if (!res.ok) return;
+                    const job = await res.json();
+                    const status = job.status || 'queued';
+                    const pill = document.getElementById('pill-' + pipeId);
+                    if (pill) {{
+                        updateRunnerPill(pill.parentElement, pipeId, status, job.rows_transferred || 0, jobId);
+                    }}
+                    if (terminal.includes(status)) {{
+                        if (status === 'completed') {{
+                            showToast('Runner completed: ' + (job.rows_transferred || 0) + ' rows transferred', 'success');
+                        }} else {{
+                            showToast('Runner ' + status + ': ' + (job.error_message || ''), 'error');
+                        }}
+                        return;
+                    }}
+                }} catch (e) {{ /* ignore polling errors */ }}
+                setTimeout(poll, 1000);
+            }};
+            setTimeout(poll, 500);
+        }}
+
     </script>
 </body>
 </html>
@@ -375,6 +533,8 @@ async def ui_pipe_detail(pipe_id: str):
     <div class="container">
         <div class="controls">
             <a href="/ui/pipes" class="btn" data-testid="btn-back">← Back to Pipes</a>
+            <button class="btn btn-success" id="btn-dispatch" data-testid="btn-dispatch">Dispatch Runner</button>
+            <span id="runner-status-pill" style="margin-left:8px;"></span>
             <button class="btn" id="btn-recompute" data-testid="btn-recompute">Recompute Declaration</button>
             <button class="btn" id="btn-create-tee" data-testid="btn-create-tee">Create Tee Request</button>
         </div>
@@ -530,6 +690,80 @@ async def ui_pipe_detail(pipe_id: str):
                 showToast('Error: ' + e.message, 'error');
             }}
             this.disabled = false;
+        }});
+
+        // --- Dispatch Runner ---
+        document.getElementById('btn-dispatch').addEventListener('click', async function() {{
+            const btn = this;
+            btn.disabled = true;
+            btn.textContent = 'Dispatching...';
+            const pill = document.getElementById('runner-status-pill');
+
+            try {{
+                const res = await fetch('/api/runners/dispatch', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{ pipe_id: '{pipe_id}', trigger: 'manual' }})
+                }});
+                const data = await res.json();
+                if (!res.ok) {{
+                    showToast('Dispatch failed: ' + (data.detail || res.status), 'error');
+                    btn.disabled = false;
+                    btn.textContent = 'Dispatch Runner';
+                    return;
+                }}
+
+                const jobId = data.job_id || '';
+                const status = data.status || 'queued';
+                const rows = data.rows_transferred || 0;
+
+                function setPill(s, r) {{
+                    const map = {{
+                        'queued':    ['Queued',    '#94a3b8', 'rgba(148,163,184,0.2)'],
+                        'dispatched':['Dispatched','#94a3b8', 'rgba(148,163,184,0.2)'],
+                        'running':   ['Running',   '#60a5fa', 'rgba(59,130,246,0.2)'],
+                        'pushing':   ['Pushing',   '#60a5fa', 'rgba(59,130,246,0.2)'],
+                        'completed': ['Done (' + r + ' rows)', '#4ade80', 'rgba(34,197,94,0.2)'],
+                        'failed':    ['Failed',    '#f87171', 'rgba(248,113,113,0.2)'],
+                        'timed_out': ['Timeout',   '#f87171', 'rgba(248,113,113,0.2)'],
+                    }};
+                    const [text, color, bg] = map[s] || [s, '#94a3b8', 'rgba(148,163,184,0.2)'];
+                    pill.innerHTML = '<span style="display:inline-block;padding:4px 12px;border-radius:12px;font-size:0.8rem;font-weight:600;color:' + color + ';background:' + bg + ';border:1px solid ' + color + '40;">' + text + '</span>';
+                }}
+
+                setPill(status, rows);
+                showToast('Runner dispatched: ' + jobId, 'success');
+                btn.textContent = 'Dispatch Runner';
+                btn.disabled = false;
+
+                // Poll if not terminal
+                const terminal = ['completed', 'failed', 'timed_out'];
+                if (terminal.includes(status)) return;
+
+                let attempts = 0;
+                const pollDetail = async () => {{
+                    attempts++;
+                    if (attempts > 30) return;
+                    try {{
+                        const r = await fetch('/api/runners/jobs/' + jobId);
+                        if (!r.ok) return;
+                        const job = await r.json();
+                        setPill(job.status, job.rows_transferred || 0);
+                        if (terminal.includes(job.status)) {{
+                            if (job.status === 'completed') showToast('Runner completed: ' + (job.rows_transferred || 0) + ' rows', 'success');
+                            else showToast('Runner ' + job.status, 'error');
+                            return;
+                        }}
+                    }} catch (e) {{}}
+                    setTimeout(pollDetail, 1000);
+                }};
+                setTimeout(pollDetail, 500);
+
+            }} catch (e) {{
+                showToast('Error: ' + e.message, 'error');
+                btn.disabled = false;
+                btn.textContent = 'Dispatch Runner';
+            }}
         }});
     </script>
 </body>
