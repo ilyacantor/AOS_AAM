@@ -4,6 +4,7 @@ Runner API — dispatch jobs, list jobs, runner callback.
 RACI: AAM is A/R for Collector Run Execution (Row 43) and Track Collector Runs (Row 48).
 """
 import asyncio
+import httpx
 from fastapi import APIRouter, HTTPException, Header, Query
 from typing import Optional
 
@@ -28,7 +29,7 @@ _log = get_logger("routers.runners")
 
 router = APIRouter(prefix="/api/runners", tags=["Runners"])
 
-CONCURRENCY = 10
+CONCURRENCY = 30
 
 
 @router.post("/dispatch")
@@ -42,7 +43,6 @@ async def dispatch_single(req: RunnerDispatchRequest):
             req.pipe_id,
             req.trigger,
         )
-        # v1: execute inline immediately after dispatch
         exec_result = await execute_job_inline(result["job_id"])
         result.update(exec_result)
         return result
@@ -55,7 +55,7 @@ async def dispatch_multiple(req: RunnerBatchDispatchRequest):
     """Dispatch runner jobs for multiple pipes, then execute concurrently.
     
     Phase 1: Bulk-insert all job records (single DB call).
-    Phase 2: Execute jobs in parallel batches of CONCURRENCY.
+    Phase 2: Execute jobs in parallel with shared HTTP client.
     """
     if not req.pipe_ids:
         raise HTTPException(status_code=400, detail="pipe_ids is required")
@@ -68,14 +68,15 @@ async def dispatch_multiple(req: RunnerBatchDispatchRequest):
 
     sem = asyncio.Semaphore(CONCURRENCY)
 
-    async def _run_one(job_id: str) -> dict:
-        async with sem:
-            try:
-                return await execute_job_inline(job_id)
-            except Exception as exc:
-                return {"job_id": job_id, "status": "failed", "error": str(exc)}
+    async with httpx.AsyncClient(timeout=30.0, limits=httpx.Limits(max_connections=CONCURRENCY, max_keepalive_connections=CONCURRENCY)) as shared_client:
+        async def _run_one(job_id: str) -> dict:
+            async with sem:
+                try:
+                    return await execute_job_inline(job_id, http_client=shared_client)
+                except Exception as exc:
+                    return {"job_id": job_id, "status": "failed", "error": str(exc)}
 
-    exec_results = await asyncio.gather(*[_run_one(jid) for jid in job_ids])
+        exec_results = await asyncio.gather(*[_run_one(jid) for jid in job_ids])
 
     completed = sum(1 for r in exec_results if r.get("status") == "completed")
     failed = sum(1 for r in exec_results if r.get("status") == "failed")

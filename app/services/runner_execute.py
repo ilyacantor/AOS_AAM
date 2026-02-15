@@ -23,7 +23,7 @@ from ..db.dcl_ingest import compute_schema_hash
 _log = get_logger("services.runner_execute")
 
 
-async def execute_job_inline(job_id: str) -> dict:
+async def execute_job_inline(job_id: str, http_client: httpx.AsyncClient | None = None) -> dict:
     """Execute a runner job inline (v1 in-process worker).
 
     The Runner lifecycle:
@@ -37,6 +37,9 @@ async def execute_job_inline(job_id: str) -> dict:
        - x-pipe-id: from manifest.source
        - x-schema-hash: computed from payload structure
     7. Status from DCL response: 200=completed, else=failed
+
+    Args:
+        http_client: Optional shared httpx.AsyncClient for connection reuse.
     """
     job = get_runner_job(job_id)
     if not job:
@@ -48,30 +51,21 @@ async def execute_job_inline(job_id: str) -> dict:
     pipe_id = source.get("pipe_id", "unknown")
     system = source.get("system", "unknown")
 
-    # --- Step 1: Mark running ---
     update_runner_status(job_id, "running")
-    _log.info("Runner started job %s (pipe=%s, system=%s)", job_id, pipe_id, system)
 
     try:
-        # --- Step 2: Resolve credentials (v1 = no-op) ---
-        # In production: credentials_ref (vault://aam/secrets/xxx) is resolved
-        # just-in-time here — never stored in the manifest JSON.
         cred_ref = source.get("credentials_ref")
         if cred_ref and cred_ref.startswith("vault://"):
             _log.info("Would resolve credential: %s (v1: skipped)", cred_ref)
 
-        # --- Step 3: Extract data from source (v1 = simulated) ---
         extracted_data = _generate_simulated_data(source)
 
-        # --- Step 4: Apply transform (schema normalization, Option A) ---
         transform = manifest.get("transform")
         if transform and transform.get("schema_map"):
             extracted_data = _apply_schema_map(extracted_data, transform["schema_map"])
 
-        # --- Step 5: Compute schema hash (Refinement C) ---
         schema_hash = compute_schema_hash(extracted_data)
 
-        # --- Step 6: Push to DCL via HTTP ---
         update_runner_status(job_id, "pushing")
 
         dcl_ingest = settings.DCL_INGEST_URL
@@ -80,11 +74,6 @@ async def execute_job_inline(job_id: str) -> dict:
         else:
             dcl_url = f"{settings.BASE_URL}{dcl_ingest}"
 
-        # --- Header mapping (exact DCL contract) ---
-        #   x-run-id      ← manifest.run_id
-        #   x-pipe-id     ← manifest.source.pipe_id
-        #   x-schema-hash ← SHA-256 of transformed field structure
-        #   x-api-key     ← resolved from vault/env (JIT, never stored in manifest)
         headers = {
             "x-run-id": manifest.get("run_id", job_id),
             "x-pipe-id": pipe_id,
@@ -93,7 +82,6 @@ async def execute_job_inline(job_id: str) -> dict:
             "Content-Type": "application/json",
         }
 
-        # --- Body mapping (flat, per DCL contract) ---
         provenance = manifest.get("provenance", {})
         run_ts = provenance.get("run_timestamp", datetime.utcnow().isoformat())
         payload = {
@@ -106,14 +94,16 @@ async def execute_job_inline(job_id: str) -> dict:
             "rows": extracted_data,
         }
 
-        _log.info("Runner pushing %d rows to %s", len(extracted_data), dcl_url)
+        _log.info("Runner pushing %d rows to %s (pipe=%s)", len(extracted_data), dcl_url, pipe_id)
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        owns_client = http_client is None
+        client = http_client or httpx.AsyncClient(timeout=30.0)
+        try:
             resp = await client.post(dcl_url, json=payload, headers=headers)
+        finally:
+            if owns_client:
+                await client.aclose()
 
-        # --- Step 7: Status from DCL response ---
-        #   200 OK + status "ingested" → COMPLETED
-        #   Anything else             → FAILED
         if resp.status_code == 200:
             dcl_body = resp.json()
             dcl_status = dcl_body.get("status", "")
@@ -125,11 +115,8 @@ async def execute_job_inline(job_id: str) -> dict:
                     dcl_response=dcl_body,
                 )
                 _log.info(
-                    "Runner completed job %s: %d rows, hash=%s, drift=%s",
-                    job_id,
-                    dcl_body.get("rows_stored", 0),
-                    schema_hash,
-                    dcl_body.get("schema_drift_detected", False),
+                    "Runner completed job %s: %d rows, hash=%s",
+                    job_id, dcl_body.get("rows_stored", 0), schema_hash,
                 )
                 return {
                     "job_id": job_id,
@@ -140,7 +127,6 @@ async def execute_job_inline(job_id: str) -> dict:
                     "schema_drift_detected": dcl_body.get("schema_drift_detected", False),
                 }
             else:
-                # 200 but unexpected status — treat as failure
                 update_runner_status(
                     job_id,
                     "failed",
@@ -169,7 +155,6 @@ async def execute_job_inline(job_id: str) -> dict:
             }
 
     except httpx.ConnectError as exc:
-        # DCL endpoint unreachable — fall back to direct store for v1
         _log.warning(
             "DCL endpoint unreachable (%s), falling back to direct store for job %s",
             exc, job_id,
