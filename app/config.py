@@ -23,7 +23,10 @@ class Settings:
             os.environ.get("AAM_DRIFT_CONNECTION_TIMEOUT_S", "30")
         )
         # Runner / DCL ingestion
-        self.DCL_INGEST_URL: str = os.environ.get(
+        # DCL_URL is the base URL of the DCL service (set as env var).
+        # DCL_INGEST_URL is the full ingest endpoint derived from it.
+        dcl_base = os.environ.get("DCL_URL", "").rstrip("/")
+        self.DCL_INGEST_URL: str = f"{dcl_base}/api/dcl/ingest" if dcl_base else os.environ.get(
             "AAM_DCL_INGEST_URL", "/api/dcl/ingest"
         )
         self.RUNNER_JOB_TIMEOUT_S: int = int(
