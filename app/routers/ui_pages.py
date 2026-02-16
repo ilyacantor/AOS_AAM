@@ -396,9 +396,9 @@ async def ui_pipes_list(
                 const jobId = data.job_id || '';
                 const status = data.status || 'queued';
                 updateRunnerPill(cell, pipeId, status, data.rows_transferred || 0, jobId);
-                showToast('Runner dispatched for ' + pipeId.substring(0, 8) + '...', 'success');
+                showToast('Dispatched to Farm: ' + pipeId.substring(0, 8) + '...', 'success');
 
-                // If already completed/failed (inline v1), no need to poll
+                // Terminal states — no need to poll
                 if (status === 'completed' || status === 'failed') return;
 
                 // Poll for status updates
@@ -2417,8 +2417,8 @@ async def ui_topology():
                 if (res.ok) {{
                     const dispatched = data.dispatched || 0;
                     const errors = data.errors || 0;
-                    statusEl.innerHTML = '<span class="dispatch-pill running">' + dispatched + ' queued</span>';
-                    showToast(dispatched + ' jobs queued for execution', 'success');
+                    statusEl.innerHTML = '<span class="dispatch-pill running">' + dispatched + ' dispatched</span>';
+                    showToast(dispatched + ' manifests dispatched to Farm', 'success');
                     _startDispatchCounter(dispatched);
                     openDispatchPanel();
                     startDispatchPolling();

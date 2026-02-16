@@ -12,7 +12,7 @@ connection using the priority cascade:
 These tests are pure unit tests — no database connection required.
 """
 import pytest
-from app.dcl_export import _resolve_fields, DCLConnectionSchema, DCLExportResponse
+from app.dcl_export import _resolve_fields, DCLConnectionSchema, DCLExportResponse, SkippedConnection
 from app.constants import (
     CATEGORY_STANDARD_FIELDS,
     PLANE_STANDARD_FIELDS,
@@ -404,6 +404,10 @@ class TestDCLExportResponseContract:
         assert "timestamp" in d
         assert "source" in d
         assert d["source"] == "aam"
+        assert "skipped_connections" in d
+        assert "skipped_count" in d
+        assert d["skipped_connections"] == []
+        assert d["skipped_count"] == 0
 
 
 # ---------------------------------------------------------------------------
@@ -495,7 +499,7 @@ class TestBuildDCLExportWithMocks:
                 "status": "connected",
                 "fabric_plane_id": "API_GATEWAY:kong",
                 "connected_via_plane": "API_GATEWAY",
-                "matched_pipe_id": None,
+                "matched_pipe_id": "pipe-hs-uuid",
                 "updated_at": "2026-02-16T00:00:00Z",
                 "aod_asset_id": "aod-obs",
             },
@@ -542,7 +546,7 @@ class TestBuildDCLExportWithMocks:
                 "status": "connected",
                 "fabric_plane_id": "DATA_WAREHOUSE:snowflake",
                 "connected_via_plane": "DATA_WAREHOUSE",
-                "matched_pipe_id": None,
+                "matched_pipe_id": "pipe-snow-uuid",
                 "updated_at": "2026-02-16T00:00:00Z",
                 "aod_asset_id": "aod-snow",
             },
@@ -585,7 +589,7 @@ class TestBuildDCLExportWithMocks:
                 "status": "connected",
                 "fabric_plane_id": "IPAAS:mulesoft",
                 "connected_via_plane": "IPAAS",
-                "matched_pipe_id": None,
+                "matched_pipe_id": f"pipe-{cat}-uuid",
                 "updated_at": "2026-02-16T00:00:00Z",
                 "aod_asset_id": f"aod-{cat}",
             })
@@ -665,8 +669,9 @@ class TestBuildDCLExportWithMocks:
         assert conn.modality == "DECLARED_INTERFACE"
         assert conn.change_semantics == "CDC_UPSERT"
 
-    def test_pipe_id_falls_back_to_candidate_id(self, monkeypatch):
-        """When matched_pipe_id is None (inference hasn't run), fall back to candidate_id."""
+    def test_candidates_without_matched_pipe_id_are_skipped(self, monkeypatch):
+        """Candidates without matched_pipe_id go to skipped_connections,
+        NOT into fabric_planes.  DCL never sees provisional data."""
         mock_planes = [
             {
                 "plane_id": "IPAAS:workato",
@@ -678,18 +683,33 @@ class TestBuildDCLExportWithMocks:
         ]
         mock_candidates = [
             {
-                "candidate_id": "cand-new-001",
-                "asset_key": "newapp.com",
-                "vendor_name": "newapp",
-                "display_name": "New App",
+                "candidate_id": "cand-inferred",
+                "asset_key": "inferred.com",
+                "vendor_name": "inferred_vendor",
+                "display_name": "Inferred App",
+                "category": "saas",
+                "governance_status": "governed",
+                "status": "connected",
+                "fabric_plane_id": "IPAAS:workato",
+                "connected_via_plane": "IPAAS",
+                "matched_pipe_id": "pipe-inferred-uuid",
+                "updated_at": "2026-02-16T00:00:00Z",
+                "aod_asset_id": "aod-inferred",
+            },
+            {
+                "candidate_id": "cand-pending",
+                "asset_key": "pending.com",
+                "vendor_name": "pending_vendor",
+                "display_name": "Pending App",
                 "category": "saas",
                 "governance_status": "governed",
                 "status": "connected",
                 "fabric_plane_id": "IPAAS:workato",
                 "connected_via_plane": "IPAAS",
                 "matched_pipe_id": None,
+                "created_at": "2026-02-15T00:00:00Z",
                 "updated_at": "2026-02-16T00:00:00Z",
-                "aod_asset_id": "aod-new",
+                "aod_asset_id": "aod-pending",
             },
         ]
 
@@ -701,10 +721,15 @@ class TestBuildDCLExportWithMocks:
         from app.dcl_export import build_dcl_export
         result = build_dcl_export()
 
-        conn = result.fabric_planes[0].connections[0]
-        # Falls back to candidate_id when no matched_pipe_id
-        assert conn.pipe_id == "cand-new-001"
-        assert conn.candidate_id == "cand-new-001"
-        # No pipe metadata available
-        assert conn.entity_scope is None
-        assert conn.transport_kind is None
+        # Only the inferred candidate is exported
+        assert result.total_connections == 1
+        assert result.fabric_planes[0].connections[0].pipe_id == "pipe-inferred-uuid"
+
+        # The pending candidate is in skipped_connections
+        assert result.skipped_count == 1
+        assert len(result.skipped_connections) == 1
+        skipped = result.skipped_connections[0]
+        assert skipped.candidate_id == "cand-pending"
+        assert skipped.vendor == "pending_vendor"
+        assert skipped.reason == "pending_inference"
+        assert skipped.discovered_at == "2026-02-15T00:00:00Z"

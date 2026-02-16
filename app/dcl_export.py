@@ -63,12 +63,27 @@ class DCLFabricPlane(BaseModel):
     health: str = "healthy"
 
 
+class SkippedConnection(BaseModel):
+    """A candidate that was excluded from the export because inference
+    has not yet produced a DeclaredPipe (no matched_pipe_id).
+
+    Operators see these in logs / UI so they know the pipeline isn't
+    broken — it's just not ready yet.
+    """
+    candidate_id: str
+    vendor: str
+    reason: str = "pending_inference"
+    discovered_at: Optional[str] = None
+
+
 class DCLExportResponse(BaseModel):
     """Response for DCL export endpoint"""
     aod_run_id: Optional[str] = None
     timestamp: str
     fabric_planes: List[DCLFabricPlane]
-    total_connections: int
+    total_connections: int                             # Count of exported pipes only
+    skipped_connections: List[SkippedConnection] = []  # Candidates without matched_pipe_id
+    skipped_count: int = 0
     source: str = "aam"
 
 
@@ -265,38 +280,45 @@ def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
         _log.debug("Candidate %s (%s) has no fabric plane link — skipping DCL grouping",
                    candidate.get("vendor_name"), candidate.get("category"))
 
-    # Build fabric plane objects for DCL
+    # Build fabric plane objects for DCL.
+    # Only export candidates with matched_pipe_id (fully inferred).
+    # Candidates without matched_pipe_id go into skipped_connections.
     fabric_planes_output = []
     total_connections = 0
+    skipped: list[SkippedConnection] = []
 
     for plane_id, data in planes_dict.items():
         plane = data["plane"]
         candidates_list = data["candidates"]
 
         if not candidates_list:
-            # Skip empty fabric planes
             continue
 
         connections = []
         for candidate in candidates_list:
-            resolved_fields = _resolve_fields(candidate, field_maps)
-
-            # Resolve pipe_id: use DeclaredPipe.pipe_id (via matched_pipe_id)
-            # as the canonical join key.  Fall back to candidate_id when
-            # inference hasn't run yet.
             cid = candidate.get("candidate_id", "")
             matched_pipe_id = candidate.get("matched_pipe_id")
-            pipe_id = matched_pipe_id or cid
+
+            # Only fully-inferred pipes go to DCL (matched_pipe_id is
+            # the canonical join key).  Candidates still pending
+            # inference are skipped so DCL never sees provisional data
+            # and Farm never gets a mismatched join key.
+            if not matched_pipe_id:
+                skipped.append(SkippedConnection(
+                    candidate_id=cid,
+                    vendor=candidate.get("vendor_name", "Unknown"),
+                    reason="pending_inference",
+                    discovered_at=candidate.get("created_at") or candidate.get("updated_at"),
+                ))
+                continue
+
+            resolved_fields = _resolve_fields(candidate, field_maps)
 
             # Enrich with pipe inference metadata from declared_pipes
-            pipe_meta = (
-                field_maps["pipe_metadata"].get(matched_pipe_id, {})
-                if matched_pipe_id
-                else {}
-            )
+            pipe_meta = field_maps["pipe_metadata"].get(matched_pipe_id, {})
 
             connection = DCLConnectionSchema(
-                pipe_id=pipe_id,
+                pipe_id=matched_pipe_id,
                 candidate_id=cid,
                 source_name=candidate.get("display_name", "Unknown"),
                 vendor=candidate.get("vendor_name", "Unknown"),
@@ -315,20 +337,29 @@ def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
             )
             connections.append(connection)
 
-        fabric_plane_obj = DCLFabricPlane(
-            plane_type=plane["plane_type"],
-            vendor=plane["vendor"],
-            connection_count=len(connections),
-            connections=connections,
-            health="healthy" if plane["is_healthy"] else "degraded"
+        if connections:
+            fabric_plane_obj = DCLFabricPlane(
+                plane_type=plane["plane_type"],
+                vendor=plane["vendor"],
+                connection_count=len(connections),
+                connections=connections,
+                health="healthy" if plane["is_healthy"] else "degraded"
+            )
+            fabric_planes_output.append(fabric_plane_obj)
+            total_connections += len(connections)
+
+    if skipped:
+        _log.info(
+            "DCL export: %d connections exported, %d skipped (pending inference)",
+            total_connections, len(skipped),
         )
-        fabric_planes_output.append(fabric_plane_obj)
-        total_connections += len(connections)
 
     return DCLExportResponse(
         aod_run_id=aod_run_id,
         timestamp=datetime.utcnow().isoformat() + "Z",
         fabric_planes=fabric_planes_output,
         total_connections=total_connections,
-        source="aam"
+        skipped_connections=skipped,
+        skipped_count=len(skipped),
+        source="aam",
     )
