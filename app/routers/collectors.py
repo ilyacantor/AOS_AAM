@@ -106,11 +106,18 @@ async def infer_pipes():
         if c.get("matched_pipe_id"):
             vendor_to_pipe[c["vendor_name"].lower()] = c["matched_pipe_id"]
 
+    # Pre-fetch existing pipes so we can detect which ones need schema enrichment
+    existing_pipes_rows = sb.select("declared_pipes")
+    existing_pipes_by_id: dict[str, dict] = {
+        p["pipe_id"]: p for p in existing_pipes_rows if p.get("pipe_id")
+    }
+
     # Run inference in-memory for all unmatched candidates
     now = datetime.utcnow().isoformat()
     new_pipes: list[dict] = []
     new_versions: list[dict] = []
     candidate_updates: list[dict] = []
+    pipe_enrichments: list[tuple[dict, dict]] = []  # (filter, update_data)
 
     for candidate in unmatched:
         cid = candidate["candidate_id"]
@@ -137,6 +144,50 @@ async def infer_pipes():
             if pipe_id:
                 match_reason = f"Matched existing pipe ({routing_source})"
                 score = max(confidence, 0.9)
+
+                # --- Enrich existing pipe if it lacks schema content ---
+                existing_pipe = existing_pipes_by_id.get(pipe_id)
+                if existing_pipe:
+                    ep_es = existing_pipe.get("entity_scope")
+                    ep_ik = existing_pipe.get("identity_keys")
+                    ep_si = existing_pipe.get("schema_info")
+                    ep_es_list = json.loads(ep_es) if isinstance(ep_es, str) else (ep_es or [])
+                    ep_ik_list = json.loads(ep_ik) if isinstance(ep_ik, str) else (ep_ik or [])
+                    ep_si_dict = json.loads(ep_si) if isinstance(ep_si, str) else ep_si
+
+                    needs_enrichment = (
+                        not (isinstance(ep_es_list, list) and len(ep_es_list) > 0)
+                        or not (isinstance(ep_ik_list, list) and len(ep_ik_list) > 0)
+                        or not (isinstance(ep_si_dict, dict) and bool(ep_si_dict))
+                    )
+
+                    if needs_enrichment:
+                        cat_lower = (candidate.get("category") or "other").lower()
+                        enrich_fields: list[str] = []
+                        if cat_lower == "other":
+                            plane_for_vendor = INFRA_VENDOR_PLANE.get(vendor_lower)
+                            if plane_for_vendor:
+                                enrich_fields = list(PLANE_STANDARD_FIELDS.get(plane_for_vendor, []))
+                        if not enrich_fields:
+                            enrich_fields = list(CATEGORY_STANDARD_FIELDS.get(cat_lower, []))
+
+                        if enrich_fields:
+                            new_es = [f for f in enrich_fields if not f.endswith("_id")]
+                            new_ik = [f for f in enrich_fields if f.endswith("_id")]
+                            pipe_enrichments.append((
+                                {"pipe_id": pipe_id},
+                                {
+                                    "entity_scope": json.dumps(new_es),
+                                    "identity_keys": json.dumps(new_ik),
+                                    "schema_info": json.dumps({"schema_version": "category_inferred"}),
+                                    "updated_at": now,
+                                },
+                            ))
+                            _log.info(
+                                "Enriching existing pipe %s (%s) with %d fields from %s",
+                                pipe_id, vendor, len(enrich_fields),
+                                "plane_standard" if cat_lower == "other" else f"category:{cat_lower}",
+                            )
             else:
                 # Create new pipe — collect for batch insert
                 pipe_id = str(uuid.uuid4())
@@ -239,11 +290,14 @@ async def infer_pipes():
             match_failures.append({"candidate_id": cid, "reason": str(exc)})
             _log.debug("Candidate %s not matched: %s", cid, exc)
 
-    # Batch-write: pipes, versions, candidate updates
+    # Batch-write: pipes, versions, candidate updates, pipe enrichments
     if new_pipes:
         sb.insert_many("declared_pipes", new_pipes)
     if new_versions:
         sb.insert_many("pipe_versions", new_versions)
+    if pipe_enrichments:
+        sb.update_many_concurrent("declared_pipes", pipe_enrichments)
+        _log.info("Enriched %d existing pipes with schema content", len(pipe_enrichments))
     # Fire all candidate updates concurrently (threaded) — 30 calls in
     # parallel instead of 30 sequential calls.
     update_pairs = []
