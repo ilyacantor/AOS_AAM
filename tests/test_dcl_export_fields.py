@@ -89,7 +89,7 @@ class TestFieldDefinitionCompleteness:
         for cat in ["ipaas", "other"]:
             fields = CATEGORY_STANDARD_FIELDS.get(cat)
             assert fields is not None, f"Category '{cat}' missing from CATEGORY_STANDARD_FIELDS"
-            assert len(fields) >= 10, f"Category '{cat}' has too few fields ({len(fields)})"
+            assert len(fields) >= 5, f"Category '{cat}' has too few fields ({len(fields)})"
 
     def test_all_plane_types_have_fields(self):
         """Every fabric plane type must have standard fields."""
@@ -212,7 +212,7 @@ class TestResolveFieldsPriority:
         )
         fields = _resolve_fields(candidate, empty_maps)
         assert fields == CATEGORY_STANDARD_FIELDS["other"]
-        assert len(fields) >= 10
+        assert len(fields) >= 5
 
     def test_unknown_category_returns_empty(self, empty_maps):
         """Truly unknown category with no other data → empty fields (not crash)."""
@@ -292,7 +292,7 @@ class TestSeedDataCoverage:
         """Every candidate from the AOD seed payload must resolve to non-empty fields."""
         candidate = _make_candidate(vendor_name=vendor_name, category=category)
         fields = _resolve_fields(candidate, empty_maps)
-        assert len(fields) >= 10, (
+        assert len(fields) >= 8, (
             f"{vendor_name} ({category}) resolved to {len(fields)} fields: {fields}"
         )
         assert all(isinstance(f, str) for f in fields)

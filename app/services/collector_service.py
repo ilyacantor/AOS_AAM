@@ -6,10 +6,31 @@ from ..db import (
     create_observation,
     create_collector_run,
     complete_collector_run,
+    list_candidates,
 )
 from ..pii_redaction import redact_pii_from_observation
 
 _log = get_logger("services.collector")
+
+
+def _build_vendor_candidate_map() -> dict[str, str]:
+    """Build a vendor_name (lowercase) → candidate_id lookup from all candidates.
+
+    Single DB call upfront so observations can be linked to the candidate
+    they belong to.  Adapters report source_system (often the vendor name);
+    matching it here lights up Priority 1 in the DCL export cascade.
+    """
+    try:
+        candidates = list_candidates()
+        mapping: dict[str, str] = {}
+        for c in candidates:
+            vendor = (c.get("vendor_name") or "").strip().lower()
+            if vendor and c.get("candidate_id"):
+                mapping[vendor] = c["candidate_id"]
+        return mapping
+    except Exception as exc:
+        _log.warning("Could not build vendor→candidate map: %s", exc)
+        return {}
 
 
 async def run_adapter_collector(
@@ -23,6 +44,9 @@ async def run_adapter_collector(
     """
     from ..models import AdapterStatus
 
+    # Pre-fetch candidate lookup so observations get linked
+    vendor_to_candidate = _build_vendor_candidate_map()
+
     all_observations = []
     adapters_collected = []
 
@@ -34,11 +58,18 @@ async def run_adapter_collector(
         observations = await adapter.discover_pipes()
 
         for obs in observations:
+            source = obs.get("source_system", adapter.plane_vendor)
+            # Link observation to candidate by matching source_system
+            # against known vendor names.
+            matched_candidate = vendor_to_candidate.get(
+                (source or "").strip().lower()
+            )
+
             obs_data = {
                 "observation_id": obs.get("observation_id"),
                 "collector_id": collector_id,
-                "candidate_id": None,
-                "source_system": obs.get("source_system", adapter.plane_vendor),
+                "candidate_id": matched_candidate,
+                "source_system": source,
                 "endpoint_info": obs.get("endpoint_info", {}),
                 "entity_hints": obs.get("entity_hints", []),
                 "schema_sample": obs.get("schema_sample"),

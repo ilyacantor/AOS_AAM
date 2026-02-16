@@ -96,6 +96,7 @@ INFRA_VENDOR_PLANE: dict[str, str] = {
     "kong": "API_GATEWAY",
     "apigee": "API_GATEWAY",
     "aws api gateway": "API_GATEWAY",
+    "azure apim": "API_GATEWAY",
     "kafka": "EVENT_BUS",
     "confluent": "EVENT_BUS",
     "rabbitmq": "EVENT_BUS",
@@ -172,16 +173,15 @@ CATEGORY_STANDARD_FIELDS: dict[str, list[str]] = {
         "location", "criticality", "last_discovered", "created_date", "modified_date",
     ],
     "ipaas": [
-        "recipe_id", "connection_name", "workflow_status", "trigger_type", "action_count",
-        "source_app", "target_app", "last_run", "error_count", "created_date",
-        "owner", "folder", "active", "run_count", "modified_date",
+        "workflow_id", "workflow_name", "run_id", "status", "trigger_type",
+        "duration", "error_count", "source_app", "target_app", "created_at",
+        "updated_at",
     ],
     # "other" is AOD's catch-all for infrastructure platforms that don't fit
     # SOR categories.  Generic fields that DCL can still map semantically.
     "other": [
-        "resource_id", "resource_name", "resource_type", "status", "environment",
-        "owner", "endpoint_url", "version", "health_status", "created_date",
-        "last_active", "region", "tags", "configuration", "modified_date",
+        "resource_id", "resource_name", "region", "status", "resource_type",
+        "tags", "created_at", "updated_at",
     ],
 }
 
@@ -193,26 +193,28 @@ CATEGORY_STANDARD_FIELDS: dict[str, list[str]] = {
 # plane vendors (Kong → API_GATEWAY, Snowflake → DATA_WAREHOUSE, etc.).
 # These fields describe what that plane type exposes to downstream consumers.
 # Used when a candidate's vendor maps to a known plane via INFRA_VENDOR_PLANE.
+#
+# Naming: vendor-neutral.  "workflow_id" not "recipe_id" (Workato-specific).
 # ---------------------------------------------------------------------------
 PLANE_STANDARD_FIELDS: dict[str, list[str]] = {
     "IPAAS": [
-        "recipe_id", "connection_name", "workflow_status", "trigger_type", "action_count",
-        "source_app", "target_app", "last_run", "error_count", "created_date",
-        "owner", "folder", "active", "run_count", "modified_date",
+        "workflow_id", "workflow_name", "run_id", "status", "trigger_type",
+        "duration", "error_count", "source_app", "target_app", "created_at",
+        "updated_at",
     ],
     "API_GATEWAY": [
         "api_id", "api_name", "route_path", "method", "consumer_id",
         "rate_limit", "upstream_url", "status", "latency_ms", "request_count",
-        "error_rate", "version", "tags", "created_date", "modified_date",
+        "error_rate", "version", "tags", "created_at", "updated_at",
     ],
     "EVENT_BUS": [
         "topic_name", "partition_count", "consumer_group", "message_count", "offset",
         "retention_ms", "schema_id", "producer_id", "consumer_lag", "throughput",
-        "replication_factor", "status", "created_date", "modified_date", "tags",
+        "replication_factor", "status", "created_at", "updated_at",
     ],
     "DATA_WAREHOUSE": [
         "table_name", "schema_name", "database_name", "row_count", "column_count",
         "size_bytes", "last_modified", "owner", "cluster_id", "storage_type",
-        "query_count", "freshness_hours", "tags", "created_date", "modified_date",
+        "query_count", "freshness_hours", "tags", "created_at", "updated_at",
     ],
 }
