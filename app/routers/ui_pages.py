@@ -180,7 +180,7 @@ async def ui_pipes_list(
         }}
         .modal-overlay {{
             display: none;
-            position: absolute;
+            position: fixed;
             top: 0;
             left: 0;
             width: 100%;
@@ -931,7 +931,7 @@ async def ui_candidates_list(
 
     <style>
         .modal {{
-            position: absolute;
+            position: fixed;
             top: 0;
             left: 0;
             width: 100%;
@@ -1675,7 +1675,7 @@ async def ui_topology():
     <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
     <style>
         .topo-page {{ padding: 0 12px 12px; }}
-        .topo-layout {{ display: flex; gap: 10px; height: calc(100% - 60px); }}
+        .topo-layout {{ display: flex; gap: 10px; height: calc(100vh - 60px); }}
         .topo-sidebar {{
             width: 176px; flex-shrink: 0;
             display: flex; flex-direction: column;
@@ -1741,14 +1741,14 @@ async def ui_topology():
         .node-details .close-btn {{ position: absolute; top: 6px; right: 8px; background: none; border: none; color: var(--slate-400); cursor: pointer; font-size: 1rem; }}
 
         .dispatch-overlay {{
-            position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6);
+            position: fixed; inset: 0; background: rgba(0,0,0,0.6);
             z-index: 9000; display: none; justify-content: center; align-items: center;
         }}
         .dispatch-overlay.visible {{ display: flex; }}
         .dispatch-panel {{
             background: #0f172a; border: 1px solid var(--slate-700);
-            border-radius: 10px; width: 720px; max-width: 92%;
-            max-height: 82%; display: flex; flex-direction: column;
+            border-radius: 10px; width: 720px; max-width: 92vw;
+            max-height: 82vh; display: flex; flex-direction: column;
             box-shadow: 0 20px 60px rgba(0,0,0,0.5);
         }}
         .dp-header {{

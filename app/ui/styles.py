@@ -8,8 +8,7 @@ from ..db import get_latest_aod_run
 NAV_STYLE = """
 <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html { height: 100%; }
-    body { font-family: 'Quicksand', sans-serif; background: #0f172a; color: #ffffff; height: 100%; position: relative; }
+    body { font-family: 'Quicksand', sans-serif; background: #0f172a; color: #ffffff; }
     .nav {
         background: rgba(30, 41, 59, 0.9);
         border-bottom: 1px solid #334155;
@@ -186,7 +185,7 @@ UI_STYLE = """
     .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
     .section { margin-bottom: 32px; }
     .empty-state { text-align: center; padding: 48px; color: var(--slate-500); }
-    .toast { position: absolute; bottom: 24px; right: 24px; background: var(--slate-800); border: 1px solid var(--slate-700); padding: 12px 20px; border-radius: 8px; z-index: 9999; display: none; }
+    .toast { position: fixed; bottom: 24px; right: 24px; background: var(--slate-800); border: 1px solid var(--slate-700); padding: 12px 20px; border-radius: 8px; z-index: 1000; display: none; }
     .toast.success { border-color: rgba(34, 197, 94, 0.5); color: var(--green-500); }
     .toast.error { border-color: rgba(248, 113, 113, 0.5); color: var(--red-400); }
     .loading { opacity: 0.5; pointer-events: none; }
