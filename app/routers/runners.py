@@ -1,5 +1,8 @@
 """
-Runner API — dispatch jobs, list jobs, runner callback.
+Runner API — dispatch manifests to Farm, list jobs, runner callback.
+
+AAM dispatches JobManifests to Farm (Path 2).  Farm executes extraction
+and pushes data to DCL (Path 3).  AAM never executes data extraction.
 
 RACI: AAM is A/R for Collector Run Execution (Row 43) and Track Collector Runs (Row 48).
 """
@@ -13,8 +16,7 @@ from ..models import (
     RunnerCallbackRequest,
     RunnerJobStatus,
 )
-from ..services.runner_dispatch import dispatch_pipe, dispatch_batch
-from ..services.runner_execute import execute_job_inline
+from ..services.runner_dispatch import dispatch_pipe, dispatch_batch, dispatch_to_farm
 from ..db.runner_jobs import (
     get_runner_job,
     get_runner_progress,
@@ -33,15 +35,21 @@ router = APIRouter(prefix="/api/runners", tags=["Runners"])
 async def dispatch_single(req: RunnerDispatchRequest):
     """Dispatch a runner job for a single pipe.
 
-    Builds a JobManifest from the pipe definition and queues it.
+    Builds a JobManifest, stores it, and POSTs it to Farm's intake
+    endpoint.  AAM does NOT execute the job — Farm does.
     """
     try:
         result = dispatch_pipe(
             req.pipe_id,
             req.trigger,
         )
-        exec_result = await execute_job_inline(result["job_id"])
-        result.update(exec_result)
+        manifest = result.pop("_manifest")
+        farm_result = await dispatch_to_farm(manifest)
+        result["status"] = farm_result.get("status", "dispatched")
+        if farm_result.get("error"):
+            result["farm_error"] = farm_result["error"]
+        if farm_result.get("farm_response"):
+            result["farm_response"] = farm_result["farm_response"]
         return result
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
@@ -49,25 +57,43 @@ async def dispatch_single(req: RunnerDispatchRequest):
 
 @router.post("/dispatch-batch")
 async def dispatch_multiple(req: RunnerBatchDispatchRequest):
-    """Dispatch runner jobs for multiple pipes.
-    
-    Inserts all jobs as 'queued' and returns immediately.
-    The background worker picks them up and executes with Semaphore(5).
+    """Dispatch runner jobs for multiple pipes to Farm.
+
+    Builds manifests, stores them, and POSTs each to Farm's intake
+    endpoint in parallel.
     """
     if not req.pipe_ids:
         raise HTTPException(status_code=400, detail="pipe_ids is required")
 
     results = dispatch_batch(req.pipe_ids, req.trigger)
-    job_ids = [r["job_id"] for r in results if r.get("status") != "error"]
+
+    # Dispatch each manifest to Farm in parallel
+    farm_tasks = []
+    for result in results:
+        manifest = result.pop("_manifest", None)
+        if manifest and result.get("status") != "error":
+            farm_tasks.append((result, dispatch_to_farm(manifest)))
+
+    for result, coro in farm_tasks:
+        try:
+            farm_result = await coro
+            result["status"] = farm_result.get("status", "dispatched")
+            if farm_result.get("error"):
+                result["farm_error"] = farm_result["error"]
+        except Exception as exc:
+            _log.warning("Farm dispatch failed: %s", exc)
+            result["farm_error"] = str(exc)
+
+    dispatched = [r for r in results if r.get("status") == "dispatched"]
     errors = [r for r in results if r.get("status") == "error"]
 
-    _log.info("Batch dispatch: %d jobs queued, %d errors", len(job_ids), len(errors))
+    _log.info("Batch dispatch to Farm: %d dispatched, %d errors", len(dispatched), len(errors))
 
     return {
-        "dispatched": len(job_ids),
+        "dispatched": len(dispatched),
         "errors": len(errors),
         "jobs": results,
-        "message": f"{len(job_ids)} jobs queued for background execution",
+        "message": f"{len(dispatched)} manifests dispatched to Farm",
     }
 
 

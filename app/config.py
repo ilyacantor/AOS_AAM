@@ -38,6 +38,11 @@ class Settings:
         self.DCL_API_KEY: str = os.environ.get(
             "AAM_DCL_API_KEY", "aam-runner-v1-key"
         )
+        # Farm intake URL — where AAM dispatches JobManifests (Path 2).
+        # Farm executes extraction and pushes data to DCL (Path 3).
+        self.FARM_INTAKE_URL: str = os.environ.get(
+            "AAM_FARM_INTAKE_URL", "http://127.0.0.1:5001/api/farm/manifest-intake"
+        )
 
 
 settings = Settings()

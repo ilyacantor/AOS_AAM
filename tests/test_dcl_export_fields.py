@@ -308,6 +308,7 @@ class TestDCLConnectionSchemaContract:
     def test_fields_is_list_of_strings(self):
         schema = DCLConnectionSchema(
             pipe_id="p1",
+            candidate_id="c1",
             source_name="Test",
             vendor="test_vendor",
             category="crm",
@@ -320,6 +321,7 @@ class TestDCLConnectionSchemaContract:
     def test_fields_default_is_empty_list(self):
         schema = DCLConnectionSchema(
             pipe_id="p1",
+            candidate_id="c1",
             source_name="Test",
             vendor="test_vendor",
             category="crm",
@@ -330,6 +332,7 @@ class TestDCLConnectionSchemaContract:
     def test_model_dump_structure(self):
         schema = DCLConnectionSchema(
             pipe_id="p1",
+            candidate_id="c1",
             source_name="Salesforce",
             vendor="salesforce",
             category="crm",
@@ -340,6 +343,46 @@ class TestDCLConnectionSchemaContract:
         assert "fields" in d
         assert d["fields"] == ["account_id", "account_name"]
         assert d["pipe_id"] == "p1"
+        assert d["candidate_id"] == "c1"
+
+    def test_new_inference_fields_present(self):
+        """Export schema must include pipe inference metadata fields."""
+        schema = DCLConnectionSchema(
+            pipe_id="pipe-uuid-123",
+            candidate_id="cand-456",
+            source_name="Salesforce",
+            vendor="salesforce",
+            category="crm",
+            fields=["account_id"],
+            entity_scope="account_name, email, status",
+            identity_keys=["account_id", "contact_id"],
+            transport_kind="API",
+            modality="DECLARED_INTERFACE",
+            change_semantics="CDC_UPSERT",
+            asset_key="salesforce.com",
+        )
+        d = schema.model_dump()
+        assert d["entity_scope"] == "account_name, email, status"
+        assert d["identity_keys"] == ["account_id", "contact_id"]
+        assert d["transport_kind"] == "API"
+        assert d["modality"] == "DECLARED_INTERFACE"
+        assert d["change_semantics"] == "CDC_UPSERT"
+
+    def test_inference_fields_default_to_none(self):
+        """New inference fields should default to None when not set."""
+        schema = DCLConnectionSchema(
+            pipe_id="p1",
+            candidate_id="c1",
+            source_name="Test",
+            vendor="test",
+            category="crm",
+            asset_key="test.com",
+        )
+        assert schema.entity_scope is None
+        assert schema.identity_keys is None
+        assert schema.transport_kind is None
+        assert schema.modality is None
+        assert schema.change_semantics is None
 
 
 # ---------------------------------------------------------------------------
@@ -392,7 +435,7 @@ class TestBuildDCLExportWithMocks:
                 "status": "connected",
                 "fabric_plane_id": "IPAAS:workato",
                 "connected_via_plane": "IPAAS",
-                "matched_pipe_id": None,
+                "matched_pipe_id": "pipe-sf-uuid",
                 "updated_at": "2026-02-16T00:00:00Z",
                 "aod_asset_id": "aod-1",
             },
@@ -406,7 +449,7 @@ class TestBuildDCLExportWithMocks:
                 "status": "connected",
                 "fabric_plane_id": "IPAAS:workato",
                 "connected_via_plane": "IPAAS",
-                "matched_pipe_id": None,
+                "matched_pipe_id": "pipe-ns-uuid",
                 "updated_at": "2026-02-16T00:00:00Z",
                 "aod_asset_id": "aod-2",
             },
@@ -427,6 +470,8 @@ class TestBuildDCLExportWithMocks:
                     f"Connection {conn.source_name} ({conn.category}) has empty fields"
                 )
                 assert all(isinstance(f, str) for f in conn.fields)
+                # New: candidate_id must be preserved for provenance
+                assert conn.candidate_id is not None
 
     def test_observation_fields_take_precedence(self, monkeypatch):
         """When observations exist, their fields override category defaults."""
@@ -558,3 +603,108 @@ class TestBuildDCLExportWithMocks:
                 assert len(conn.fields) >= 5, (
                     f"Category '{conn.category}' has fewer than 5 fields: {conn.fields}"
                 )
+
+    def test_pipe_id_uses_matched_pipe_id(self, monkeypatch):
+        """pipe_id in export MUST be DeclaredPipe.pipe_id (via matched_pipe_id),
+        not candidate_id.  This is the critical join key for DCL late-binding."""
+        mock_planes = [
+            {
+                "plane_id": "IPAAS:workato",
+                "plane_type": "IPAAS",
+                "vendor": "workato",
+                "display_name": "Workato",
+                "is_healthy": True,
+            }
+        ]
+        mock_candidates = [
+            {
+                "candidate_id": "cand-sf-001",
+                "asset_key": "salesforce.com",
+                "vendor_name": "salesforce",
+                "display_name": "Salesforce CRM",
+                "category": "crm",
+                "governance_status": "governed",
+                "status": "connected",
+                "fabric_plane_id": "IPAAS:workato",
+                "connected_via_plane": "IPAAS",
+                "matched_pipe_id": "declared-pipe-uuid-sf",
+                "updated_at": "2026-02-16T00:00:00Z",
+                "aod_asset_id": "aod-sf",
+            },
+        ]
+        # Return pipe metadata when declared_pipes is queried
+        mock_pipes_db = [
+            {
+                "pipe_id": "declared-pipe-uuid-sf",
+                "entity_scope": '["account_name", "email", "status"]',
+                "identity_keys": '["account_id", "contact_id"]',
+                "transport_kind": "API",
+                "modality": "DECLARED_INTERFACE",
+                "change_semantics": "CDC_UPSERT",
+            },
+        ]
+
+        monkeypatch.setattr("app.dcl_export.get_fabric_planes", lambda aod_run_id=None: mock_planes)
+        monkeypatch.setattr("app.dcl_export.list_candidates", lambda **kwargs: mock_candidates)
+        monkeypatch.setattr("app.dcl_export.get_all_schema_samples", lambda: [])
+        monkeypatch.setattr("app.dcl_export.sb.select", lambda *a, **kw: mock_pipes_db)
+
+        from app.dcl_export import build_dcl_export
+        result = build_dcl_export()
+
+        conn = result.fabric_planes[0].connections[0]
+
+        # Critical: pipe_id is the DeclaredPipe UUID, NOT candidate_id
+        assert conn.pipe_id == "declared-pipe-uuid-sf"
+        assert conn.candidate_id == "cand-sf-001"
+
+        # Pipe inference metadata populated from declared_pipes
+        assert conn.entity_scope == "account_name, email, status"
+        assert conn.identity_keys == ["account_id", "contact_id"]
+        assert conn.transport_kind == "API"
+        assert conn.modality == "DECLARED_INTERFACE"
+        assert conn.change_semantics == "CDC_UPSERT"
+
+    def test_pipe_id_falls_back_to_candidate_id(self, monkeypatch):
+        """When matched_pipe_id is None (inference hasn't run), fall back to candidate_id."""
+        mock_planes = [
+            {
+                "plane_id": "IPAAS:workato",
+                "plane_type": "IPAAS",
+                "vendor": "workato",
+                "display_name": "Workato",
+                "is_healthy": True,
+            }
+        ]
+        mock_candidates = [
+            {
+                "candidate_id": "cand-new-001",
+                "asset_key": "newapp.com",
+                "vendor_name": "newapp",
+                "display_name": "New App",
+                "category": "saas",
+                "governance_status": "governed",
+                "status": "connected",
+                "fabric_plane_id": "IPAAS:workato",
+                "connected_via_plane": "IPAAS",
+                "matched_pipe_id": None,
+                "updated_at": "2026-02-16T00:00:00Z",
+                "aod_asset_id": "aod-new",
+            },
+        ]
+
+        monkeypatch.setattr("app.dcl_export.get_fabric_planes", lambda aod_run_id=None: mock_planes)
+        monkeypatch.setattr("app.dcl_export.list_candidates", lambda **kwargs: mock_candidates)
+        monkeypatch.setattr("app.dcl_export.get_all_schema_samples", lambda: [])
+        monkeypatch.setattr("app.dcl_export.sb.select", lambda *a, **kw: [])
+
+        from app.dcl_export import build_dcl_export
+        result = build_dcl_export()
+
+        conn = result.fabric_planes[0].connections[0]
+        # Falls back to candidate_id when no matched_pipe_id
+        assert conn.pipe_id == "cand-new-001"
+        assert conn.candidate_id == "cand-new-001"
+        # No pipe metadata available
+        assert conn.entity_scope is None
+        assert conn.transport_kind is None

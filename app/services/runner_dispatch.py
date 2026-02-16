@@ -1,11 +1,12 @@
 """
-Runner Dispatch Service — builds Job Manifests and dispatches runner jobs.
+Runner Dispatch Service — builds Job Manifests and dispatches to Farm.
 
 AAM is the Control Plane (RACI Row 76: Fabric Plane Connection, A/R).
-The Runner is the Muscle (ephemeral worker).  Data bytes never touch AAM.
+Farm is the Execution Engine.  Data bytes never touch AAM.
 
-Flow: build_manifest() → dispatch_job() → runner executes → callback
+Flow: build_manifest() → dispatch_job() → dispatch_to_farm() → Farm executes
 """
+import httpx
 from datetime import datetime
 from typing import Optional
 
@@ -83,8 +84,11 @@ def build_manifest(
     """Build an immutable Job Manifest from a pipe definition.
 
     The manifest contains vault references for secrets — never plaintext.
+    Uses DeclaredPipe.pipe_id (via matched_pipe_id) as the canonical pipe_id
+    so the manifest aligns with the DCL export (critical for late-binding join).
     """
-    pipe_id = pipe["pipe_id"]
+    # Use DeclaredPipe pipe_id for manifest alignment with export
+    pipe_id = pipe.get("matched_pipe_id") or pipe["pipe_id"]
     source_system = pipe.get("source_system", "unknown")
     fabric_plane = pipe.get("fabric_plane", "")
     transport_kind = pipe.get("transport_kind", "")
@@ -141,7 +145,10 @@ def dispatch_pipe(
     snapshot_name: Optional[str] = None,
     farm_verification: bool = False,
 ) -> dict:
-    """High-level: load pipe → build manifest → dispatch.  Returns job summary."""
+    """High-level: load pipe → build manifest → dispatch.
+
+    Returns job summary including the manifest for Farm dispatch.
+    """
     pipe = get_pipe(pipe_id)
     if not pipe:
         raise ValueError(f"Pipe {pipe_id} not found")
@@ -157,9 +164,10 @@ def dispatch_pipe(
     return {
         "job_id": job_id,
         "run_id": manifest.run_id,
-        "pipe_id": pipe_id,
+        "pipe_id": manifest.source.pipe_id,
         "status": "queued",
         "trigger": trigger,
+        "_manifest": manifest,
     }
 
 
@@ -168,14 +176,15 @@ def dispatch_batch(
     trigger: str = "manual",
 ) -> list[dict]:
     """Dispatch runner jobs for multiple pipes using bulk insert.
-    
+
     Bulk-fetches all pipes in one query, builds manifests, then bulk-inserts.
-    Returns list of job summaries with job_ids ready for execution.
+    Returns list of job summaries with _manifest for Farm dispatch.
     """
     all_pipes = list_pipes()
     pipe_map = {p["pipe_id"]: p for p in all_pipes}
 
-    manifests = []
+    manifests_data = []
+    manifest_objects = []
     results = []
     errors = []
 
@@ -186,22 +195,24 @@ def dispatch_batch(
                 errors.append({"pipe_id": pid, "status": "error", "error": f"Pipe {pid} not found"})
                 continue
             manifest = build_manifest(pipe, trigger)
-            manifests.append(manifest.model_dump())
+            manifests_data.append(manifest.model_dump())
+            manifest_objects.append(manifest)
             results.append({
                 "job_id": manifest.run_id,
                 "run_id": manifest.run_id,
-                "pipe_id": pid,
+                "pipe_id": manifest.source.pipe_id,
                 "status": "queued",
                 "trigger": trigger,
+                "_manifest": manifest,
             })
         except Exception as exc:
             _log.warning("Failed to build manifest for pipe %s: %s", pid, exc)
             errors.append({"pipe_id": pid, "status": "error", "error": str(exc)})
 
-    if manifests:
+    if manifests_data:
         try:
-            create_runner_jobs_batch(manifests)
-            _log.info("Bulk-dispatched %d runner jobs", len(manifests))
+            create_runner_jobs_batch(manifests_data)
+            _log.info("Bulk-dispatched %d runner jobs", len(manifests_data))
         except Exception as exc:
             _log.error("Bulk insert failed: %s", exc)
             for r in results:
@@ -209,3 +220,40 @@ def dispatch_batch(
                 r["error"] = f"Bulk insert failed: {exc}"
 
     return results + errors
+
+
+async def dispatch_to_farm(manifest: JobManifest) -> dict:
+    """POST a JobManifest to Farm's intake endpoint (Path 2).
+
+    AAM dispatches instructions to Farm.  Farm executes extraction and
+    pushes data to DCL (Path 3).  The manifest's target.dcl_url tells
+    Farm where to deliver — it is NOT the manifest's own destination.
+    """
+    farm_url = settings.FARM_INTAKE_URL
+    payload = manifest.model_dump()
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(farm_url, json=payload)
+
+        if resp.status_code in (200, 201, 202):
+            body = resp.json()
+            _log.info(
+                "Manifest dispatched to Farm: run_id=%s pipe_id=%s status=%d",
+                manifest.run_id, manifest.source.pipe_id, resp.status_code,
+            )
+            update_runner_status(manifest.run_id, "dispatched")
+            return {"status": "dispatched", "farm_response": body}
+
+        _log.warning(
+            "Farm rejected manifest: run_id=%s status=%d body=%s",
+            manifest.run_id, resp.status_code, resp.text[:500],
+        )
+        return {
+            "status": "farm_error",
+            "error": f"Farm returned {resp.status_code}: {resp.text[:500]}",
+        }
+
+    except httpx.ConnectError as exc:
+        _log.warning("Farm unreachable at %s: %s", farm_url, exc)
+        return {"status": "farm_unreachable", "error": f"Farm unreachable: {exc}"}

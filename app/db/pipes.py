@@ -256,6 +256,7 @@ def _candidate_to_pipe(row) -> dict:
 
     return {
         "pipe_id": row["candidate_id"],
+        "matched_pipe_id": row.get("matched_pipe_id"),
         "display_name": row["display_name"],
         "fabric_plane": fabric_plane,
         "modality": modality,

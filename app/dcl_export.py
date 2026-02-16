@@ -30,13 +30,24 @@ _log = logging.getLogger(__name__)
 
 
 class DCLConnectionSchema(BaseModel):
-    """Schema for a single connection in a fabric plane"""
-    pipe_id: str
+    """Schema for a single connection in a fabric plane.
+
+    pipe_id is the DeclaredPipe.pipe_id (via matched_pipe_id) — the canonical
+    join key that DCL uses to bind Structure (export) with Content (Farm push).
+    candidate_id is preserved separately for provenance tracking.
+    """
+    pipe_id: str                                      # DeclaredPipe.pipe_id (via matched_pipe_id)
+    candidate_id: str                                 # Original AOD candidate_id (provenance)
     source_name: str
     vendor: str
     category: str
     governance_status: Optional[str] = None
     fields: List[str] = []
+    entity_scope: Optional[str] = None                # From pipe inference
+    identity_keys: Optional[List[str]] = None         # From pipe inference
+    transport_kind: Optional[str] = None              # From pipe inference
+    modality: Optional[str] = None                    # From pipe inference
+    change_semantics: Optional[str] = None            # From pipe inference
     health: str = "healthy"
     last_sync: Optional[str] = None
     asset_key: str
@@ -81,6 +92,7 @@ def _build_field_maps(candidate_ids: set[str], vendor_names: set[str]) -> dict:
         "by_candidate_id": {},
         "by_source_system": {},
         "by_pipe_id": {},
+        "pipe_metadata": {},   # pipe_id → {entity_scope, identity_keys, ...}
     }
 
     # --- Source 1: Observation schema_samples (single DB call) ---
@@ -103,29 +115,45 @@ def _build_field_maps(candidate_ids: set[str], vendor_names: set[str]) -> dict:
     except Exception as exc:
         _log.warning("Failed to fetch observation schema samples: %s", exc)
 
-    # --- Source 2: Declared pipes (identity_keys + entity_scope) ---
+    # --- Source 2: Declared pipes (identity_keys + entity_scope + metadata) ---
     try:
         rows = sb.select(
             "declared_pipes",
-            columns="pipe_id,identity_keys,entity_scope",
+            columns="pipe_id,identity_keys,entity_scope,transport_kind,modality,change_semantics",
         )
         for row in rows:
             pid = row.get("pipe_id")
             if not pid:
                 continue
-            fields: list[str] = []
+
+            # Parse JSON arrays
             ik_raw = row.get("identity_keys")
+            ik_parsed: list = []
             if ik_raw:
-                ik = json.loads(ik_raw) if isinstance(ik_raw, str) else ik_raw
-                if isinstance(ik, list):
-                    fields.extend(ik)
+                ik_parsed = json.loads(ik_raw) if isinstance(ik_raw, str) else ik_raw
+                if not isinstance(ik_parsed, list):
+                    ik_parsed = []
+
             es_raw = row.get("entity_scope")
+            es_parsed: list = []
             if es_raw:
-                es = json.loads(es_raw) if isinstance(es_raw, str) else es_raw
-                if isinstance(es, list):
-                    fields.extend(es)
+                es_parsed = json.loads(es_raw) if isinstance(es_raw, str) else es_raw
+                if not isinstance(es_parsed, list):
+                    es_parsed = []
+
+            # Field list for cascade priority 3
+            fields: list[str] = list(dict.fromkeys(ik_parsed + es_parsed))
             if fields:
-                maps["by_pipe_id"][pid] = list(dict.fromkeys(fields))
+                maps["by_pipe_id"][pid] = fields
+
+            # Pipe metadata for export enrichment
+            maps["pipe_metadata"][pid] = {
+                "entity_scope": ", ".join(es_parsed) if es_parsed else None,
+                "identity_keys": ik_parsed or None,
+                "transport_kind": row.get("transport_kind"),
+                "modality": row.get("modality"),
+                "change_semantics": row.get("change_semantics"),
+            }
     except Exception as exc:
         _log.warning("Failed to fetch declared pipe fields: %s", exc)
 
@@ -252,13 +280,34 @@ def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
         connections = []
         for candidate in candidates_list:
             resolved_fields = _resolve_fields(candidate, field_maps)
+
+            # Resolve pipe_id: use DeclaredPipe.pipe_id (via matched_pipe_id)
+            # as the canonical join key.  Fall back to candidate_id when
+            # inference hasn't run yet.
+            cid = candidate.get("candidate_id", "")
+            matched_pipe_id = candidate.get("matched_pipe_id")
+            pipe_id = matched_pipe_id or cid
+
+            # Enrich with pipe inference metadata from declared_pipes
+            pipe_meta = (
+                field_maps["pipe_metadata"].get(matched_pipe_id, {})
+                if matched_pipe_id
+                else {}
+            )
+
             connection = DCLConnectionSchema(
-                pipe_id=candidate.get("candidate_id", ""),
+                pipe_id=pipe_id,
+                candidate_id=cid,
                 source_name=candidate.get("display_name", "Unknown"),
                 vendor=candidate.get("vendor_name", "Unknown"),
                 category=candidate.get("category", "other"),
                 governance_status=candidate.get("governance_status"),
                 fields=resolved_fields,
+                entity_scope=pipe_meta.get("entity_scope"),
+                identity_keys=pipe_meta.get("identity_keys"),
+                transport_kind=pipe_meta.get("transport_kind"),
+                modality=pipe_meta.get("modality"),
+                change_semantics=pipe_meta.get("change_semantics"),
                 health="unknown",
                 last_sync=candidate.get("updated_at"),
                 asset_key=candidate.get("asset_key", ""),
