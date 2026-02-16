@@ -497,6 +497,7 @@ class SourceSpec(BaseModel):
     pipe_id: str
     system: str                                         # vendor name
     adapter: str                                        # rest_api | jdbc | kafka | ipaas | webhook
+    category: Optional[str] = None                      # crm | erp | itsm | support | etc.
     endpoint_ref: dict = Field(default_factory=dict)    # opaque connection info
     credentials_ref: Optional[str] = None               # vault://aam/secrets/xxx — reference only, NEVER plaintext
     query: Optional[str] = None                         # extraction query/filter

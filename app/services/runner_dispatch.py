@@ -14,6 +14,8 @@ from ..config import settings
 from ..logger import get_logger
 from ..db import (
     get_pipe,
+    get_candidate,
+    list_candidates,
     list_pipes,
 )
 from ..db.runner_jobs import create_runner_job, create_runner_jobs_batch, update_runner_status, list_runner_jobs
@@ -105,12 +107,19 @@ def build_manifest(
 
     run_id = _next_run_id(source_system)
 
+    category = pipe.get("category") or pipe.get("app_category") or None
+    if not category:
+        candidate = get_candidate(pipe.get("pipe_id", ""))
+        if candidate:
+            category = candidate.get("category") or None
+
     return JobManifest(
         run_id=run_id,
         source=SourceSpec(
             pipe_id=pipe_id,
             system=source_system,
             adapter=adapter,
+            category=category,
             endpoint_ref=endpoint_ref,
             credentials_ref=credentials_ref,
         ),
@@ -182,6 +191,12 @@ def dispatch_batch(
     """
     all_pipes = list_pipes()
     pipe_map = {p["pipe_id"]: p for p in all_pipes}
+
+    all_candidates = list_candidates()
+    candidate_category_map = {c["candidate_id"]: c.get("category") for c in all_candidates if c.get("category")}
+    for p in all_pipes:
+        if not p.get("category"):
+            p["category"] = candidate_category_map.get(p["pipe_id"])
 
     manifests_data = []
     manifest_objects = []
