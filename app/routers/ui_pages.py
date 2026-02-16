@@ -1712,6 +1712,8 @@ async def ui_topology():
         .sb-btn-accent:hover {{ background: rgba(251, 146, 60, 0.1); }}
         .sb-btn-runner {{ border-color: rgba(34, 197, 94, 0.3); color: #4ade80; }}
         .sb-btn-runner:hover {{ background: rgba(34, 197, 94, 0.1); }}
+        .sb-btn-stop {{ border-color: rgba(248, 113, 113, 0.3); color: #f87171; }}
+        .sb-btn-stop:hover {{ background: rgba(248, 113, 113, 0.15); }}
         .dispatch-pill {{
             display: inline-block; padding: 1px 7px; border-radius: 8px;
             font-size: 0.62rem; font-weight: 600; letter-spacing: 0.3px;
@@ -1761,6 +1763,13 @@ async def ui_topology():
             cursor: pointer; font-size: 1.2rem; padding: 2px 6px;
         }}
         .dp-header .dp-close:hover {{ color: var(--slate-200); }}
+        .dp-stop-btn {{
+            margin-left: auto; margin-right: 8px;
+            background: rgba(248, 113, 113, 0.1); border: 1px solid rgba(248, 113, 113, 0.3);
+            color: #f87171; border-radius: 6px; padding: 4px 14px;
+            font-size: 0.72rem; font-weight: 600; cursor: pointer;
+        }}
+        .dp-stop-btn:hover {{ background: rgba(248, 113, 113, 0.2); }}
         .dp-summary {{
             display: flex; gap: 12px; padding: 12px 18px;
             border-bottom: 1px solid rgba(51,65,85,0.5);
@@ -1804,6 +1813,7 @@ async def ui_topology():
         .dp-status.running {{ background: rgba(59,130,246,0.15); color: #60a5fa; }}
         .dp-status.queued {{ background: rgba(148,163,184,0.15); color: #94a3b8; }}
         .dp-status.pushing {{ background: rgba(167,139,250,0.15); color: #a78bfa; }}
+        .dp-status.cancelled {{ background: rgba(248,113,113,0.1); color: #f87171; }}
         .dp-error {{ color: #f87171; font-size: 0.6rem; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
         .dp-error:hover {{ white-space: normal; word-break: break-all; }}
         .dp-filter {{
@@ -1842,6 +1852,7 @@ async def ui_topology():
                 <button class="sb-btn" id="btn-run-inference">Run Inference</button>
                 <button class="sb-btn" id="btn-export-dcl">Export to DCL</button>
                 <button class="sb-btn sb-btn-runner" onclick="dispatchAllRunners()" id="btn-dispatch-all" data-testid="btn-dispatch-all">Dispatch Runner</button>
+                <button class="sb-btn sb-btn-stop" onclick="cancelAllJobs()" id="btn-stop-all" data-testid="btn-stop-all" style="display:none;">Stop All</button>
                 <button class="sb-btn" onclick="openDispatchPanel()" id="btn-view-dispatch" data-testid="btn-view-dispatch" style="font-size:0.72rem;">View Dispatch</button>
                 <span id="dispatch-all-status" style="display:none;font-size:0.68rem;margin-top:2px;"></span>
             </div>
@@ -2420,6 +2431,7 @@ async def ui_topology():
                     statusEl.innerHTML = '<span class="dispatch-pill running">' + dispatched + ' dispatched</span>';
                     showToast(dispatched + ' manifests dispatched to Farm', 'success');
                     _startDispatchCounter(dispatched);
+                    document.getElementById('btn-stop-all').style.display = 'block';
                     openDispatchPanel();
                     startDispatchPolling();
                 }} else {{
@@ -2439,6 +2451,31 @@ async def ui_topology():
         // ── Dispatch Panel ──
         let _dpFilter = 'all';
         let _dpData = null;
+
+        async function cancelAllJobs() {{
+            const btn = document.getElementById('btn-stop-all');
+            btn.disabled = true;
+            btn.textContent = 'Stopping...';
+            try {{
+                const res = await fetch('/api/runners/cancel-queued', {{ method: 'POST' }});
+                const data = await res.json();
+                const count = data.cancelled || 0;
+                showToast(count + ' jobs cancelled', 'success');
+                btn.style.display = 'none';
+                btn.disabled = false;
+                btn.textContent = 'Stop All';
+                const dispBtn = document.getElementById('btn-dispatch-all');
+                dispBtn.disabled = false;
+                dispBtn.textContent = 'Dispatch Runner';
+                const statusEl = document.getElementById('dispatch-all-status');
+                statusEl.innerHTML = '<span class="dispatch-pill failed">' + count + ' cancelled</span>';
+                loadDispatchData();
+            }} catch (e) {{
+                showToast('Cancel failed: ' + e.message, 'error');
+                btn.disabled = false;
+                btn.textContent = 'Stop All';
+            }}
+        }}
 
         function openDispatchPanel() {{
             document.getElementById('dispatch-overlay').classList.add('visible');
@@ -2476,7 +2513,7 @@ async def ui_topology():
         }}
 
         function renderDispatchSummary(jobs) {{
-            const counts = {{ completed: 0, failed: 0, running: 0, queued: 0, pushing: 0 }};
+            const counts = {{ completed: 0, failed: 0, running: 0, queued: 0, pushing: 0, cancelled: 0 }};
             let totalRows = 0;
             jobs.forEach(j => {{
                 const s = j.status || 'queued';
@@ -2485,9 +2522,11 @@ async def ui_topology():
             }});
             document.getElementById('dp-total').textContent = jobs.length;
             document.getElementById('dp-completed').textContent = counts.completed;
-            document.getElementById('dp-failed').textContent = counts.failed;
+            document.getElementById('dp-failed').textContent = counts.failed + counts.cancelled;
             document.getElementById('dp-running').textContent = counts.running + counts.pushing;
             document.getElementById('dp-rows').textContent = totalRows;
+            const hasActive = counts.queued > 0 || counts.running > 0 || counts.pushing > 0;
+            document.getElementById('btn-stop-all').style.display = hasActive ? 'block' : 'none';
         }}
 
         function renderDispatchJobs(jobs) {{
@@ -2526,6 +2565,7 @@ async def ui_topology():
         <div class="dispatch-panel">
             <div class="dp-header">
                 <h2>Dispatch Details</h2>
+                <button class="dp-stop-btn" onclick="cancelAllJobs()" data-testid="dp-btn-stop">Stop All</button>
                 <button class="dp-close" onclick="closeDispatchPanel()" data-testid="btn-close-dispatch">&times;</button>
             </div>
             <div class="dp-summary">

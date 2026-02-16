@@ -23,6 +23,7 @@ from ..db.runner_jobs import (
     list_runner_jobs,
     update_runner_status,
     update_heartbeat,
+    cancel_queued_jobs,
 )
 from ..logger import get_logger
 
@@ -100,6 +101,14 @@ async def dispatch_multiple(req: RunnerBatchDispatchRequest):
         "jobs": results,
         "message": f"{len(dispatched)} manifests dispatched to Farm",
     }
+
+
+@router.post("/cancel-queued")
+async def cancel_all_queued():
+    """Cancel all queued and running jobs. Operator stop button."""
+    cancelled = cancel_queued_jobs()
+    _log.info("Operator cancelled %d queued/running jobs", cancelled)
+    return {"cancelled": cancelled, "message": f"{cancelled} jobs cancelled"}
 
 
 @router.get("/progress")

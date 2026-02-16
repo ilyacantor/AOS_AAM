@@ -142,6 +142,26 @@ def get_runner_progress() -> dict:
     }
 
 
+def cancel_queued_jobs() -> int:
+    """Cancel all queued jobs by setting status to 'cancelled'. Returns count cancelled."""
+    from psycopg2 import sql as psql
+    from . import supabase_client as sb2
+
+    query = psql.SQL(
+        "UPDATE {} SET status = 'cancelled', completed_at = NOW(), "
+        "error_message = 'Cancelled by operator' "
+        "WHERE status IN ('queued', 'running') RETURNING job_id"
+    ).format(sb2._ident("runner_jobs"))
+
+    try:
+        rows = sb2._execute_composed(query)
+        return len(rows)
+    except Exception as exc:
+        import logging
+        logging.getLogger("aam.db.runner_jobs").error("Failed to cancel queued jobs: %s", exc)
+        return 0
+
+
 def list_runner_jobs(
     pipe_id: Optional[str] = None,
     status: Optional[str] = None,
