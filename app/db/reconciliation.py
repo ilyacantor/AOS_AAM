@@ -484,6 +484,91 @@ def _check_schema_completeness(aod_run_id: str) -> dict:
     }
 
 
+def _check_pipe_schema_content(aod_run_id: str) -> dict:
+    """Check whether declared pipes created from this run have real schema content.
+
+    Validates that entity_scope, identity_keys, and schema_info are populated
+    after inference — i.e. that DCL will receive actual field definitions,
+    not empty placeholders.
+    """
+    candidates = sb.select(
+        "connection_candidates",
+        filters={"aod_run_id": aod_run_id},
+        columns="candidate_id,vendor_name,matched_pipe_id",
+    )
+
+    pipe_ids = set()
+    vendor_by_pipe: dict[str, str] = {}
+    for c in candidates:
+        pid = c.get("matched_pipe_id")
+        if pid:
+            pipe_ids.add(pid)
+            vendor_by_pipe[pid] = c.get("vendor_name") or "unknown"
+
+    if not pipe_ids:
+        return {
+            "total_pipes": 0,
+            "pipes_with_fields": 0,
+            "pipes_without_fields": 0,
+            "field_coverage_pct": 0,
+            "by_source": {},
+            "missing_pipes": [],
+            "has_issues": False,
+        }
+
+    all_pipes = sb.select("declared_pipes")
+    pipes = [p for p in all_pipes if p.get("pipe_id") in pipe_ids]
+
+    pipes_with = 0
+    pipes_without = 0
+    by_source: dict[str, int] = defaultdict(int)
+    missing_pipes: list[dict] = []
+
+    for p in pipes:
+        pid = p["pipe_id"]
+        es_raw = p.get("entity_scope")
+        ik_raw = p.get("identity_keys")
+        si_raw = p.get("schema_info")
+
+        es = json.loads(es_raw) if isinstance(es_raw, str) else (es_raw or [])
+        ik = json.loads(ik_raw) if isinstance(ik_raw, str) else (ik_raw or [])
+        si = json.loads(si_raw) if isinstance(si_raw, str) else si_raw
+
+        has_es = isinstance(es, list) and len(es) > 0
+        has_ik = isinstance(ik, list) and len(ik) > 0
+        has_si = isinstance(si, dict) and bool(si)
+        fully_populated = has_es and has_ik and has_si
+
+        if fully_populated:
+            pipes_with += 1
+            source = si.get("schema_version", "unknown")
+            by_source[source] += 1
+        else:
+            pipes_without += 1
+            missing_pipes.append({
+                "pipe_id": pid,
+                "display_name": p.get("display_name") or "",
+                "source_system": p.get("source_system") or "",
+                "vendor": vendor_by_pipe.get(pid, "unknown"),
+                "entity_scope_count": len(es) if isinstance(es, list) else 0,
+                "identity_keys_count": len(ik) if isinstance(ik, list) else 0,
+                "has_schema_info": has_si,
+            })
+
+    total = pipes_with + pipes_without
+    coverage = round((pipes_with / max(total, 1)) * 100, 1)
+
+    return {
+        "total_pipes": total,
+        "pipes_with_fields": pipes_with,
+        "pipes_without_fields": pipes_without,
+        "field_coverage_pct": coverage,
+        "by_source": dict(by_source),
+        "missing_pipes": missing_pipes[:25],
+        "has_issues": pipes_without > 0,
+    }
+
+
 def _check_duplicates(aod_run_id: str) -> dict:
     """Find candidates sharing vendor + display_name combination."""
     candidates = sb.select("connection_candidates", filters={"aod_run_id": aod_run_id})
@@ -534,6 +619,7 @@ def get_aod_reconciliation(aod_run_id: str) -> dict:
     sor_check = _compare_sor_line_items(aod_run_id)
     completeness = _check_schema_completeness(aod_run_id)
     duplicates = _check_duplicates(aod_run_id)
+    pipe_schema = _check_pipe_schema_content(aod_run_id)
 
     handoff_row = summary["handoff_row"]
     candidates_stored = summary["candidates_stored"]
@@ -551,12 +637,14 @@ def get_aod_reconciliation(aod_run_id: str) -> dict:
     real_fabric_issues = fabric_check["mismatches"] if fabric_check["has_aod_data"] else 0
     real_sor_issues = sor_check["mismatches"] if sor_check["has_aod_data"] else 0
     schema_issues = completeness.get("incomplete_count", 0) if completeness.get("has_issues") else 0
+    pipe_schema_issues = pipe_schema.get("pipes_without_fields", 0)
     issues_count = (
         len(vendor_check["case_duplicates"])
         + real_fabric_issues
         + real_sor_issues
         + schema_issues
         + duplicates["total_groups"]
+        + pipe_schema_issues
     )
 
     return {
@@ -586,6 +674,7 @@ def get_aod_reconciliation(aod_run_id: str) -> dict:
             "fabric_comparison": fabric_check,
             "sor_comparison": sor_check,
             "schema_completeness": completeness,
+            "pipe_schema_content": pipe_schema,
             "duplicates": duplicates,
             "total_issues": issues_count,
         },

@@ -3062,7 +3062,92 @@ async def ui_reconcile(aod_run_id: str):
                 """
             sc_content += '<div style="font-size: 0.75rem; color: var(--slate-500); margin-top: 4px; font-style: italic;">These fields are populated during operator assignment or inference, not by AOD.</div>'
     
-    # --- Deep Check 5: Duplicate Detection ---
+    # --- Deep Check 5: Pipe Schema Content ---
+    ps = deep.get("pipe_schema_content", {})
+    ps_total = ps.get("total_pipes", 0)
+    ps_with = ps.get("pipes_with_fields", 0)
+    ps_without = ps.get("pipes_without_fields", 0)
+    ps_coverage = ps.get("field_coverage_pct", 0)
+    ps_by_source = ps.get("by_source", {})
+    ps_missing = ps.get("missing_pipes", [])
+
+    ps_bar_color = "var(--green-400)" if ps_coverage >= 80 else ("var(--orange-400)" if ps_coverage >= 50 else "var(--red-400)")
+
+    ps_content = ""
+    if ps_total == 0:
+        ps_content = '<div style="color: var(--slate-400); font-size: 0.85rem;">No declared pipes found for this run. Run inference first (POST /api/aam/infer).</div>'
+    else:
+        ps_content += f"""
+        <div style="margin-bottom: 16px;">
+            <div style="display: flex; justify-content: space-between; gap: 8px; margin-bottom: 4px;">
+                <span style="font-size: 0.85rem; color: #cbd5e1;">Pipe Field Coverage</span>
+                <span style="font-size: 0.85rem; font-weight: 600; color: {ps_bar_color};">{ps_coverage}%</span>
+            </div>
+            <div style="height: 8px; background: var(--slate-800); border-radius: 4px; overflow: hidden;">
+                <div style="height: 100%; width: {ps_coverage}%; background: {ps_bar_color}; border-radius: 4px;"></div>
+            </div>
+            <div style="font-size: 0.8rem; color: var(--slate-400); margin-top: 4px;">
+                <span style="color: var(--green-400); font-weight: 600;">{ps_with}</span> of {ps_total} pipes have entity_scope, identity_keys, and schema_info populated
+            </div>
+        </div>
+        """
+
+        if ps_by_source:
+            source_labels = {
+                "category_inferred": "Category Inferred",
+                "observation": "Live Observation",
+                "present": "Present",
+                "unknown": "Unknown Source",
+            }
+            ps_content += '<div style="font-size: 0.8rem; font-weight: 500; color: #cbd5e1; margin-bottom: 8px;">Field Resolution Source</div>'
+            ps_content += '<div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px;">'
+            source_colors = {
+                "category_inferred": ("#a5b4fc", "rgba(99,102,241,0.15)"),
+                "observation": ("#86efac", "rgba(34,197,94,0.15)"),
+            }
+            for src, count in sorted(ps_by_source.items(), key=lambda x: -x[1]):
+                label = source_labels.get(src, src.replace("_", " ").title())
+                colors = source_colors.get(src, ("#cbd5e1", "rgba(255,255,255,0.05)"))
+                ps_content += f'<span style="background: {colors[1]}; color: {colors[0]}; padding: 3px 10px; border-radius: 4px; font-size: 0.8rem;">{label}: {count}</span>'
+            ps_content += '</div>'
+
+        if ps_missing:
+            ps_content += f"""
+            <div style="font-size: 0.8rem; font-weight: 500; color: var(--orange-400); margin-bottom: 8px;">Pipes Missing Schema Content ({ps_without})</div>
+            <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+                <thead>
+                    <tr style="border-bottom: 1px solid rgba(255,255,255,0.1);">
+                        <th style="text-align: left; padding: 8px; color: var(--slate-400); font-weight: 500;">Vendor</th>
+                        <th style="text-align: left; padding: 8px; color: var(--slate-400); font-weight: 500;">Display Name</th>
+                        <th style="text-align: center; padding: 8px; color: var(--slate-400); font-weight: 500;">Entity Scope</th>
+                        <th style="text-align: center; padding: 8px; color: var(--slate-400); font-weight: 500;">Identity Keys</th>
+                        <th style="text-align: center; padding: 8px; color: var(--slate-400); font-weight: 500;">Schema Info</th>
+                    </tr>
+                </thead>
+                <tbody>
+            """
+            for mp in ps_missing:
+                es_count = mp.get("entity_scope_count", 0)
+                ik_count = mp.get("identity_keys_count", 0)
+                has_si = mp.get("has_schema_info", False)
+                es_cell = f'<span style="color: var(--green-400);">{es_count}</span>' if es_count > 0 else '<span style="color: var(--red-400);">0</span>'
+                ik_cell = f'<span style="color: var(--green-400);">{ik_count}</span>' if ik_count > 0 else '<span style="color: var(--red-400);">0</span>'
+                si_cell = '<span style="color: var(--green-400);">&#10003;</span>' if has_si else '<span style="color: var(--red-400);">&#10007;</span>'
+                ps_content += f"""
+                    <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                        <td style="padding: 8px; font-weight: 500; color: #e2e8f0;">{mp.get("vendor", "")}</td>
+                        <td style="padding: 8px; color: #cbd5e1;">{mp.get("display_name", "")}</td>
+                        <td style="padding: 8px; text-align: center;">{es_cell}</td>
+                        <td style="padding: 8px; text-align: center;">{ik_cell}</td>
+                        <td style="padding: 8px; text-align: center;">{si_cell}</td>
+                    </tr>
+                """
+            ps_content += """
+                </tbody>
+            </table>
+            """
+
+    # --- Deep Check 6: Duplicate Detection ---
     dd = deep.get("duplicates", {})
     dd_groups = dd.get("duplicate_groups", [])
     dd_total = dd.get("total_duplicate_rows", 0)
@@ -3226,7 +3311,7 @@ async def ui_reconcile(aod_run_id: str):
 
         <!-- Deep Checks Section -->
         <h2 style="margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--slate-700);">Deep Reconciliation Checks</h2>
-        <p class="page-subtitle" style="margin-top: -8px;">Detailed data quality analysis across 5 dimensions</p>
+        <p class="page-subtitle" style="margin-top: -8px;">Detailed data quality analysis across 6 dimensions</p>
 
         <!-- Check 1: Vendor Matching -->
         <div class="deep-check">
@@ -3260,7 +3345,15 @@ async def ui_reconcile(aod_run_id: str):
             </div>
         </div>
 
-        <!-- Check 5: Duplicate Detection -->
+        <!-- Check 5: Pipe Schema Content -->
+        <div class="deep-check">
+            <div class="panel" data-testid="check-pipe-schema-content">
+                {check_header("Pipe Schema Content", ps.get("has_issues", False), ps_without, "Validates that declared pipes have entity_scope, identity_keys, and schema_info populated for DCL export")}
+                {ps_content}
+            </div>
+        </div>
+
+        <!-- Check 6: Duplicate Detection -->
         <div class="deep-check">
             <div class="panel" data-testid="check-duplicates">
                 {check_header("Duplicate Detection", dd.get("has_issues", False), dd.get("total_groups", 0), "Finds candidates with identical vendor + display name combinations")}
