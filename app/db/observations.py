@@ -48,6 +48,32 @@ def mark_observation_processed(observation_id: str):
     sb.update("observations", {"processed": True}, filters={"observation_id": observation_id})
 
 
+def get_all_schema_samples() -> list[dict]:
+    """Fetch all observations that have a schema_sample, returning only
+    the fields needed for field resolution (candidate_id, source_system,
+    schema_sample).  Single DB round-trip for the whole table.
+    """
+    rows = sb.select(
+        "observations",
+        columns="candidate_id,source_system,schema_sample",
+        raw_params={"schema_sample": "not.is.null"},
+    )
+    results = []
+    for row in rows:
+        schema_raw = row.get("schema_sample")
+        if not schema_raw:
+            continue
+        schema = json.loads(schema_raw) if isinstance(schema_raw, str) else schema_raw
+        if not isinstance(schema, dict) or not schema:
+            continue
+        results.append({
+            "candidate_id": row.get("candidate_id"),
+            "source_system": row.get("source_system"),
+            "field_names": list(schema.keys()),
+        })
+    return results
+
+
 def _row_to_observation(row) -> dict:
     """Convert database row to observation dict"""
     return {

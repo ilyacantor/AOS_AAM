@@ -3,15 +3,28 @@ AAM → DCL Export Module
 
 Provides pipe definitions grouped by fabric plane for DCL consumption.
 Uses REAL fabric plane data from AOD instead of hardcoded vendors.
+
+Field resolution priority (highest to lowest):
+  1. Observation schema_sample (real fields from adapter discovery)
+  2. Declared pipe identity_keys + entity_scope (inference-generated)
+  3. Category-based standard fields (metadata inference from category)
 """
+import json
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Optional
 
 from .models import CandidateStatus
 from pydantic import BaseModel
 from datetime import datetime
 
-from .db import get_candidates_by_aod_run, list_candidates, get_fabric_planes
+from .db import (
+    get_candidates_by_aod_run,
+    list_candidates,
+    get_fabric_planes,
+    get_all_schema_samples,
+)
+from .db import supabase_client as sb
+from .constants import CATEGORY_STANDARD_FIELDS
 
 _log = logging.getLogger(__name__)
 
@@ -48,16 +61,125 @@ class DCLExportResponse(BaseModel):
     source: str = "aam"
 
 
+# ---------------------------------------------------------------------------
+# Field resolution — resolves fields for each candidate using all
+# available data sources.  Batch-fetches everything upfront to avoid
+# N+1 DB queries.
+# ---------------------------------------------------------------------------
+
+def _build_field_maps(candidate_ids: set[str], vendor_names: set[str]) -> dict:
+    """Pre-fetch all field data in bulk.  Returns a dict with lookup maps.
+
+    Returns:
+        {
+            "by_candidate_id": {candidate_id: [field_names]},
+            "by_source_system": {source_system_lower: [field_names]},
+            "by_pipe_id": {pipe_id: [field_names]},
+        }
+    """
+    maps: dict = {
+        "by_candidate_id": {},
+        "by_source_system": {},
+        "by_pipe_id": {},
+    }
+
+    # --- Source 1: Observation schema_samples (single DB call) ---
+    try:
+        obs_samples = get_all_schema_samples()
+        for sample in obs_samples:
+            cid = sample.get("candidate_id")
+            src = (sample.get("source_system") or "").lower()
+            fields = sample["field_names"]
+
+            if cid and cid in candidate_ids:
+                existing = maps["by_candidate_id"].get(cid, [])
+                merged = list(dict.fromkeys(existing + fields))  # dedupe preserving order
+                maps["by_candidate_id"][cid] = merged
+
+            if src:
+                existing = maps["by_source_system"].get(src, [])
+                merged = list(dict.fromkeys(existing + fields))
+                maps["by_source_system"][src] = merged
+    except Exception as exc:
+        _log.warning("Failed to fetch observation schema samples: %s", exc)
+
+    # --- Source 2: Declared pipes (identity_keys + entity_scope) ---
+    try:
+        rows = sb.select(
+            "declared_pipes",
+            columns="pipe_id,identity_keys,entity_scope",
+        )
+        for row in rows:
+            pid = row.get("pipe_id")
+            if not pid:
+                continue
+            fields: list[str] = []
+            ik_raw = row.get("identity_keys")
+            if ik_raw:
+                ik = json.loads(ik_raw) if isinstance(ik_raw, str) else ik_raw
+                if isinstance(ik, list):
+                    fields.extend(ik)
+            es_raw = row.get("entity_scope")
+            if es_raw:
+                es = json.loads(es_raw) if isinstance(es_raw, str) else es_raw
+                if isinstance(es, list):
+                    fields.extend(es)
+            if fields:
+                maps["by_pipe_id"][pid] = list(dict.fromkeys(fields))
+    except Exception as exc:
+        _log.warning("Failed to fetch declared pipe fields: %s", exc)
+
+    return maps
+
+
+def _resolve_fields(candidate: dict, field_maps: dict) -> List[str]:
+    """Resolve field names for a single candidate using the priority cascade.
+
+    Priority:
+      1. Observation linked by candidate_id  (real adapter schema)
+      2. Observation matched by source_system ↔ vendor_name  (fuzzy match)
+      3. Declared pipe identity_keys + entity_scope via matched_pipe_id
+      4. Category-based standard fields  (metadata inference)
+    """
+    cid = candidate.get("candidate_id", "")
+    vendor = (candidate.get("vendor_name") or "").lower()
+    matched_pipe = candidate.get("matched_pipe_id")
+    category = (candidate.get("category") or "other").lower()
+
+    # Priority 1: Direct observation link
+    fields = field_maps["by_candidate_id"].get(cid)
+    if fields:
+        return fields
+
+    # Priority 2: Source system match
+    fields = field_maps["by_source_system"].get(vendor)
+    if fields:
+        return fields
+
+    # Priority 3: Declared pipe fields
+    if matched_pipe:
+        fields = field_maps["by_pipe_id"].get(matched_pipe)
+        if fields:
+            return fields
+
+    # Priority 4: Category standard fields
+    fields = CATEGORY_STANDARD_FIELDS.get(category)
+    if fields:
+        return list(fields)  # Return a copy
+
+    return []
+
+
 def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
     """
     Build DCL export from AAM candidates using REAL fabric planes from AOD.
-    
+
     Groups candidates by fabric plane and formats for DCL consumption.
     If aod_run_id is provided, filters to that run. Otherwise, uses all candidates.
     """
     # Fetch real fabric planes from database
     fabric_planes_db = get_fabric_planes(aod_run_id)
-    
+
     # Fetch candidates
     if aod_run_id:
         candidates = get_candidates_by_aod_run(aod_run_id)
@@ -65,7 +187,12 @@ def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
         # Get all candidates with status 'connected' or 'triaged'
         all_candidates = list_candidates()
         candidates = [c for c in all_candidates if c.get("status") in [CandidateStatus.CONNECTED, CandidateStatus.TRIAGED, CandidateStatus.NEW]]
-    
+
+    # Pre-fetch field data in bulk (3 DB calls total, not N per candidate)
+    candidate_ids = {c.get("candidate_id", "") for c in candidates}
+    vendor_names = {(c.get("vendor_name") or "").lower() for c in candidates}
+    field_maps = _build_field_maps(candidate_ids, vendor_names)
+
     # Group candidates by fabric plane (using fabric_plane_id linkage)
     planes_dict: Dict[str, Dict] = {}
     for plane_db in fabric_planes_db:
@@ -74,7 +201,7 @@ def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
             "plane": plane_db,
             "candidates": []
         }
-    
+
     # Assign candidates to their fabric plane using fabric_plane_id,
     # with fallback to connected_via_plane (set by inference).
     unlinked_candidates = []
@@ -100,35 +227,36 @@ def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
     for candidate in unlinked_candidates:
         _log.debug("Candidate %s (%s) has no fabric plane link — skipping DCL grouping",
                    candidate.get("vendor_name"), candidate.get("category"))
-    
+
     # Build fabric plane objects for DCL
     fabric_planes_output = []
     total_connections = 0
-    
+
     for plane_id, data in planes_dict.items():
         plane = data["plane"]
         candidates_list = data["candidates"]
-        
+
         if not candidates_list:
             # Skip empty fabric planes
             continue
-        
+
         connections = []
         for candidate in candidates_list:
+            resolved_fields = _resolve_fields(candidate, field_maps)
             connection = DCLConnectionSchema(
                 pipe_id=candidate.get("candidate_id", ""),
                 source_name=candidate.get("display_name", "Unknown"),
                 vendor=candidate.get("vendor_name", "Unknown"),
                 category=candidate.get("category", "other"),
                 governance_status=candidate.get("governance_status"),
-                fields=[],  # Schema column names — populated after observation/enrichment
+                fields=resolved_fields,
                 health="unknown",
                 last_sync=candidate.get("updated_at"),
                 asset_key=candidate.get("asset_key", ""),
                 aod_asset_id=candidate.get("aod_asset_id"),
             )
             connections.append(connection)
-        
+
         fabric_plane_obj = DCLFabricPlane(
             plane_type=plane["plane_type"],
             vendor=plane["vendor"],
@@ -138,7 +266,7 @@ def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
         )
         fabric_planes_output.append(fabric_plane_obj)
         total_connections += len(connections)
-    
+
     return DCLExportResponse(
         aod_run_id=aod_run_id,
         timestamp=datetime.utcnow().isoformat() + "Z",

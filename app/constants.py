@@ -105,3 +105,70 @@ INFRA_VENDOR_PLANE: dict[str, str] = {
     "redshift": "DATA_WAREHOUSE",
     "databricks": "DATA_WAREHOUSE",
 }
+
+
+# ---------------------------------------------------------------------------
+# Standard field definitions per application category.
+#
+# These represent the typical schema fields exposed by each category of
+# enterprise system.  AAM uses these as inferred field definitions when
+# live schema discovery (observations) has not yet produced concrete
+# field lists.  DCL consumes these to build semantic mappings.
+#
+# DESIGN: This is metadata inference — AAM's core responsibility.
+# The field names are real-world-accurate defaults for each category,
+# enabling DCL to perform semantic mapping (field name → business concept)
+# even before live adapters have been connected.
+# ---------------------------------------------------------------------------
+CATEGORY_STANDARD_FIELDS: dict[str, list[str]] = {
+    "crm": [
+        "account_id", "account_name", "contact_id", "contact_name", "email",
+        "phone", "opportunity_id", "deal_stage", "deal_amount", "owner_id",
+        "created_date", "modified_date", "industry", "annual_revenue", "status",
+    ],
+    "erp": [
+        "entity_id", "company_code", "fiscal_year", "posting_date", "document_number",
+        "gl_account", "cost_center", "amount", "currency", "vendor_id",
+        "material_number", "plant", "profit_center", "created_date", "modified_date",
+    ],
+    "hcm": [
+        "employee_id", "first_name", "last_name", "department", "job_title",
+        "hire_date", "manager_id", "salary", "location", "employment_status",
+        "email", "cost_center", "org_unit", "created_date", "modified_date",
+    ],
+    "hr": [
+        "employee_id", "first_name", "last_name", "department", "job_title",
+        "hire_date", "manager_id", "salary", "location", "employment_status",
+        "email", "cost_center", "org_unit", "created_date", "modified_date",
+    ],
+    "itsm": [
+        "incident_id", "ticket_number", "priority", "status", "category",
+        "assigned_to", "created_date", "resolved_date", "description", "impact",
+        "urgency", "sla_breach", "requester_id", "asset_id", "modified_date",
+    ],
+    "idp": [
+        "user_id", "username", "email", "display_name", "status",
+        "last_login", "mfa_enabled", "groups", "roles", "created_date",
+        "provider", "federation_id", "session_count", "risk_score", "modified_date",
+    ],
+    "identity": [
+        "user_id", "username", "email", "display_name", "status",
+        "last_login", "mfa_enabled", "groups", "roles", "created_date",
+        "provider", "federation_id", "session_count", "risk_score", "modified_date",
+    ],
+    "finance": [
+        "transaction_id", "account_number", "amount", "currency", "transaction_date",
+        "posting_date", "vendor_id", "invoice_number", "payment_status", "cost_center",
+        "gl_code", "department", "description", "created_date", "modified_date",
+    ],
+    "saas": [
+        "subscription_id", "account_id", "plan_name", "status", "mrr",
+        "seats_licensed", "seats_used", "renewal_date", "owner_id", "created_date",
+        "usage_score", "last_active", "integration_count", "modified_date", "domain",
+    ],
+    "cmdb": [
+        "ci_id", "ci_name", "ci_type", "status", "environment",
+        "owner", "department", "vendor", "version", "ip_address",
+        "location", "criticality", "last_discovered", "created_date", "modified_date",
+    ],
+}
