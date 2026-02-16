@@ -43,9 +43,13 @@ class Settings:
         )
         # Farm intake URL — where AAM dispatches JobManifests (Path 2).
         # Farm executes extraction and pushes data to DCL (Path 3).
-        self.FARM_INTAKE_URL: str = os.environ.get(
-            "FARM_INTAKE_URL", "http://127.0.0.1:5001/api/farm/manifest-intake"
-        )
+        _farm_base = os.environ.get("FARM_INTAKE_URL", "").rstrip("/")
+        if _farm_base and not _farm_base.endswith("/api/farm/manifest-intake"):
+            self.FARM_INTAKE_URL: str = _farm_base + "/api/farm/manifest-intake"
+        elif _farm_base:
+            self.FARM_INTAKE_URL: str = _farm_base
+        else:
+            self.FARM_INTAKE_URL: str = "http://127.0.0.1:5001/api/farm/manifest-intake"
 
 
 settings = Settings()
