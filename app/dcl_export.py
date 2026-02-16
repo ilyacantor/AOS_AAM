@@ -294,15 +294,19 @@ def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
         if not candidates_list:
             continue
 
+        # Sort candidates by updated_at descending so when we deduplicate
+        # by pipe_id below, the first one seen is the most recent.
+        candidates_list.sort(
+            key=lambda c: c.get("updated_at") or c.get("created_at") or "",
+            reverse=True,
+        )
+
         connections = []
+        seen_pipe_ids: set[str] = set()
         for candidate in candidates_list:
             cid = candidate.get("candidate_id", "")
             matched_pipe_id = candidate.get("matched_pipe_id")
 
-            # Only fully-inferred pipes go to DCL (matched_pipe_id is
-            # the canonical join key).  Candidates still pending
-            # inference are skipped so DCL never sees provisional data
-            # and Farm never gets a mismatched join key.
             if not matched_pipe_id:
                 skipped.append(SkippedConnection(
                     candidate_id=cid,
@@ -312,9 +316,21 @@ def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
                 ))
                 continue
 
+            # pipe_id is a primary key in DCL's PipeDefinitionStore —
+            # export only one connection per unique pipe_id, keeping
+            # the most recently updated candidate.
+            if matched_pipe_id in seen_pipe_ids:
+                skipped.append(SkippedConnection(
+                    candidate_id=cid,
+                    vendor=candidate.get("vendor_name", "Unknown"),
+                    reason="duplicate_pipe_id",
+                    discovered_at=candidate.get("created_at") or candidate.get("updated_at"),
+                ))
+                continue
+            seen_pipe_ids.add(matched_pipe_id)
+
             resolved_fields = _resolve_fields(candidate, field_maps)
 
-            # Enrich with pipe inference metadata from declared_pipes
             pipe_meta = field_maps["pipe_metadata"].get(matched_pipe_id, {})
 
             connection = DCLConnectionSchema(
