@@ -8,8 +8,8 @@ from ..db import get_latest_aod_run
 NAV_STYLE = """
 <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { font-family: 'Quicksand', sans-serif; background: #0f172a; color: #ffffff; height: 100%; overflow: hidden; }
-    body { position: relative; overflow-y: auto; }
+    html { height: 100%; }
+    body { font-family: 'Quicksand', sans-serif; background: #0f172a; color: #ffffff; height: 100%; position: relative; }
     .nav {
         background: rgba(30, 41, 59, 0.9);
         border-bottom: 1px solid #334155;
