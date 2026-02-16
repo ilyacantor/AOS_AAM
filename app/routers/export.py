@@ -1,14 +1,82 @@
 """
 Export Router — DCL export, push tracking, and stats endpoints.
+
+BRIDGE NOTE (dual-post):
+  When pushing to DCL, AAM posts the export payload to TWO DCL endpoints:
+    1. DCL_INGEST_URL  — feeds DCL's existing dashboard/graph pipeline
+    2. DCL_EXPORT_PIPES_URL — populates DCL's PipeDefinitionStore (ingest guard)
+
+  This dual-post is a TEMPORARY BRIDGE.  DCL should consolidate so a single
+  ingest populates both stores internally.  Once DCL wires that up, AAM
+  drops the second POST and this bridge code is removed.
 """
 from fastapi import APIRouter, HTTPException, Query, Request
 from typing import Optional
 from datetime import datetime
+import logging
+
+import httpx
 
 from ..db import get_pipe_stats, list_candidates, record_dcl_push, list_dcl_pushes, get_dcl_push
 from ..dcl_export import build_dcl_export
+from ..config import settings
+
+_log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Export"])
+
+_DCL_TIMEOUT = 15.0
+
+
+async def _deliver_to_dcl(export_payload: dict) -> dict:
+    """POST the export payload to DCL's export-pipes endpoint.
+
+    Returns a delivery_report with the status of the POST.
+
+    This populates DCL's PipeDefinitionStore so the ingest guard
+    recognises AAM pipe_ids when Farm pushes extracted data.
+
+    NOTE: DCL_INGEST_URL (/api/dcl/ingest) is NOT used here — that
+    endpoint expects Farm data records, not AAM structure exports.
+    AAM only POSTs structure to /api/dcl/export-pipes.
+
+    BRIDGE: Once DCL consolidates its stores so the existing AAM
+    ingest pathway also populates the PipeDefinitionStore, this
+    explicit POST can be removed.
+    """
+    report: dict = {"export_pipes": None}
+
+    async with httpx.AsyncClient(timeout=_DCL_TIMEOUT) as client:
+        if settings.DCL_EXPORT_PIPES_URL:
+            try:
+                resp = await client.post(
+                    settings.DCL_EXPORT_PIPES_URL,
+                    json=export_payload,
+                    headers={
+                        "x-api-key": settings.DCL_API_KEY,
+                        "x-source": "aam",
+                    },
+                )
+                report["export_pipes"] = {
+                    "url": settings.DCL_EXPORT_PIPES_URL,
+                    "status": resp.status_code,
+                    "ok": resp.is_success,
+                    "body": resp.json() if resp.is_success else resp.text[:500],
+                    "bridge": True,
+                }
+                _log.info("DCL export-pipes POST (bridge) %s → %d",
+                          settings.DCL_EXPORT_PIPES_URL, resp.status_code)
+            except Exception as exc:
+                report["export_pipes"] = {
+                    "url": settings.DCL_EXPORT_PIPES_URL,
+                    "error": str(exc),
+                    "bridge": True,
+                }
+                _log.warning("DCL export-pipes POST (bridge) failed: %s", exc)
+        else:
+            report["export_pipes"] = {"skipped": True, "reason": "DCL_URL not configured", "bridge": True}
+
+    return report
 
 
 @router.get("/api/export/dcl/declared-pipes")
@@ -25,7 +93,10 @@ async def export_for_dcl(aod_run_id: Optional[str] = Query(None)):
 async def push_to_dcl(request: Request):
     """
     Export connections to DCL and record the push for reconciliation.
-    Returns the export payload and a push_id for tracking.
+
+    Dual-posts to DCL's ingest endpoint (dashboard pipeline) AND
+    DCL's export-pipes endpoint (PipeDefinitionStore).  The second
+    POST is a temporary bridge — see module docstring.
 
     Optional body: {"aod_run_id": "...", "notes": "..."}
     """
@@ -41,6 +112,8 @@ async def push_to_dcl(request: Request):
     export_data = build_dcl_export(aod_run_id=aod_run_id)
     export_payload = export_data.model_dump()
 
+    delivery_report = await _deliver_to_dcl(export_payload)
+
     push_record = record_dcl_push(
         pipe_count=export_data.total_connections,
         payload=export_payload,
@@ -50,6 +123,7 @@ async def push_to_dcl(request: Request):
 
     return {
         "push": push_record,
+        "delivery": delivery_report,
         "export": export_payload,
     }
 

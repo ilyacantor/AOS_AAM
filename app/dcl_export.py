@@ -53,7 +53,7 @@ class DCLConnectionSchema(BaseModel):
     governance_status: Optional[str] = None
     fields: List[str] = []
     entity_scope: Optional[str] = None                # From pipe inference
-    identity_keys: Optional[List[str]] = None         # From pipe inference
+    identity_keys: List[str] = []                     # From pipe inference
     transport_kind: Optional[str] = None              # From pipe inference
     modality: Optional[str] = None                    # From pipe inference
     change_semantics: Optional[str] = None            # From pipe inference
@@ -351,7 +351,7 @@ def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
                 governance_status=candidate.get("governance_status"),
                 fields=resolved_fields,
                 entity_scope=pipe_meta.get("entity_scope"),
-                identity_keys=pipe_meta.get("identity_keys"),
+                identity_keys=pipe_meta.get("identity_keys") or [],
                 transport_kind=pipe_meta.get("transport_kind"),
                 modality=pipe_meta.get("modality"),
                 change_semantics=pipe_meta.get("change_semantics"),
