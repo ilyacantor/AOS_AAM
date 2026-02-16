@@ -46,6 +46,106 @@ _TRANSPORT_ADAPTER = {
     TransportKind.WEBHOOK: "webhook",
 }
 
+VALID_CATEGORIES = {"crm", "erp", "billing", "hr", "support", "devops", "observability", "infrastructure"}
+
+CATEGORY_SYNONYMS = {
+    "hcm": "hr",
+    "human_capital": "hr",
+    "data": "infrastructure",
+    "warehouse": "infrastructure",
+    "lake": "infrastructure",
+    "analytics": "infrastructure",
+    "bi": "infrastructure",
+    "itsm": "support",
+    "helpdesk": "support",
+    "monitoring": "observability",
+    "apm": "observability",
+    "ci_cd": "devops",
+    "scm": "devops",
+    "project_management": "devops",
+    "collaboration": "support",
+    "finance": "erp",
+    "accounting": "erp",
+    "payments": "billing",
+    "subscription": "billing",
+    "idp": "infrastructure",
+    "saas": "support",
+    "security": "infrastructure",
+}
+
+VENDOR_CATEGORY = {
+    "salesforce": "crm",
+    "hubspot": "crm",
+    "pipedrive": "crm",
+    "zoho": "crm",
+    "sap": "erp",
+    "oracle": "erp",
+    "netsuite": "erp",
+    "workday": "hr",
+    "bamboohr": "hr",
+    "adp": "hr",
+    "zendesk": "support",
+    "freshdesk": "support",
+    "intercom": "support",
+    "zoom": "support",
+    "slack": "support",
+    "jira": "devops",
+    "atlassian": "devops",
+    "trello": "devops",
+    "asana": "devops",
+    "basecamp": "devops",
+    "notion": "devops",
+    "miro": "devops",
+    "github": "devops",
+    "gitlab": "devops",
+    "datadog": "observability",
+    "newrelic": "observability",
+    "splunk": "observability",
+    "stripe": "billing",
+    "chargebee": "billing",
+    "recurly": "billing",
+    "snowflake": "infrastructure",
+    "bigquery": "infrastructure",
+    "redshift": "infrastructure",
+    "databricks": "infrastructure",
+    "aws": "infrastructure",
+    "azure": "infrastructure",
+    "gcp": "infrastructure",
+    "kong": "infrastructure",
+    "apigee": "infrastructure",
+    "celigo": "infrastructure",
+    "mulesoft": "infrastructure",
+    "tray": "infrastructure",
+    "aws eventbridge": "infrastructure",
+    "bytedance": "support",
+    "tiktok": "support",
+    "docusign": "erp",
+    "surveymonkey": "support",
+    "momentive": "support",
+    "microsoft": "support",
+    "hipchat": "support",
+}
+
+
+def normalize_category(raw_category: Optional[str], vendor: Optional[str] = None) -> Optional[str]:
+    """Normalize a category to the closed vocabulary. Returns None if unclassifiable."""
+    if raw_category:
+        cat = raw_category.lower().strip()
+        if cat in VALID_CATEGORIES:
+            return cat
+        mapped = CATEGORY_SYNONYMS.get(cat)
+        if mapped:
+            return mapped
+
+    if vendor:
+        v = vendor.lower().strip()
+        vendor_cat = VENDOR_CATEGORY.get(v)
+        if vendor_cat:
+            return vendor_cat
+
+    return None
+
+
 _seq_counter: Optional[int] = None
 
 
@@ -107,11 +207,14 @@ def build_manifest(
 
     run_id = _next_run_id(source_system)
 
-    category = pipe.get("category") or pipe.get("app_category") or None
-    if not category:
+    raw_category = pipe.get("category") or pipe.get("app_category") or None
+    vendor = pipe.get("source_system") or pipe.get("vendor_name") or None
+    if not raw_category:
         candidate = get_candidate(pipe.get("pipe_id", ""))
         if candidate:
-            category = candidate.get("category") or None
+            raw_category = candidate.get("category") or None
+            vendor = vendor or candidate.get("vendor_name")
+    category = normalize_category(raw_category, vendor)
 
     return JobManifest(
         run_id=run_id,
@@ -193,10 +296,12 @@ def dispatch_batch(
     pipe_map = {p["pipe_id"]: p for p in all_pipes}
 
     all_candidates = list_candidates()
-    candidate_category_map = {c["candidate_id"]: c.get("category") for c in all_candidates if c.get("category")}
+    candidate_map = {c["candidate_id"]: c for c in all_candidates}
     for p in all_pipes:
-        if not p.get("category"):
-            p["category"] = candidate_category_map.get(p["pipe_id"])
+        cand = candidate_map.get(p["pipe_id"])
+        raw_cat = p.get("category") or (cand.get("category") if cand else None)
+        vendor = p.get("source_system") or (cand.get("vendor_name") if cand else None)
+        p["category"] = normalize_category(raw_cat, vendor)
 
     manifests_data = []
     manifest_objects = []
@@ -208,6 +313,9 @@ def dispatch_batch(
             pipe = pipe_map.get(pid)
             if not pipe:
                 errors.append({"pipe_id": pid, "status": "error", "error": f"Pipe {pid} not found"})
+                continue
+            if not pipe.get("category"):
+                errors.append({"pipe_id": pid, "status": "skipped", "error": "Unclassified category — incomplete inference, not dispatchable"})
                 continue
             manifest = build_manifest(pipe, trigger)
             manifests_data.append(manifest.model_dump())

@@ -17,6 +17,15 @@ from .models import CandidateStatus
 from pydantic import BaseModel
 from datetime import datetime
 
+from .services.runner_dispatch import normalize_category
+
+
+def _normalize_export_category(raw_category: Optional[str], vendor: Optional[str] = None) -> str:
+    """Normalize category for DCL export. Falls back to 'other' only if truly unresolvable."""
+    result = normalize_category(raw_category, vendor)
+    return result or "other"
+
+
 from .db import (
     get_candidates_by_aod_run,
     list_candidates,
@@ -338,7 +347,7 @@ def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
                 candidate_id=cid,
                 source_name=candidate.get("display_name", "Unknown"),
                 vendor=candidate.get("vendor_name", "Unknown"),
-                category=candidate.get("category", "other"),
+                category=_normalize_export_category(candidate.get("category"), candidate.get("vendor_name")),
                 governance_status=candidate.get("governance_status"),
                 fields=resolved_fields,
                 entity_scope=pipe_meta.get("entity_scope"),
