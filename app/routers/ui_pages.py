@@ -1852,6 +1852,7 @@ async def ui_topology():
                 <button class="sb-btn" id="btn-run-inference">Run Inference</button>
                 <button class="sb-btn" id="btn-export-dcl">Export to DCL</button>
                 <button class="sb-btn sb-btn-runner" onclick="dispatchAllRunners()" id="btn-dispatch-all" data-testid="btn-dispatch-all">Dispatch Runner</button>
+                <button class="sb-btn" onclick="runFullPipeline()" id="btn-full-pipeline" data-testid="btn-full-pipeline" style="background:var(--green-700,#15803d);color:#fff;margin-top:4px;">Fetch → Infer → Export</button>
                 <button class="sb-btn sb-btn-stop" onclick="cancelAllJobs()" id="btn-stop-all" data-testid="btn-stop-all" style="display:none;">Stop All</button>
                 <button class="sb-btn" onclick="openDispatchPanel()" id="btn-view-dispatch" data-testid="btn-view-dispatch" style="font-size:0.72rem;">View Dispatch</button>
                 <span id="dispatch-all-status" style="display:none;font-size:0.68rem;margin-top:2px;"></span>
@@ -1949,6 +1950,74 @@ async def ui_topology():
                 btn.textContent = 'Failed (' + elapsed + 's)';
                 btn.disabled = false;
                 _fetchRunning = false;
+            }}
+        }}
+
+        async function runFullPipeline() {{
+            var btn = document.getElementById('btn-full-pipeline');
+            btn.disabled = true;
+            var start = Date.now();
+            var timer = setInterval(function() {{
+                var s = Math.floor((Date.now() - start) / 1000);
+                btn.textContent = btn._step + '... ' + s + 's';
+            }}, 500);
+
+            function setStep(label) {{
+                btn._step = label;
+                btn.textContent = label + '... 0s';
+            }}
+
+            try {{
+                // Step 1: Fetch AOD data
+                setStep('1/3 Fetching');
+                var res = await fetch('/api/handoff/aod/fetch', {{ method: 'POST' }});
+                if (!res.ok) {{
+                    var d = await res.json().catch(function() {{ return {{}}; }});
+                    throw new Error('Fetch failed: ' + (d.detail || res.status));
+                }}
+                var fetchData = await res.json();
+
+                // Step 2: Run inference
+                setStep('2/3 Inferring');
+                res = await fetch('/api/aam/infer', {{ method: 'POST' }});
+                if (!res.ok) {{
+                    var d = await res.json().catch(function() {{ return {{}}; }});
+                    throw new Error('Inference failed: ' + (d.detail || res.status));
+                }}
+                var inferData = await res.json();
+
+                // Step 3: Export to DCL (push)
+                setStep('3/3 Exporting');
+                res = await fetch('/api/export/dcl/push', {{ method: 'POST', headers: {{'Content-Type': 'application/json'}}, body: '{{}}' }});
+                if (!res.ok) {{
+                    var d = await res.json().catch(function() {{ return {{}}; }});
+                    throw new Error('Export failed: ' + (d.detail || res.status));
+                }}
+                var exportData = await res.json();
+
+                clearInterval(timer);
+                var elapsed = Math.floor((Date.now() - start) / 1000);
+
+                var pipesCreated = inferData.pipes_created || 0;
+                var pipeCount = exportData.export ? exportData.export.total_connections : 0;
+                var dclOk = exportData.delivery && exportData.delivery.export_pipes && exportData.delivery.export_pipes.ok;
+
+                var msg = 'Pipeline complete (' + elapsed + 's): ' + pipesCreated + ' pipes inferred, ' + pipeCount + ' exported to DCL';
+                if (dclOk) {{
+                    msg += ' (DCL accepted)';
+                }} else if (exportData.delivery && exportData.delivery.export_pipes && exportData.delivery.export_pipes.error) {{
+                    msg += ' (DCL unreachable)';
+                }}
+                showToast(msg, dclOk ? 'success' : 'warning');
+                btn.textContent = 'Done (' + elapsed + 's)';
+                btn.disabled = false;
+                setTimeout(() => location.reload(), 1500);
+            }} catch (e) {{
+                clearInterval(timer);
+                var elapsed = Math.floor((Date.now() - start) / 1000);
+                showToast('Pipeline failed: ' + e.message, 'error');
+                btn.textContent = 'Failed (' + elapsed + 's)';
+                btn.disabled = false;
             }}
         }}
 
