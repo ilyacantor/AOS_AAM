@@ -2459,7 +2459,9 @@ async def ui_topology():
 
         async function loadDispatchData() {{
             const body = document.getElementById('dp-body');
-            body.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--slate-500);">Loading...</td></tr>';
+            if (!_dpData) {{
+                body.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--slate-500);">Loading...</td></tr>';
+            }}
             try {{
                 const res = await fetch('/api/runners/jobs?limit=200');
                 const data = await res.json();
@@ -2467,7 +2469,9 @@ async def ui_topology():
                 renderDispatchSummary(_dpData);
                 renderDispatchJobs(_dpData);
             }} catch (e) {{
-                body.innerHTML = '<tr><td colspan="5" style="color:#f87171;">Error: ' + e.message + '</td></tr>';
+                if (!_dpData) {{
+                    body.innerHTML = '<tr><td colspan="5" style="color:#f87171;">Error: ' + e.message + '</td></tr>';
+                }}
             }}
         }}
 

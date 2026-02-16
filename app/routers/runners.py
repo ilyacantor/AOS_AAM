@@ -80,6 +80,11 @@ async def dispatch_multiple(req: RunnerBatchDispatchRequest):
             result["status"] = farm_result.get("status", "dispatched")
             if farm_result.get("error"):
                 result["farm_error"] = farm_result["error"]
+            if farm_result.get("status") == "farm_error":
+                update_runner_status(
+                    result["job_id"], "failed",
+                    error_message=farm_result.get("error", "Farm rejected manifest"),
+                )
         except Exception as exc:
             _log.warning("Farm dispatch failed: %s", exc)
             result["farm_error"] = str(exc)
