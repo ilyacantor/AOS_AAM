@@ -1748,7 +1748,7 @@ async def ui_topology():
         .dispatch-panel {{
             background: #0f172a; border: 1px solid var(--slate-700);
             border-radius: 10px; width: 720px; max-width: 92vw;
-            max-height: 82vh; display: flex; flex-direction: column;
+            height: 72vh; display: flex; flex-direction: column;
             box-shadow: 0 20px 60px rgba(0,0,0,0.5);
         }}
         .dp-header {{
