@@ -150,23 +150,7 @@ GET /api/fabric-drift
 GET /api/fabric-drift/heal-history
 ```
 
-### 5. Enterprise Maturity Presets
-
-Four configurations for different enterprise integration patterns:
-
-| Preset | Description | Primary Plane |
-|--------|-------------|---------------|
-| **Scrappy** | Direct point-to-point API calls | API Gateway |
-| **iPaaS-Centric** | Workato/MuleSoft as control plane | iPaaS |
-| **Platform-Oriented** | Kafka/EventBridge backbone | Event Bus |
-| **Warehouse-Centric** | Snowflake/BigQuery as source of truth | Data Warehouse |
-
-**Activate a preset:**
-```
-POST /api/preset-config/{preset_name}/activate
-```
-
-### 6. Governance Enforcement
+### 5. Governance Enforcement
 
 Policies applied during all discovery and collection:
 
@@ -217,7 +201,7 @@ Incoming connection requests from AOD:
 - Defer candidates with reasons
 - Acknowledge or suppress drift
 - Export pipes to DCL format
-- Switch enterprise presets
+
 
 ### NOT Allowed (by design)
 
@@ -240,15 +224,6 @@ Incoming connection requests from AOD:
 | GET | `/api/adapters/{plane}/health` | Check adapter health |
 | POST | `/api/adapters/{plane}/discover` | Discover pipes from plane |
 | POST | `/api/adapters/{plane}/self-heal` | Execute self-heal |
-
-### Preset Configuration
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/preset-config` | Get current preset |
-| GET | `/api/preset-config/all` | List all presets |
-| POST | `/api/preset-config/{name}/activate` | Switch preset |
-| POST | `/api/preset-config/validate-routing` | Validate routing decision |
 
 ### Fabric Drift
 
@@ -305,8 +280,6 @@ Incoming connection requests from AOD:
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/presets` | List database presets |
-| POST | `/api/presets/{id}/load` | Load preset data |
 | GET | `/api/stats` | Get pipe statistics |
 | DELETE | `/api/data` | Clear all data |
 | GET | `/health` | Health check |
@@ -315,14 +288,7 @@ Incoming connection requests from AOD:
 
 ## Quick Start
 
-### Option 1: Load a Preset (Fastest)
-```bash
-POST /api/preset-config/ipaas_centric/activate
-POST /api/presets/ipaas_centric/load
-GET /api/pipes
-```
-
-### Option 2: Full Discovery Flow
+### Option 1: Full Discovery Flow
 ```bash
 POST /api/adapters/api_gateway/connect
 POST /api/collect/adapter/run

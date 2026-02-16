@@ -2,51 +2,54 @@
 Preset/seed data admin operations
 """
 import json
-import uuid
-import sqlite3
-from datetime import datetime
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
-from .connection import get_connection, get_db
+from . import supabase_client as sb
 
-# ============================================================================
-# PRESET / SEED DATA OPERATIONS
-# ============================================================================
+
+TABLE_PK_MAP = {
+    "drift_events": "drift_id",
+    "pipe_versions": "version_id",
+    "declared_pipes": "pipe_id",
+    "observations": "observation_id",
+    "collector_runs": "run_id",
+    "connection_candidates": "candidate_id",
+    "tee_requests": "tee_id",
+    "fabric_planes": "plane_id",
+    "sor_declarations": "sor_id",
+    "sor_dispositions": "disposition_id",
+    "aod_policy_manifest": "policy_id",
+    "aod_handoff_log": "handoff_id",
+    "runner_jobs": "job_id",
+}
+
+ALLOWED_TABLES = frozenset(TABLE_PK_MAP.keys())
+
 
 def reset_aod_state():
     """
     Clear candidate/fabric/SOR data so a fresh handoff can repopulate it.
 
-    Preserves collectors (infrastructure config) only.
-    The handoff log must be cleared because process_handoff() uses it for
-    idempotency checks — a stale log entry would short-circuit re-ingestion.
+    Uses a single multi-statement DELETE for one network round trip.
     """
-    # Tables whose rows are repopulated on each handoff
-    repopulated_tables = [
-        "drift_events",
-        "pipe_versions",
-        "declared_pipes",
-        "observations",
-        "collector_runs",
-        "connection_candidates",
-        "tee_requests",
-        "fabric_planes",
-        "sor_declarations",
-        "sor_dispositions",
-        "aod_policy_manifest",
-        "aod_handoff_log",
-    ]
+    from psycopg2 import sql as psql
 
-    with get_db() as conn:
-        cursor = conn.cursor()
-        counts = {}
-        for table in repopulated_tables:
-            cursor.execute(f"SELECT COUNT(*) FROM {table}")
-            counts[table] = cursor.fetchone()[0]
-            cursor.execute(f"DELETE FROM {table}")
+    stmts = psql.SQL("; ").join(
+        psql.SQL("DELETE FROM {}").format(sb._ident(t)) for t in ALLOWED_TABLES
+    )
+    conn = sb._get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(stmts)
+    except Exception as e:
+        sb._put_conn(conn, broken=True)
+        raise
+    finally:
+        sb._put_conn(conn)
 
-    total_deleted = sum(counts.values())
-    return {"reset": True, "tables_cleared": counts, "total_rows_deleted": total_deleted}
+    return {"reset": True, "tables_cleared": len(ALLOWED_TABLES)}
 
 
 def clear_all_data():
@@ -55,10 +58,11 @@ def clear_all_data():
 
 
 def get_pipe_stats() -> dict:
-    """Get statistics about pipes by fabric_plane and modality"""
-    conn = get_connection()
-    cursor = conn.cursor()
+    """Get statistics about pipes by fabric_plane and modality.
 
+    Queries connection_candidates (the single source of truth) instead of
+    declared_pipes.
+    """
     stats = {
         "total_pipes": 0,
         "by_fabric_plane": {},
@@ -66,23 +70,35 @@ def get_pipe_stats() -> dict:
         "by_source_system": {}
     }
 
-    cursor.execute("SELECT COUNT(*) FROM declared_pipes")
-    stats["total_pipes"] = cursor.fetchone()[0]
+    candidates = sb.select("connection_candidates") or []
+    planes = sb.select("fabric_planes") or []
 
-    cursor.execute("SELECT fabric_plane, COUNT(*) as cnt FROM declared_pipes GROUP BY fabric_plane")
-    for row in cursor.fetchall():
-        plane = row["fabric_plane"] or "API_GATEWAY"
-        stats["by_fabric_plane"][plane] = row["cnt"]
+    planes_dict = {p["plane_id"]: p for p in planes}
 
-    cursor.execute("SELECT modality, COUNT(*) as cnt FROM declared_pipes GROUP BY modality")
-    for row in cursor.fetchall():
-        stats["by_modality"][row["modality"]] = row["cnt"]
+    stats["total_pipes"] = len(candidates)
 
-    cursor.execute("SELECT source_system, COUNT(*) as cnt FROM declared_pipes GROUP BY source_system")
-    for row in cursor.fetchall():
-        stats["by_source_system"][row["source_system"]] = row["cnt"]
+    by_plane: dict[str, int] = defaultdict(int)
+    by_modality: dict[str, int] = defaultdict(int)
+    by_source: dict[str, int] = defaultdict(int)
 
-    conn.close()
+    for c in candidates:
+        fpid = c.get("fabric_plane_id")
+        if fpid and fpid in planes_dict:
+            plane_label = (planes_dict[fpid].get("plane_type") or "UNMAPPED").upper()
+        elif c.get("connected_via_plane"):
+            plane_label = c["connected_via_plane"].upper()
+        else:
+            plane_label = "UNMAPPED"
+        by_plane[plane_label] += 1
+
+        cat = c.get("category") or "unknown"
+        by_modality[cat] += 1
+
+        vendor = c.get("vendor_name") or "unknown"
+        by_source[vendor] += 1
+
+    stats["by_fabric_plane"] = dict(by_plane)
+    stats["by_modality"] = dict(by_modality)
+    stats["by_source_system"] = dict(by_source)
+
     return stats
-
-

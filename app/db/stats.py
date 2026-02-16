@@ -1,17 +1,12 @@
 """
 Canonical stats — single source of truth
 """
-import json
-import uuid
-import sqlite3
-from datetime import datetime
+from collections import defaultdict
 from typing import Optional
 
-from .connection import get_connection
+from . import supabase_client as sb
+from ..constants import SOR_CATEGORIES
 
-# ============================================================================
-# CANONICAL STATS - SINGLE SOURCE OF TRUTH
-# ============================================================================
 
 def get_canonical_stats(aod_run_id: Optional[str] = None) -> dict:
     """
@@ -31,81 +26,42 @@ def get_canonical_stats(aod_run_id: Optional[str] = None) -> dict:
     Returns:
         dict with canonical stat fields that match UI expectations
     """
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    # Build WHERE clause for optional run filtering
-    run_filter = ""
-    run_params = ()
     if aod_run_id:
-        run_filter = "WHERE aod_run_id = ?"
-        run_params = (aod_run_id,)
-
-    # FABRICS: Count of distinct fabric planes from database
-    if aod_run_id:
-        cursor.execute("SELECT COUNT(*) FROM fabric_planes WHERE aod_run_id = ?", (aod_run_id,))
+        fabric_planes = sb.select("fabric_planes", filters={"aod_run_id": aod_run_id})
+        candidates = sb.select("connection_candidates", filters={"aod_run_id": aod_run_id})
     else:
-        cursor.execute("SELECT COUNT(*) FROM fabric_planes")
-    fabrics_count = cursor.fetchone()[0]
+        fabric_planes = sb.select("fabric_planes")
+        candidates = sb.select("connection_candidates")
 
-    # SORs: Candidates with System of Record categories
-    from ..constants import SOR_CATEGORIES
-    sor_categories = list(SOR_CATEGORIES)
-    placeholders = ','.join('?' * len(sor_categories))
+    fabrics_count = len(fabric_planes)
 
-    if aod_run_id:
-        cursor.execute(f"""
-            SELECT COUNT(*) FROM connection_candidates
-            WHERE aod_run_id = ? AND LOWER(category) IN ({placeholders})
-        """, (aod_run_id, *sor_categories))
-    else:
-        cursor.execute(f"""
-            SELECT COUNT(*) FROM connection_candidates
-            WHERE LOWER(category) IN ({placeholders})
-        """, sor_categories)
-    sors_count = cursor.fetchone()[0]
+    sor_categories = SOR_CATEGORIES
+    sors_count = sum(
+        1 for c in candidates
+        if (c.get("category") or "").lower() in sor_categories
+    )
 
-    # TOTAL CANDIDATES (= PIPES by canonical definition)
-    if aod_run_id:
-        cursor.execute("SELECT COUNT(*) FROM connection_candidates WHERE aod_run_id = ?", (aod_run_id,))
-    else:
-        cursor.execute("SELECT COUNT(*) FROM connection_candidates")
-    total_candidates = cursor.fetchone()[0]
+    total_candidates = len(candidates)
 
-    # PIPES WITH DRIFT: Declared pipes with open drift status
-    cursor.execute("""
-        SELECT COUNT(*) FROM declared_pipes
-        WHERE drift_status = 'OPEN'
-    """)
-    pipes_with_drift = cursor.fetchone()[0]
+    drift_events = sb.select("drift_events")
+    drift_pipe_ids = set()
+    for d in drift_events:
+        s = (d.get("status") or "").lower()
+        if s == "open":
+            drift_pipe_ids.add(d.get("pipe_id"))
+    pipes_with_drift = len(drift_pipe_ids)
 
-    # FABRIC BREAKDOWN by type (for detailed views)
-    if aod_run_id:
-        cursor.execute("""
-            SELECT plane_type, COUNT(*) as count
-            FROM fabric_planes
-            WHERE aod_run_id = ?
-            GROUP BY plane_type
-        """, (aod_run_id,))
-    else:
-        cursor.execute("""
-            SELECT plane_type, COUNT(*) as count
-            FROM fabric_planes
-            GROUP BY plane_type
-        """)
-    fabrics_by_type = {row[0]: row[1] for row in cursor.fetchall()}
-
-    conn.close()
+    fabrics_by_type: dict[str, int] = defaultdict(int)
+    for fp in fabric_planes:
+        pt = fp.get("plane_type") or "unknown"
+        fabrics_by_type[pt] += 1
 
     return {
-        # Canonical fields - these MUST match UI expectations
         "fabrics": fabrics_count,
         "sors": sors_count,
         "total_candidates": total_candidates,
         "pipes_with_drift": pipes_with_drift,
-        # Extended info for detailed views
-        "fabrics_by_type": fabrics_by_type,
-        # Aliases for backward compatibility
-        "total_pipes": total_candidates,  # candidates = pipes
-        "pipes": total_candidates
+        "fabrics_by_type": dict(fabrics_by_type),
+        "total_pipes": total_candidates,
+        "pipes": total_candidates,
     }

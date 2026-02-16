@@ -72,11 +72,7 @@
 - `export_service.py:122` — Sample of 25 incomplete candidates.
 - `inference.py:475` — 10,000 requests/day = "high traffic" threshold.
 
-**11. `preset_config.py` — Dead Parameter**
-- `get_routing_decision(candidate_category)` ignores `candidate_category` entirely
-  (line 161) and just returns `primary_plane`.
-
-**12. `dcl_export.py` — Vendor/Category Confusion**
+**11. `dcl_export.py` — Vendor/Category Confusion**
 - `_infer_fields_from_category()` (line 52) checks `"salesforce" in category_lower`,
   mixing vendor name checks into a function that claims to work on categories.
 

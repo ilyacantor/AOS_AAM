@@ -28,19 +28,18 @@ Drift Detection	Schema Drift Detection		A/R			C	Field changes (not connection
 Drift Detection	Schema Hash Computation		A/R			C	Data structure drift
 Export	DCL Pipe Export		A/R	I		I	DeclaredPipes for DCL consumption
 Export	Pipe Snapshot Export		A/R			I	Point-in-time export
-Fabric Detection	Enterprise Preset Inference (Scrappy vs Platform)	A/R	C				Classifies Org Architecture
+Fabric Detection	Evidence-Based Fabric Plane Inference	A/R	C				Classifies Org Architecture
 Fabric Detection	Fabric Plane Identification (MuleSoft, Kafka, Snowflake, Kong)	A/R	C				Detects the Backbone, not just endpoints
 Fabric Detection	Connection Routing Logic (Set `connected_via_plane`)	A/R	I				Context for AAM Handoff
 Fabric Mgmt	Fabric Plane Connection (The Backbone)		A/R			I	Connects to Planes, not Apps
-Fabric Mgmt	Preset Config Loading (6, 8, 9, 10, 11)		A/R			I	Configures Mesh behavior
-Fabric Mgmt	Preset Config Loading (6, 8, 9, 11)		A/R			I	Configures Mesh behavior
+Fabric Mgmt	Fabric Plane Inference Cascade		A/R			I	Evidence-based plane routing
 Fabric Mgmt	Routing Policy Enforcement		A/R			I	Enforces "Block Direct Access"
 Governance	PII Redaction (Edge)		A/R			I	Redacts before data enters DCL
 Governance	Auth Policy Enforcement		A/R			I	Plane-level auth validation
-Governance	Block Direct App Access		A/R			I	Enforced for non-Scrappy presets
+Governance	Block Direct App Access		A/R			I	Enforced via fabric plane routing
 Governance	PII Redaction (Edge)		A/R			I	Redacts before data enters DCL
 Governance	Rate Limit Enforcement		A/R			I	Plane-level rate limiting
-Handoff	ConnectionCandidate Export	A/R	I				Sends Target + Preset to AAM
+Handoff	ConnectionCandidate Export	A/R	I				Sends Target + Evidence Leads to AAM
 Ingestion	Fabric Pointer Buffering (Zero-Trust)			A/R		I	buffers Pointers, NOT Payloads
 Ingestion	Just-in-Time Payload Fetching		C	R			Fetch only on Semantic Map request
 Ingestion	Schema Drift Detection		C	A/R		C	Field changes (not connection
@@ -126,7 +125,7 @@ Observability	Vitals aggregation				A/R	C
 Operator UI	Display Candidates		A/R			I	
 Operator UI	Display Drift Events		A/R			I	
 Operator UI	Display Pipe Inventory		A/R			I	
-Operator UI	Load Enterprise Presets		A/R			I	
+Operator UI	Load Fabric Plane Configuration		A/R			I
 Pipe Inference	Create DeclaredPipe		A/R			I	
 Pipe Inference	Infer Change Semantics		A/R			I	
 Pipe Inference	Infer Entity Scope		A/R			I	

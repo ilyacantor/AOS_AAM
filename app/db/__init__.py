@@ -1,9 +1,8 @@
 """
 AAM Database Package — re-exports all domain functions for backward compatibility.
 """
-from .connection import get_db, get_connection  # noqa: F401
 from .schema import init_db  # noqa: F401
-from .candidates import create_candidate, get_candidate, list_candidates, update_candidate_status  # noqa: F401
+from .candidates import create_candidate, create_candidates_batch, get_candidate, list_candidates, update_candidate_status  # noqa: F401
 from .pipes import create_pipe, get_pipe, list_pipes, get_pipe_versions, update_pipe_with_version  # noqa: F401
 from .drift import create_drift_event, get_drift_events, list_all_drift_events  # noqa: F401
 from .observations import create_observation, get_observations_for_candidate, get_unprocessed_observations, mark_observation_processed  # noqa: F401
@@ -21,6 +20,5 @@ from .sor_dispositions import set_sor_disposition, get_sor_dispositions  # noqa:
 from .reconciliation import get_aod_reconciliation, get_latest_aod_run  # noqa: F401
 from .stats import get_canonical_stats  # noqa: F401
 from .dcl_pushes import init_dcl_pushes_table, record_dcl_push, list_dcl_pushes, get_dcl_push  # noqa: F401
-
-# Re-export DATABASE for monkeypatching in tests
-from .connection import DATABASE  # noqa: F401
+from .runner_jobs import create_runner_job, update_runner_status, update_heartbeat, get_runner_job, list_runner_jobs  # noqa: F401
+from .dcl_ingest import compute_schema_hash, store_ingest, get_previous_schema_hash, list_ingests, get_ingest  # noqa: F401

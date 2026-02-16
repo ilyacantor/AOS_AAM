@@ -26,16 +26,7 @@
 | **EVENT_BUS** | EventBusAdapter | Streaming Consumer | Kafka, EventBridge, Pulsar |
 | **DATA_WAREHOUSE** | WarehouseAdapter | JDBC/Bulk Read | Snowflake, BigQuery, Redshift |
 
-**CRITICAL CONSTRAINT:** AAM does NOT connect directly to individual apps (Salesforce, HubSpot) unless running in Preset 6 (Scrappy) mode.
-
-## Enterprise Preset Patterns
-
-| Preset | Primary Plane | Direct App Access | Behavior |
-|--------|---------------|-------------------|----------|
-| 6 - Scrappy | API_GATEWAY | YES (exception) | Point-to-point, direct APIs |
-| 8 - iPaaS-Centric | IPAAS | NO | Blocks direct API; forces iPaaS routing |
-| 9 - Platform-Oriented | EVENT_BUS | NO | Prioritizes streaming for high-volume |
-| 11 - Warehouse-Centric | DATA_WAREHOUSE | NO | Warehouse as Source of Truth |
+**CRITICAL CONSTRAINT:** AAM connects to Fabric Planes, NOT individual apps (Salesforce, HubSpot). Fabric plane inference uses evidence leads from AOD, vendor identity, endpoint signals, and display name hints.
 
 ## System Architecture Context
 
@@ -50,10 +41,10 @@
 |---------|--------|-------|
 | FabricAdapter Interface | FUNCTIONAL | Polymorphic base class |
 | IPaaSAdapter | FUNCTIONAL | Workato, MuleSoft, Boomi |
-| GatewayAdapter | FUNCTIONAL | Kong, Apigee + Scrappy mode |
+| GatewayAdapter | FUNCTIONAL | Kong, Apigee |
 | EventBusAdapter | FUNCTIONAL | Kafka, EventBridge |
 | WarehouseAdapter | FUNCTIONAL | Snowflake, BigQuery |
-| PresetConfigLoader | FUNCTIONAL | 4 enterprise patterns |
+| Fabric Plane Inference | FUNCTIONAL | Evidence-based inference cascade |
 | FabricDriftDetector | FUNCTIONAL | Connectivity drift detection |
 | Self-Healing Repair | FUNCTIONAL | AAM-owned, not Farm |
 | Governance Policies | FUNCTIONAL | Plane-level enforcement |
@@ -70,7 +61,7 @@
 | Connect to API_GATEWAY | R/A | I |
 | Connect to EVENT_BUS | R/A | I |
 | Connect to DATA_WAREHOUSE | R/A | I |
-| Apply Preset Configuration | R/A | I |
+| Infer Fabric Plane for Candidates | R/A | I |
 | Enforce Routing Policies | R/A | I |
 | **Adapter Operations** |
 | Register Adapters | R/A | I |
@@ -124,7 +115,7 @@
 
 ### AAM Owns (Self-Healing Mesh)
 - Fabric Plane adapters (NOT app connectors)
-- Preset configuration and routing
+- Fabric plane inference and routing
 - Connectivity drift detection AND repair
 - Governance policy enforcement at Plane level
 
@@ -138,7 +129,7 @@
 - Individual SaaS app connectors (deleted)
 - Infrastructure provisioning (delegated to AOA)
 - Runtime operations (delegated to AOA)
-- Direct app connections (except Scrappy mode)
+- Direct app connections (connects to Planes only)
 
 ## What AAM Does NOT Do
 
@@ -152,8 +143,7 @@
 
 ## Notes
 - AAM connects to Fabric Planes, NOT individual applications
-- Only Preset 6 (Scrappy) allows direct Point-to-Point app access
 - AAM owns self-healing of Plane connections - Farm is NOT involved
 - FabricDriftDetector handles connectivity issues; SchemaHash handles data drift
-- PresetConfigLoader determines routing behavior based on enterprise maturity
+- Fabric plane inference uses evidence leads, vendor identity, and endpoint signals
 - Governance policies are applied at the Plane level (not app level)

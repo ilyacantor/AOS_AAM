@@ -54,7 +54,6 @@ from .db import (
     get_topology_data,
     get_topology_for_pipe,
     get_topology_for_fabric_plane,
-    get_connection,
     create_handoff_log,
     get_handoff_log,
     list_handoff_logs,
@@ -94,7 +93,10 @@ async def lifespan(app):
     init_db()
     from .db import init_dcl_pushes_table
     init_dcl_pushes_table()
+    from .services.runner_worker import start_worker, stop_worker
+    await start_worker()
     yield
+    await stop_worker()
 
 
 app = FastAPI(
@@ -125,6 +127,8 @@ from .routers.topology import router as topology_router
 from .routers.export import router as export_router
 from .routers.admin import router as admin_router
 from .routers.ui_pages import router as ui_pages_router
+from .routers.runners import router as runners_router
+from .routers.dcl_ingest import router as dcl_ingest_router
 
 app.include_router(handoff_router)
 app.include_router(fabric_router)
@@ -138,6 +142,8 @@ app.include_router(adapters_router)
 app.include_router(topology_router)
 app.include_router(export_router)
 app.include_router(admin_router)
+app.include_router(runners_router)
+app.include_router(dcl_ingest_router)
 app.include_router(ui_pages_router)
 
 

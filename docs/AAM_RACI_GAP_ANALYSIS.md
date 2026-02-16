@@ -35,7 +35,7 @@ The AAM implementation is functional for core operations. The architecture is so
 |----------------|--------|---------------------|
 | API Gateway Adapter (Kong, Apigee) | **IMPLEMENTED** | `app/adapters/gateway.py` - GatewayAdapter class with Kong, Apigee, AWS API Gateway support |
 | API Gateway Connection | **IMPLEMENTED** | `connect()`, `disconnect()` async methods |
-| Adapter Factory Resolution | **IMPLEMENTED** | `app/adapters/factory.py` - `get_adapter_for_plane()` and `get_adapter_for_preset()` |
+| Adapter Factory Resolution | **IMPLEMENTED** | `app/adapters/factory.py` - `get_adapter_for_plane()` |
 | Data Warehouse Connection | **IMPLEMENTED** | `app/adapters/warehouse.py` - WarehouseAdapter for Snowflake, BigQuery, Redshift |
 | Event Bus Adapter (Kafka, EventBridge) | **IMPLEMENTED** | `app/adapters/eventbus.py` - EventBusAdapter with Kafka, EventBridge, Pulsar support |
 | Event Bus Connection | **IMPLEMENTED** | Full connect/disconnect/health check implementation |
@@ -116,10 +116,9 @@ The AAM implementation is functional for core operations. The architecture is so
 | RACI Capability | Status | Implementation Notes |
 |----------------|--------|---------------------|
 | Fabric Plane Connection | **IMPLEMENTED** | `POST /api/adapters/{plane_type}/connect` |
-| Preset Config Loading | **IMPLEMENTED** | `PresetConfigLoader` in `preset_config.py`, `POST /api/preset-config/{preset}/activate` |
 | Routing Policy Enforcement | **IMPLEMENTED** | `validate_candidate_routing()`, `should_block_direct_api()` |
 
-**Gap:** None - fully functional with all 4 presets (Scrappy, iPaaS-Centric, Platform-Oriented, Warehouse-Centric)
+**Gap:** Routing policy enforcement needs integration with fabric plane inference
 
 ---
 
@@ -129,7 +128,7 @@ The AAM implementation is functional for core operations. The architecture is so
 |----------------|--------|---------------------|
 | PII Redaction (Edge) | **PARTIAL** | `apply_governance_policy()` stub - adds header but doesn't redact |
 | Auth Policy Enforcement | **PARTIAL** | Governance policy type exists but no real enforcement |
-| Block Direct App Access | **IMPLEMENTED** | `is_direct_access_allowed()` checks preset mode |
+| Block Direct App Access | **IMPLEMENTED** | `is_direct_access_allowed()` checks fabric plane routing |
 | Rate Limit Enforcement | **PARTIAL** | Governance policy type exists but no real enforcement |
 
 **Gap:**
@@ -202,8 +201,6 @@ The AAM implementation is functional for core operations. The architecture is so
 | Display Candidates | **IMPLEMENTED** | `/ui/candidates` - full CRUD interface |
 | Display Drift Events | **IMPLEMENTED** | `/ui/drift` - drift list with ack/suppress |
 | Display Pipe Inventory | **IMPLEMENTED** | `/ui/pipes` - searchable/filterable |
-| Load Enterprise Presets | **IMPLEMENTED** | `/ui/drift` has preset selector |
-
 **Gap:** None - UI is fully functional with styled components
 
 ---
@@ -256,7 +253,7 @@ The AAM implementation is functional for core operations. The architecture is so
 5. **Drift Detection** - Schema drift and fabric drift tracked
 6. **Version Control** - Pipes versioned with hash comparison
 7. **Operator UI** - 4 functional screens with actions
-8. **Preset System** - 4 enterprise maturity patterns
+8. **Fabric Plane Routing** - Evidence-based inference cascade
 
 ### What's Mock/Stubbed
 

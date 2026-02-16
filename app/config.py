@@ -22,6 +22,22 @@ class Settings:
         self.DRIFT_CONNECTION_TIMEOUT_S: int = int(
             os.environ.get("AAM_DRIFT_CONNECTION_TIMEOUT_S", "30")
         )
+        # Runner / DCL ingestion
+        self.DCL_INGEST_URL: str = os.environ.get(
+            "AAM_DCL_INGEST_URL", "/api/dcl/ingest"
+        )
+        self.RUNNER_JOB_TIMEOUT_S: int = int(
+            os.environ.get("AAM_RUNNER_JOB_TIMEOUT_S", "300")
+        )
+        # Base URL for self-referencing HTTP calls (Runner → DCL ingest)
+        self.BASE_URL: str = os.environ.get(
+            "AAM_BASE_URL", "http://127.0.0.1:5000"
+        )
+        # API key the Runner sends in x-api-key header to DCL
+        # In production: resolved from vault. In v1: env var.
+        self.DCL_API_KEY: str = os.environ.get(
+            "AAM_DCL_API_KEY", "aam-runner-v1-key"
+        )
 
 
 settings = Settings()

@@ -25,7 +25,9 @@ from ..db import (
     get_aod_reconciliation,
     list_tee_requests,
     list_handoff_logs,
+    get_latest_aod_run,
 )
+from ..db.runner_jobs import list_runner_jobs
 
 router = APIRouter(include_in_schema=False)
 
@@ -58,6 +60,17 @@ async def ui_pipes_list(
             drift_by_pipe[pid]["total"] += 1
             if d.get("status") == "open":
                 drift_by_pipe[pid]["open"] += 1
+
+    # Fetch latest runner job status per pipe
+    try:
+        all_jobs = list_runner_jobs(limit=200)
+    except Exception:
+        all_jobs = []
+    latest_job_by_pipe = {}
+    for j in all_jobs:
+        pid = j.get("pipe_id")
+        if pid and pid not in latest_job_by_pipe:
+            latest_job_by_pipe[pid] = j
     
     fabric_plane_colors = {**PLANE_TYPE_COLORS, "UNMAPPED": "#ef4444"}
     
@@ -69,10 +82,37 @@ async def ui_pipes_list(
         owner_signals = p.get("owner_signals", [])
         pipe_fabric = p.get("fabric_plane", "UNMAPPED")
         fabric_color = fabric_plane_colors.get(pipe_fabric, "#64748b")
-        drift_info = drift_by_pipe.get(pipe_id, {"open": 0, "total": 0})
-        drift_status = f"{drift_info['open']} open" if drift_info['open'] > 0 else "OK"
-        drift_class = "badge-open" if drift_info['open'] > 0 else "badge-connected"
-        
+        drift_info = drift_by_pipe.get(pipe_id)
+        if drift_info is None:
+            drift_status = "No data"
+            drift_class = "badge-deferred"
+        elif drift_info["open"] > 0:
+            drift_status = f"{drift_info['open']} open"
+            drift_class = "badge-open"
+        else:
+            drift_status = "Healthy"
+            drift_class = "badge-connected"
+
+        # Runner status pill
+        latest_job = latest_job_by_pipe.get(pipe_id)
+        if latest_job:
+            job_status = latest_job.get("status", "")
+            job_id = latest_job.get("job_id", "")
+            rows_done = latest_job.get("rows_transferred", 0)
+            runner_pill_map = {
+                "queued": ("Queued", "runner-queued"),
+                "dispatched": ("Dispatched", "runner-queued"),
+                "running": ("Running", "runner-running"),
+                "pushing": ("Pushing", "runner-running"),
+                "completed": (f"Done ({rows_done}r)", "runner-completed"),
+                "failed": ("Failed", "runner-failed"),
+                "timed_out": ("Timeout", "runner-failed"),
+            }
+            pill_text, pill_class = runner_pill_map.get(job_status, (job_status, "runner-queued"))
+            runner_cell = f'<span class="runner-pill {pill_class}" id="pill-{pipe_id}" title="{job_id}">{pill_text}</span>'
+        else:
+            runner_cell = f'<button class="btn btn-sm btn-run" data-pipe-id="{pipe_id}" id="btn-run-{pipe_id}" onclick="dispatchRunner(\'{pipe_id}\')">Run</button>'
+
         rows_html += f"""
         <tr data-testid="pipe-row-{pipe_id}">
             <td><span class="fabric-badge" style="background:{fabric_color}20;color:{fabric_color};border:1px solid {fabric_color}40;">{pipe_fabric}</span></td>
@@ -82,7 +122,7 @@ async def ui_pipes_list(
             <td>{', '.join(entity_scope[:3])}{'...' if len(entity_scope) > 3 else ''}</td>
             <td>{len(trust_labels)}</td>
             <td><span class="badge {drift_class}">{drift_status}</span></td>
-            <td>{', '.join(owner_signals[:2]) if owner_signals else '-'}</td>
+            <td class="runner-cell">{runner_cell}</td>
         </tr>
         """
     
@@ -203,6 +243,49 @@ async def ui_pipes_list(
         .modal-btn-confirm:hover {{
             background: #06b6d4;
         }}
+        .runner-pill {{
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+            white-space: nowrap;
+        }}
+        .runner-queued {{
+            background: rgba(148, 163, 184, 0.2);
+            color: #94a3b8;
+            border: 1px solid rgba(148, 163, 184, 0.3);
+        }}
+        .runner-running {{
+            background: rgba(59, 130, 246, 0.2);
+            color: #60a5fa;
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            animation: pulse-blue 1.5s infinite;
+        }}
+        .runner-completed {{
+            background: rgba(34, 197, 94, 0.2);
+            color: #4ade80;
+            border: 1px solid rgba(34, 197, 94, 0.3);
+        }}
+        .runner-failed {{
+            background: rgba(248, 113, 113, 0.2);
+            color: #f87171;
+            border: 1px solid rgba(248, 113, 113, 0.3);
+        }}
+        .btn-run {{
+            padding: 2px 12px !important;
+            font-size: 0.7rem !important;
+            border-radius: 12px;
+        }}
+        .runner-cell {{
+            min-width: 80px;
+            text-align: center;
+        }}
+        @keyframes pulse-blue {{
+            0%, 100% {{ opacity: 1; }}
+            50% {{ opacity: 0.6; }}
+        }}
     </style>
 </head>
 <body>
@@ -211,8 +294,8 @@ async def ui_pipes_list(
         <h1>Pipes</h1>
         <p class="page-subtitle">All declared data pipes with metadata, health status, and ownership. These are your canonical integration endpoints.</p>
         
-        {aod_run_banner(extra_buttons='<button class="btn btn-sm" style="font-size: 0.75rem;" id="btn-run-inference" data-testid="btn-run-inference">Run Inference</button><button class="btn btn-sm" style="font-size: 0.75rem;" id="btn-export-dcl" data-testid="btn-export-dcl">Export to DCL</button>')}
-        
+        {aod_run_banner()}
+
         <div class="controls">
             <select id="filter" data-testid="filter" onchange="applyFilter()">{filter_options}</select>
         </div>
@@ -226,7 +309,7 @@ async def ui_pipes_list(
                     <th>Entity Scope</th>
                     <th>Trust Labels</th>
                     <th>Drift</th>
-                    <th>Owner</th>
+                    <th>Runner</th>
                 </tr>
             </thead>
             <tbody id="pipes-body">{rows_html}</tbody>
@@ -288,44 +371,90 @@ async def ui_pipes_list(
             if (filter && filter !== 'all') params.set('filter', filter);
             window.location.href = '/ui/pipes' + (params.toString() ? '?' + params.toString() : '');
         }}
-        
-        document.getElementById('btn-run-inference').addEventListener('click', async function() {{
-            this.disabled = true;
-            this.textContent = 'Running...';
+
+        async function dispatchRunner(pipeId) {{
+            const btn = document.getElementById('btn-run-' + pipeId);
+            if (!btn) return;
+            btn.disabled = true;
+            btn.textContent = '...';
+
             try {{
-                const res = await fetch('/api/aam/infer', {{ method: 'POST' }});
+                const res = await fetch('/api/runners/dispatch', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{ pipe_id: pipeId, trigger: 'manual' }})
+                }});
                 const data = await res.json();
-                if (res.ok) {{
-                    let msg = 'Inference complete: ' + data.pipes_created + ' pipes created';
-                    if (data.from_candidates) msg += ' (' + data.from_candidates + ' from candidates)';
-                    if (data.candidates_unmatched) msg += ', ' + data.candidates_unmatched + ' unmatched';
-                    showToast(msg, data.pipes_created > 0 ? 'success' : 'warning');
-                    setTimeout(() => location.reload(), 1500);
-                }} else {{
-                    showToast('Error: ' + (data.detail || 'Failed'), 'error');
+                if (!res.ok) {{
+                    showToast('Dispatch failed: ' + (data.detail || res.status), 'error');
+                    btn.disabled = false;
+                    btn.textContent = 'Run';
+                    return;
                 }}
+                // Replace button with status pill
+                const cell = btn.parentElement;
+                const jobId = data.job_id || '';
+                const status = data.status || 'queued';
+                updateRunnerPill(cell, pipeId, status, data.rows_transferred || 0, jobId);
+                showToast('Runner dispatched for ' + pipeId.substring(0, 8) + '...', 'success');
+
+                // If already completed/failed (inline v1), no need to poll
+                if (status === 'completed' || status === 'failed') return;
+
+                // Poll for status updates
+                pollRunnerStatus(pipeId, jobId);
             }} catch (e) {{
                 showToast('Error: ' + e.message, 'error');
+                btn.disabled = false;
+                btn.textContent = 'Run';
             }}
-            this.disabled = false;
-            this.textContent = 'Run Inference';
-        }});
+        }}
 
-        document.getElementById('btn-export-dcl').addEventListener('click', async function() {{
-            try {{
-                const res = await fetch('/api/export/dcl/declared-pipes');
-                const data = await res.json();
-                const blob = new Blob([JSON.stringify(data, null, 2)], {{ type: 'application/json' }});
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = 'dcl-export-' + new Date().toISOString().slice(0,10) + '.json';
-                a.click();
-                showToast('Exported ' + data.pipe_count + ' pipes', 'success');
-            }} catch (e) {{
-                showToast('Export failed: ' + e.message, 'error');
-            }}
-        }});
+        function updateRunnerPill(cell, pipeId, status, rows, jobId) {{
+            const pillMap = {{
+                'queued':    ['Queued',    'runner-queued'],
+                'dispatched':['Dispatched','runner-queued'],
+                'running':   ['Running',   'runner-running'],
+                'pushing':   ['Pushing',   'runner-running'],
+                'completed': ['Done (' + rows + 'r)', 'runner-completed'],
+                'failed':    ['Failed',    'runner-failed'],
+                'timed_out': ['Timeout',   'runner-failed'],
+            }};
+            const [text, cls] = pillMap[status] || [status, 'runner-queued'];
+            cell.innerHTML = '<span class="runner-pill ' + cls + '" id="pill-' + pipeId + '" title="' + jobId + '">' + text + '</span>';
+        }}
+
+        async function pollRunnerStatus(pipeId, jobId) {{
+            const terminal = ['completed', 'failed', 'timed_out'];
+            let attempts = 0;
+            const maxAttempts = 30;
+
+            const poll = async () => {{
+                attempts++;
+                if (attempts > maxAttempts) return;
+                try {{
+                    const res = await fetch('/api/runners/jobs/' + jobId);
+                    if (!res.ok) return;
+                    const job = await res.json();
+                    const status = job.status || 'queued';
+                    const pill = document.getElementById('pill-' + pipeId);
+                    if (pill) {{
+                        updateRunnerPill(pill.parentElement, pipeId, status, job.rows_transferred || 0, jobId);
+                    }}
+                    if (terminal.includes(status)) {{
+                        if (status === 'completed') {{
+                            showToast('Runner completed: ' + (job.rows_transferred || 0) + ' rows transferred', 'success');
+                        }} else {{
+                            showToast('Runner ' + status + ': ' + (job.error_message || ''), 'error');
+                        }}
+                        return;
+                    }}
+                }} catch (e) {{ /* ignore polling errors */ }}
+                setTimeout(poll, 1000);
+            }};
+            setTimeout(poll, 500);
+        }}
+
     </script>
 </body>
 </html>
@@ -404,6 +533,8 @@ async def ui_pipe_detail(pipe_id: str):
     <div class="container">
         <div class="controls">
             <a href="/ui/pipes" class="btn" data-testid="btn-back">← Back to Pipes</a>
+            <button class="btn btn-success" id="btn-dispatch" data-testid="btn-dispatch">Dispatch Runner</button>
+            <span id="runner-status-pill" style="margin-left:8px;"></span>
             <button class="btn" id="btn-recompute" data-testid="btn-recompute">Recompute Declaration</button>
             <button class="btn" id="btn-create-tee" data-testid="btn-create-tee">Create Tee Request</button>
         </div>
@@ -530,6 +661,7 @@ async def ui_pipe_detail(pipe_id: str):
             this.textContent = 'Recomputing...';
             try {{
                 const res = await fetch('/api/aam/infer', {{ method: 'POST' }});
+                if (!res.ok) throw new Error('Request failed: ' + res.status);
                 const data = await res.json();
                 showToast('Recomputed: ' + data.pipes_created + ' pipes processed', 'success');
                 setTimeout(() => location.reload(), 1500);
@@ -558,6 +690,80 @@ async def ui_pipe_detail(pipe_id: str):
                 showToast('Error: ' + e.message, 'error');
             }}
             this.disabled = false;
+        }});
+
+        // --- Dispatch Runner ---
+        document.getElementById('btn-dispatch').addEventListener('click', async function() {{
+            const btn = this;
+            btn.disabled = true;
+            btn.textContent = 'Dispatching...';
+            const pill = document.getElementById('runner-status-pill');
+
+            try {{
+                const res = await fetch('/api/runners/dispatch', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{ pipe_id: '{pipe_id}', trigger: 'manual' }})
+                }});
+                const data = await res.json();
+                if (!res.ok) {{
+                    showToast('Dispatch failed: ' + (data.detail || res.status), 'error');
+                    btn.disabled = false;
+                    btn.textContent = 'Dispatch Runner';
+                    return;
+                }}
+
+                const jobId = data.job_id || '';
+                const status = data.status || 'queued';
+                const rows = data.rows_transferred || 0;
+
+                function setPill(s, r) {{
+                    const map = {{
+                        'queued':    ['Queued',    '#94a3b8', 'rgba(148,163,184,0.2)'],
+                        'dispatched':['Dispatched','#94a3b8', 'rgba(148,163,184,0.2)'],
+                        'running':   ['Running',   '#60a5fa', 'rgba(59,130,246,0.2)'],
+                        'pushing':   ['Pushing',   '#60a5fa', 'rgba(59,130,246,0.2)'],
+                        'completed': ['Done (' + r + ' rows)', '#4ade80', 'rgba(34,197,94,0.2)'],
+                        'failed':    ['Failed',    '#f87171', 'rgba(248,113,113,0.2)'],
+                        'timed_out': ['Timeout',   '#f87171', 'rgba(248,113,113,0.2)'],
+                    }};
+                    const [text, color, bg] = map[s] || [s, '#94a3b8', 'rgba(148,163,184,0.2)'];
+                    pill.innerHTML = '<span style="display:inline-block;padding:4px 12px;border-radius:12px;font-size:0.8rem;font-weight:600;color:' + color + ';background:' + bg + ';border:1px solid ' + color + '40;">' + text + '</span>';
+                }}
+
+                setPill(status, rows);
+                showToast('Runner dispatched: ' + jobId, 'success');
+                btn.textContent = 'Dispatch Runner';
+                btn.disabled = false;
+
+                // Poll if not terminal
+                const terminal = ['completed', 'failed', 'timed_out'];
+                if (terminal.includes(status)) return;
+
+                let attempts = 0;
+                const pollDetail = async () => {{
+                    attempts++;
+                    if (attempts > 30) return;
+                    try {{
+                        const r = await fetch('/api/runners/jobs/' + jobId);
+                        if (!r.ok) return;
+                        const job = await r.json();
+                        setPill(job.status, job.rows_transferred || 0);
+                        if (terminal.includes(job.status)) {{
+                            if (job.status === 'completed') showToast('Runner completed: ' + (job.rows_transferred || 0) + ' rows', 'success');
+                            else showToast('Runner ' + job.status, 'error');
+                            return;
+                        }}
+                    }} catch (e) {{}}
+                    setTimeout(pollDetail, 1000);
+                }};
+                setTimeout(pollDetail, 500);
+
+            }} catch (e) {{
+                showToast('Error: ' + e.message, 'error');
+                btn.disabled = false;
+                btn.textContent = 'Dispatch Runner';
+            }}
         }});
     </script>
 </body>
@@ -823,6 +1029,7 @@ async def ui_candidates_list(
             // Fetch pipes
             try {{
                 const res = await fetch('/api/pipes');
+                if (!res.ok) throw new Error('Request failed: ' + res.status);
                 const data = await res.json();
                 const pipes = data.pipes || [];
 
@@ -1441,7 +1648,23 @@ async def ui_drift_list(status: Optional[str] = Query(None)):
 
 @router.get("/ui/topology", response_class=HTMLResponse, include_in_schema=False)
 async def ui_topology():
-    """Topology Visualization Screen - Interactive graph of pipes, planes, and sources"""
+    """Topology Visualization Screen"""
+    latest_run = get_latest_aod_run()
+    if latest_run:
+        _snap = latest_run.get("snapshot_name") or "Unnamed"
+        _pipes = latest_run.get("candidates_accepted", 0)
+        _ts = (latest_run.get("handoff_timestamp") or "")[:10]
+        _rid = latest_run.get("aod_run_id", "")
+        _run_html = (
+            f'<div class="sb-val" style="color:#f0abfc;">{_snap}</div>'
+            f'<div class="sb-kpi"><span>{_pipes}</span> pipes</div>'
+            f'<div class="sb-dim">{_ts}</div>'
+        )
+        _recon_html = f'<a href="/ui/reconcile/{_rid}" class="sb-link">Reconcile</a>'
+    else:
+        _run_html = '<div class="sb-val" style="color:#fb923c;">No AOD data</div>'
+        _recon_html = ''
+
     return HTMLResponse(content=f"""
 <!DOCTYPE html>
 <html>
@@ -1451,203 +1674,273 @@ async def ui_topology():
     {UI_STYLE}
     <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
     <style>
-        #topology-container {{
-            width: 100%;
-            height: 600px;
+        .topo-page {{ padding: 0 12px 12px; }}
+        .topo-layout {{ display: flex; gap: 10px; height: calc(100vh - 60px); }}
+        .topo-sidebar {{
+            width: 176px; flex-shrink: 0;
+            display: flex; flex-direction: column;
+            background: rgba(30, 41, 59, 0.5);
             border: 1px solid var(--slate-700);
             border-radius: 8px;
-            background: rgba(15, 23, 42, 0.8);
+            overflow-y: auto;
         }}
-        .topology-controls {{
-            display: flex;
-            gap: 8px;
-            margin-bottom: 12px;
-            flex-wrap: wrap;
-            align-items: center;
+        .topo-sidebar::-webkit-scrollbar {{ width: 3px; }}
+        .topo-sidebar::-webkit-scrollbar-thumb {{ background: var(--slate-700); border-radius: 3px; }}
+        .topo-main {{ flex: 1; min-width: 0; position: relative; }}
+        #topology-container {{ width: 100%; height: 100%; border: 1px solid var(--slate-700); border-radius: 8px; background: rgba(15, 23, 42, 0.8); }}
+        .sb-section {{ padding: 8px 10px; }}
+        .sb-section + .sb-section {{ border-top: 1px solid rgba(51, 65, 85, 0.5); }}
+        .sb-title {{ font-size: 0.58rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--slate-500); margin-bottom: 5px; font-weight: 600; }}
+        .sb-val {{ font-weight: 600; font-size: 0.82rem; line-height: 1.25; word-break: break-word; color: var(--slate-200); }}
+        .sb-kpi {{ margin-top: 3px; font-size: 0.7rem; color: var(--slate-400); }}
+        .sb-kpi span {{ font-size: 1.15rem; font-weight: 700; color: var(--cyan-400); margin-right: 2px; }}
+        .sb-dim {{ font-size: 0.62rem; color: var(--slate-500); margin-top: 2px; }}
+        .sb-link {{ font-size: 0.68rem; color: var(--slate-400); display: inline-block; margin-top: 4px; }}
+        .sb-stats {{ display: flex; flex-direction: column; gap: 2px; }}
+        .sb-stat {{ font-size: 0.7rem; color: var(--slate-400); display: flex; justify-content: space-between; }}
+        .sb-stat span:last-child {{ color: var(--cyan-400); font-weight: 600; }}
+        .sb-btn {{
+            width: 100%; padding: 4px 8px; border-radius: 4px;
+            font-size: 0.7rem; font-weight: 500; cursor: pointer;
+            border: 1px solid var(--slate-700); background: transparent;
+            color: var(--slate-300); text-align: left;
+            transition: all 0.15s; font-family: inherit; margin-bottom: 2px;
         }}
-        .topology-header {{
-            display: flex;
-            align-items: baseline;
-            gap: 16px;
-            flex-wrap: wrap;
-            margin-bottom: 12px;
+        .sb-btn:hover {{ background: rgba(34, 211, 238, 0.08); border-color: rgba(34, 211, 238, 0.3); color: var(--cyan-400); }}
+        .sb-btn:disabled {{ opacity: 0.4; cursor: not-allowed; }}
+        .sb-btn-accent {{ border-color: rgba(251, 146, 60, 0.3); color: #fb923c; }}
+        .sb-btn-accent:hover {{ background: rgba(251, 146, 60, 0.1); }}
+        .sb-btn-runner {{ border-color: rgba(34, 197, 94, 0.3); color: #4ade80; }}
+        .sb-btn-runner:hover {{ background: rgba(34, 197, 94, 0.1); }}
+        .dispatch-pill {{
+            display: inline-block; padding: 1px 7px; border-radius: 8px;
+            font-size: 0.62rem; font-weight: 600; letter-spacing: 0.3px;
         }}
-        .topology-header h1 {{
-            margin: 0;
+        .dispatch-pill.queued {{ background: rgba(148,163,184,0.2); color: #94a3b8; }}
+        .dispatch-pill.running {{ background: rgba(59,130,246,0.2); color: #60a5fa; animation: pulse-blue 1.5s infinite; }}
+        .dispatch-pill.completed {{ background: rgba(34,197,94,0.2); color: #4ade80; }}
+        .dispatch-pill.failed {{ background: rgba(248,113,113,0.2); color: #f87171; }}
+        @keyframes pulse-blue {{ 0%,100% {{ opacity:1; }} 50% {{ opacity:0.6; }} }}
+        .sb-select {{
+            width: 100%; padding: 3px 6px; font-size: 0.7rem;
+            background: rgba(15, 23, 42, 0.6); border: 1px solid var(--slate-700);
+            border-radius: 4px; color: var(--slate-300);
+            font-family: inherit; cursor: pointer; margin-bottom: 3px;
         }}
-        .topology-header .inline-stats {{
-            display: flex;
-            gap: 12px;
-            font-size: 0.8rem;
-            color: var(--slate-400);
+        .sb-select:focus {{ outline: none; border-color: rgba(34, 211, 238, 0.4); }}
+        .sb-legend {{ display: flex; flex-direction: column; gap: 2px; }}
+        .sb-legend-item {{ display: flex; align-items: center; gap: 5px; font-size: 0.65rem; color: var(--slate-400); }}
+        .sb-legend-item svg {{ width: 10px; height: 10px; flex-shrink: 0; }}
+        .node-details {{
+            position: absolute; top: 10px; right: 10px; width: 260px;
+            background: rgba(30, 41, 59, 0.95); border: 1px solid var(--slate-700);
+            border-radius: 8px; padding: 12px; display: none; z-index: 100;
         }}
-        .topology-header .inline-stats span {{
-            color: var(--cyan-400);
-            font-weight: 600;
+        .node-details.visible {{ display: block; }}
+        .node-details h3 {{ margin-bottom: 8px; color: var(--cyan-400); font-size: 0.85rem; }}
+        .node-details .close-btn {{ position: absolute; top: 6px; right: 8px; background: none; border: none; color: var(--slate-400); cursor: pointer; font-size: 1rem; }}
+
+        .dispatch-overlay {{
+            position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+            z-index: 9000; display: none; justify-content: center; align-items: center;
         }}
-        .legend-below {{
-            display: flex;
-            gap: 16px;
-            flex-wrap: wrap;
-            margin-top: 12px;
-            padding: 10px 16px;
-            background: rgba(30, 41, 59, 0.6);
-            border-radius: 6px;
-            justify-content: center;
+        .dispatch-overlay.visible {{ display: flex; }}
+        .dispatch-panel {{
+            background: #0f172a; border: 1px solid var(--slate-700);
+            border-radius: 10px; width: 720px; max-width: 92vw;
+            max-height: 82vh; display: flex; flex-direction: column;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
         }}
-        .legend-item {{
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            font-size: 0.85rem;
+        .dp-header {{
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 14px 18px; border-bottom: 1px solid var(--slate-700);
+        }}
+        .dp-header h2 {{ font-size: 0.95rem; color: var(--slate-100); margin: 0; }}
+        .dp-header .dp-close {{
+            background: none; border: none; color: var(--slate-400);
+            cursor: pointer; font-size: 1.2rem; padding: 2px 6px;
+        }}
+        .dp-header .dp-close:hover {{ color: var(--slate-200); }}
+        .dp-summary {{
+            display: flex; gap: 12px; padding: 12px 18px;
+            border-bottom: 1px solid rgba(51,65,85,0.5);
+        }}
+        .dp-stat {{
+            display: flex; flex-direction: column; align-items: center;
+            padding: 8px 14px; border-radius: 6px;
+            background: rgba(30,41,59,0.8); min-width: 70px;
+        }}
+        .dp-stat .dp-val {{ font-size: 1.3rem; font-weight: 700; }}
+        .dp-stat .dp-lbl {{ font-size: 0.6rem; color: var(--slate-400); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }}
+        .dp-stat.completed .dp-val {{ color: #4ade80; }}
+        .dp-stat.failed .dp-val {{ color: #f87171; }}
+        .dp-stat.running .dp-val {{ color: #60a5fa; }}
+        .dp-stat.queued .dp-val {{ color: #94a3b8; }}
+        .dp-stat.total .dp-val {{ color: var(--cyan-400); }}
+        .dp-stat.rows .dp-val {{ color: #a78bfa; }}
+        .dp-jobs {{
+            flex: 1; overflow-y: auto; padding: 8px 18px 14px;
+        }}
+        .dp-jobs table {{
+            width: 100%; border-collapse: collapse; font-size: 0.7rem;
+        }}
+        .dp-jobs th {{
+            text-align: left; padding: 6px 8px; color: var(--slate-400);
+            border-bottom: 1px solid var(--slate-700); font-weight: 600;
+            font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.5px;
+            position: sticky; top: 0; background: #0f172a;
+        }}
+        .dp-jobs td {{
+            padding: 5px 8px; border-bottom: 1px solid rgba(51,65,85,0.3);
             color: var(--slate-300);
         }}
-        .legend-shape {{
-            width: 18px;
-            height: 18px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+        .dp-jobs tr:hover td {{ background: rgba(51,65,85,0.2); }}
+        .dp-status {{
+            display: inline-block; padding: 1px 7px; border-radius: 8px;
+            font-size: 0.6rem; font-weight: 600;
         }}
-        .legend-shape svg {{
-            width: 16px;
-            height: 16px;
+        .dp-status.completed {{ background: rgba(34,197,94,0.15); color: #4ade80; }}
+        .dp-status.failed {{ background: rgba(248,113,113,0.15); color: #f87171; }}
+        .dp-status.running {{ background: rgba(59,130,246,0.15); color: #60a5fa; }}
+        .dp-status.queued {{ background: rgba(148,163,184,0.15); color: #94a3b8; }}
+        .dp-status.pushing {{ background: rgba(167,139,250,0.15); color: #a78bfa; }}
+        .dp-error {{ color: #f87171; font-size: 0.6rem; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+        .dp-error:hover {{ white-space: normal; word-break: break-all; }}
+        .dp-filter {{
+            display: flex; gap: 6px; padding: 8px 18px 0;
         }}
-        .node-details {{
-            position: absolute;
-            top: 100px;
-            right: 24px;
-            width: 300px;
-            background: rgba(30, 41, 59, 0.95);
-            border: 1px solid var(--slate-700);
-            border-radius: 8px;
-            padding: 16px;
-            display: none;
-            z-index: 100;
+        .dp-filter-btn {{
+            background: rgba(30,41,59,0.8); border: 1px solid var(--slate-700);
+            color: var(--slate-400); padding: 3px 10px; border-radius: 4px;
+            font-size: 0.62rem; cursor: pointer; font-family: inherit;
         }}
-        .node-details.visible {{
-            display: block;
-        }}
-        .node-details h3 {{
-            margin-bottom: 12px;
-            color: var(--cyan-400);
-        }}
-        .node-details .close-btn {{
-            position: absolute;
-            top: 8px;
-            right: 8px;
-            background: none;
-            border: none;
-            color: var(--slate-400);
-            cursor: pointer;
-            font-size: 1.2rem;
-        }}
-        .filter-group {{
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }}
-        .filter-group label {{
-            font-size: 0.85rem;
-            color: var(--slate-400);
-        }}
+        .dp-filter-btn:hover {{ border-color: var(--slate-500); color: var(--slate-200); }}
+        .dp-filter-btn.active {{ border-color: var(--cyan-400); color: var(--cyan-400); background: rgba(34,211,238,0.08); }}
     </style>
 </head>
 <body>
     {ui_nav("topology")}
-    <div class="container">
-        <div class="topology-header">
-            <h1>Topology</h1>
-            <div class="inline-stats">
-                <div><span id="stat-pipes">-</span> Pipes</div>
-                <div><span id="stat-fabrics">-</span> Fabrics</div>
-                <div><span id="stat-sors">-</span> SORs</div>
-                <div><span id="stat-drift">-</span> Drift</div>
+    <div class="topo-page">
+    <div class="topo-layout">
+        <aside class="topo-sidebar">
+            <div class="sb-section">
+                <div class="sb-title">Run</div>
+                {_run_html}
+                {_recon_html}
             </div>
-        </div>
-
-        <div class="topology-controls">
-            <div class="filter-group">
-                <label>Filter:</label>
-                <select id="asset-filter" onchange="applyTopologyFilters()">
-                    <option value="all" selected>All</option>
-                    <option value="sors">SORs</option>
-                    <option value="fabrics">Fabrics</option>
+            <div class="sb-section">
+                <div class="sb-title">Topology</div>
+                <div class="sb-stats">
+                    <div class="sb-stat"><span>Fabrics</span> <span id="stat-fabrics">-</span></div>
+                    <div class="sb-stat"><span>SORs</span> <span id="stat-sors">-</span></div>
+                    <div class="sb-stat"><span>Drift</span> <span id="stat-drift">-</span></div>
+                </div>
+            </div>
+            <div class="sb-section">
+                <div class="sb-title">Actions</div>
+                <button class="sb-btn sb-btn-accent" onclick="fetchAodData()" id="fetch-aod-btn">Fetch AOD Data</button>
+                <button class="sb-btn" id="btn-run-inference">Run Inference</button>
+                <button class="sb-btn" id="btn-export-dcl">Export to DCL</button>
+                <button class="sb-btn sb-btn-runner" onclick="dispatchAllRunners()" id="btn-dispatch-all" data-testid="btn-dispatch-all">Dispatch Runner</button>
+                <button class="sb-btn" onclick="openDispatchPanel()" id="btn-view-dispatch" data-testid="btn-view-dispatch" style="font-size:0.72rem;">View Dispatch</button>
+                <span id="dispatch-all-status" style="display:none;font-size:0.68rem;margin-top:2px;"></span>
+            </div>
+            <div class="sb-section">
+                <div class="sb-title">View</div>
+                <select class="sb-select" id="asset-filter" onchange="applyTopologyFilters()">
+                    <option value="all" selected>All Assets</option>
+                    <option value="sors">SORs Only</option>
+                    <option value="fabrics">Fabrics Only</option>
                     <option value="API_GATEWAY">API Gateway</option>
                     <option value="IPAAS">iPaaS</option>
                     <option value="EVENT_BUS">Event Bus</option>
                     <option value="DATA_WAREHOUSE">Data Warehouse</option>
                 </select>
-            </div>
-            <div class="filter-group">
-                <label>Detail Level:</label>
-                <select id="detail-filter" onchange="applyTopologyFilters()">
-                    <option value="summary" selected>Summary View</option>
-                    <option value="all">All Assets (slow)</option>
+                <select class="sb-select" id="detail-filter" onchange="applyTopologyFilters()">
+                    <option value="summary" selected>Summary</option>
+                    <option value="all">All Nodes</option>
                 </select>
-            </div>
-            <div class="filter-group">
-                <label>Layout:</label>
-                <select id="layout-select" onchange="handleLayoutAction(this.value)">
+                <select class="sb-select" id="layout-select" onchange="handleLayoutAction(this.value)">
                     <option value="physics">Force-Directed</option>
                     <option value="hierarchical">Hierarchical</option>
                     <option value="circular">Circular</option>
-                    <option disabled>───────────</option>
+                    <option disabled>─────────</option>
                     <option value="_fit">Fit to Screen</option>
-                    <option value="_unlock">Unlock Positions</option>
+                    <option value="_unlock">Unlock Nodes</option>
                 </select>
+                <button class="sb-btn" onclick="resetView()" style="margin-top:1px;">Reset</button>
             </div>
-            <button class="btn" onclick="resetView()">Reset View</button>
-            <button class="btn btn-success" onclick="refreshData()">Refresh Data</button>
-        </div>
-
-        <div style="padding-right: 80px;">
-        <div id="topology-container"></div>
-        </div>
-
-        <div class="legend-below">
-            <div class="legend-item">
-                <div class="legend-shape"><svg viewBox="0 0 12 12"><polygon points="6,0 12,6 6,12 0,6" fill="#a78bfa"/></svg></div>
-                <span>Gateway</span>
+            <div class="sb-section">
+                <div class="sb-title">Legend</div>
+                <div class="sb-legend">
+                    <div class="sb-legend-item"><svg viewBox="0 0 12 12"><polygon points="6,0 12,6 6,12 0,6" fill="#a78bfa"/></svg> Gateway</div>
+                    <div class="sb-legend-item"><svg viewBox="0 0 12 12"><polygon points="6,0 12,6 6,12 0,6" fill="#22d3ee"/></svg> iPaaS</div>
+                    <div class="sb-legend-item"><svg viewBox="0 0 12 12"><polygon points="6,0 12,6 6,12 0,6" fill="#f97316"/></svg> Event Bus</div>
+                    <div class="sb-legend-item"><svg viewBox="0 0 12 12"><polygon points="6,0 12,6 6,12 0,6" fill="#10b981"/></svg> Warehouse</div>
+                    <div class="sb-legend-item"><svg viewBox="0 0 12 12"><circle cx="6" cy="6" r="5" fill="#60a5fa"/></svg> Pipe</div>
+                    <div class="sb-legend-item"><svg viewBox="0 0 12 12"><rect x="1" y="1" width="10" height="10" fill="#94a3b8"/></svg> Source</div>
+                    <div class="sb-legend-item"><svg viewBox="0 0 12 12"><polygon points="6,1 11,11 1,11" fill="#c084fc"/></svg> Candidate</div>
+                    <div class="sb-legend-item"><svg viewBox="0 0 12 12"><rect x="1" y="1" width="10" height="10" fill="#f59e0b" stroke="#fbbf24" stroke-width="2"/></svg> SOR</div>
+                </div>
             </div>
-            <div class="legend-item">
-                <div class="legend-shape"><svg viewBox="0 0 12 12"><polygon points="6,0 12,6 6,12 0,6" fill="#22d3ee"/></svg></div>
-                <span>iPaaS</span>
+        </aside>
+        <main class="topo-main">
+            <div id="topology-container"></div>
+            <div id="node-details" class="node-details">
+                <button class="close-btn" onclick="closeDetails()">&times;</button>
+                <h3 id="detail-title">Node Details</h3>
+                <div id="detail-content"></div>
             </div>
-            <div class="legend-item">
-                <div class="legend-shape"><svg viewBox="0 0 12 12"><polygon points="6,0 12,6 6,12 0,6" fill="#f97316"/></svg></div>
-                <span>Event Bus</span>
-            </div>
-            <div class="legend-item">
-                <div class="legend-shape"><svg viewBox="0 0 12 12"><polygon points="6,0 12,6 6,12 0,6" fill="#10b981"/></svg></div>
-                <span>Warehouse</span>
-            </div>
-            <div class="legend-item">
-                <div class="legend-shape"><svg viewBox="0 0 12 12"><circle cx="6" cy="6" r="5" fill="#60a5fa"/></svg></div>
-                <span>Pipe</span>
-            </div>
-            <div class="legend-item">
-                <div class="legend-shape"><svg viewBox="0 0 12 12"><rect x="1" y="1" width="10" height="10" fill="#94a3b8"/></svg></div>
-                <span>Source</span>
-            </div>
-            <div class="legend-item">
-                <div class="legend-shape"><svg viewBox="0 0 12 12"><polygon points="6,1 11,11 1,11" fill="#c084fc"/></svg></div>
-                <span>Candidate</span>
-            </div>
-            <div class="legend-item">
-                <div class="legend-shape"><svg viewBox="0 0 12 12"><rect x="1" y="1" width="10" height="10" fill="#f59e0b" stroke="#fbbf24" stroke-width="2"/></svg></div>
-                <span>SOR (Farm)</span>
-            </div>
-        </div>
-
-        <div id="node-details" class="node-details">
-            <button class="close-btn" onclick="closeDetails()">&times;</button>
-            <h3 id="detail-title">Node Details</h3>
-            <div id="detail-content"></div>
-        </div>
+        </main>
     </div>
+    </div>
+    <div id="toast" class="toast"></div>
 
     <script>
+        var _fetchRunning = false;
+        var _fetchTimer = null;
+        var _fetchStart = 0;
+        async function fetchAodData() {{
+            if (_fetchRunning) return;
+            _fetchRunning = true;
+            var btn = document.getElementById('fetch-aod-btn');
+            _fetchStart = Date.now();
+            if (_fetchTimer) clearInterval(_fetchTimer);
+            _fetchTimer = setInterval(function() {{
+                var s = Math.floor((Date.now() - _fetchStart) / 1000);
+                btn.textContent = 'Fetching... ' + s + 's';
+            }}, 500);
+            btn.textContent = 'Fetching... 0s';
+            btn.disabled = true;
+            try {{
+                var res = await fetch('/api/handoff/aod/fetch', {{ method: 'POST' }});
+                var data = await res.json();
+                clearInterval(_fetchTimer);
+                _fetchTimer = null;
+                var elapsed = Math.floor((Date.now() - _fetchStart) / 1000);
+                if (res.ok) {{
+                    btn.textContent = 'Fetched (' + elapsed + 's)';
+                    btn.disabled = false;
+                    _fetchRunning = false;
+                    showToast('Fetch complete in ' + elapsed + 's', 'success');
+                    setTimeout(() => location.reload(), 1200);
+                }} else {{
+                    showToast(data.detail || 'Fetch failed', 'error');
+                    btn.textContent = 'Failed (' + elapsed + 's)';
+                    btn.disabled = false;
+                    _fetchRunning = false;
+                }}
+            }} catch(e) {{
+                clearInterval(_fetchTimer);
+                _fetchTimer = null;
+                var elapsed = Math.floor((Date.now() - _fetchStart) / 1000);
+                showToast('Fetch failed: ' + e.message, 'error');
+                btn.textContent = 'Failed (' + elapsed + 's)';
+                btn.disabled = false;
+                _fetchRunning = false;
+            }}
+        }}
+
         let network = null;
         let allNodes = [];
         let allEdges = [];
@@ -1682,6 +1975,7 @@ async def ui_topology():
             }}
 
             const response = await fetch(url);
+            if (!response.ok) throw new Error('Request failed: ' + response.status);
             let data = await response.json();
             
             // Apply SOR filter client-side
@@ -1710,7 +2004,7 @@ async def ui_topology():
                     : nodeColors[n.type] || '#64748b';
                 let borderWidth = 1;
                 let borderColor = undefined;
-                if (n.metadata && n.metadata.is_authoritative) {{
+                if (n.metadata && n.metadata.origin === 'Declared') {{
                     color = '#f59e0b';
                     borderWidth = 3;
                     borderColor = '#fbbf24';
@@ -1722,7 +2016,7 @@ async def ui_topology():
                     color: borderColor ? {{ background: color, border: borderColor }} : color,
                     borderWidth: borderWidth,
                     size: n.type === 'fabric_plane' ? 30 : (n.type === 'pipe' ? 20 : 15),
-                    font: {{ color: '#ffffff', size: 12 }},
+                    font: {{ color: '#ffffff', size: 12, face: 'Quicksand, sans-serif' }},
                     title: buildTooltip(n),
                     nodeData: n
                 }};
@@ -1738,10 +2032,8 @@ async def ui_topology():
                 arrows: {{ to: {{ enabled: true, scaleFactor: 0.5 }} }}
             }}));
 
-            // Update stats
+            // Update sidebar stats
             if (data.stats) {{
-                // Canonical KPIs: Pipes (= candidates), Fabrics, SORs
-                document.getElementById('stat-pipes').textContent = data.stats.total_candidates || 0;
                 document.getElementById('stat-fabrics').textContent = data.stats.fabrics || 0;
                 document.getElementById('stat-sors').textContent = data.stats.sors || 0;
                 document.getElementById('stat-drift').textContent = data.stats.pipes_with_drift || 0;
@@ -1757,8 +2049,7 @@ async def ui_topology():
                 lines.push('Type: ' + (node.metadata.plane_type || 'unknown'));
                 if (node.metadata.connected !== undefined) lines.push('Connected: ' + node.metadata.connected + ' / ' + node.metadata.total);
             }} else if (node.type === 'source_system') {{
-                if (node.metadata.is_authoritative) lines.push('Farm-Authoritative SOR');
-                else if (node.metadata.is_sor) lines.push('SOR (candidate-derived)');
+                if (node.metadata.origin) lines.push('Origin: ' + node.metadata.origin);
                 if (node.metadata.domain) lines.push('Domain: ' + node.metadata.domain);
                 if (node.metadata.confidence) lines.push('Confidence: ' + node.metadata.confidence);
                 if (node.metadata.category) lines.push('Category: ' + node.metadata.category);
@@ -1944,7 +2235,7 @@ async def ui_topology():
 
         function resetView() {{
             document.getElementById('asset-filter').value = 'all';
-            document.getElementById('detail-filter').value = 'full';
+            document.getElementById('detail-filter').value = 'summary';
             document.getElementById('layout-select').value = 'physics';
             _lastLayout = 'physics';
             physicsEnabled = true;
@@ -1979,9 +2270,282 @@ async def ui_topology():
             }}
         }}
 
+        function showToast(message, type) {{
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = 'toast ' + type;
+            toast.style.display = 'block';
+            setTimeout(() => toast.style.display = 'none', 3000);
+        }}
+
+        var _inferTimer = null;
+        var _inferStart = 0;
+        document.getElementById('btn-run-inference').addEventListener('click', async function() {{
+            var btn = this;
+            btn.disabled = true;
+            _inferStart = Date.now();
+            if (_inferTimer) clearInterval(_inferTimer);
+            _inferTimer = setInterval(function() {{
+                var s = Math.floor((Date.now() - _inferStart) / 1000);
+                btn.textContent = 'Running... ' + s + 's';
+            }}, 500);
+            btn.textContent = 'Running... 0s';
+            try {{
+                const res = await fetch('/api/aam/infer', {{ method: 'POST' }});
+                const data = await res.json();
+                clearInterval(_inferTimer);
+                _inferTimer = null;
+                var elapsed = Math.floor((Date.now() - _inferStart) / 1000);
+                if (res.ok) {{
+                    let msg = 'Inference complete: ' + data.pipes_created + ' pipes created';
+                    if (data.from_candidates) msg += ' (' + data.from_candidates + ' from candidates)';
+                    if (data.candidates_unmatched) msg += ', ' + data.candidates_unmatched + ' unmatched';
+                    showToast(msg, data.pipes_created > 0 ? 'success' : 'warning');
+                    btn.textContent = 'Inferred (' + elapsed + 's)';
+                    btn.disabled = false;
+                    setTimeout(() => location.reload(), 1200);
+                }} else {{
+                    showToast('Error: ' + (data.detail || 'Failed'), 'error');
+                    btn.textContent = 'Failed (' + elapsed + 's)';
+                    btn.disabled = false;
+                }}
+            }} catch (e) {{
+                clearInterval(_inferTimer);
+                _inferTimer = null;
+                var elapsed = Math.floor((Date.now() - _inferStart) / 1000);
+                showToast('Error: ' + e.message, 'error');
+                btn.textContent = 'Failed (' + elapsed + 's)';
+                btn.disabled = false;
+            }}
+        }});
+
+        document.getElementById('btn-export-dcl').addEventListener('click', async function() {{
+            try {{
+                const res = await fetch('/api/export/dcl/declared-pipes');
+                if (!res.ok) throw new Error('Request failed: ' + res.status);
+                const data = await res.json();
+                const blob = new Blob([JSON.stringify(data, null, 2)], {{ type: 'application/json' }});
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'dcl-export-' + new Date().toISOString().slice(0,10) + '.json';
+                a.click();
+                showToast('Exported ' + data.pipe_count + ' pipes', 'success');
+            }} catch (e) {{
+                showToast('Export failed: ' + e.message, 'error');
+            }}
+        }});
+
+        let _dispatchPollTimer = null;
+        let _dispatchCounterTimer = null;
+        let _dispatchStart = 0;
+        let _dispatchJobCount = 0;
+
+        function _startDispatchCounter(count) {{
+            _dispatchStart = Date.now();
+            _dispatchJobCount = count;
+            const btn = document.getElementById('btn-dispatch-all');
+            if (_dispatchCounterTimer) clearInterval(_dispatchCounterTimer);
+            _dispatchCounterTimer = setInterval(() => {{
+                const sec = Math.floor((Date.now() - _dispatchStart) / 1000);
+                btn.textContent = 'Running ' + _dispatchJobCount + '... ' + sec + 's';
+            }}, 200);
+        }}
+
+        function _stopDispatchCounter() {{
+            if (_dispatchCounterTimer) {{ clearInterval(_dispatchCounterTimer); _dispatchCounterTimer = null; }}
+            const btn = document.getElementById('btn-dispatch-all');
+            btn.textContent = 'Dispatch Runner';
+        }}
+
+        function startDispatchPolling() {{
+            stopDispatchPolling();
+            _dispatchPollTimer = setInterval(async () => {{
+                await loadDispatchData();
+                if (_dpData) {{
+                    const hasActive = _dpData.some(j => j.status === 'queued' || j.status === 'running' || j.status === 'pushing');
+                    if (!hasActive) {{
+                        stopDispatchPolling();
+                        _stopDispatchCounter();
+                        const statusEl = document.getElementById('dispatch-all-status');
+                        const done = _dpData.filter(j => j.status === 'completed').length;
+                        const failed = _dpData.filter(j => j.status === 'failed').length;
+                        const rows = _dpData.reduce((s, j) => s + (j.rows_transferred || 0), 0);
+                        const elapsed = Math.floor((Date.now() - _dispatchStart) / 1000);
+                        if (failed === 0) {{
+                            statusEl.innerHTML = '<span class="dispatch-pill completed">Done (' + rows + 'r) ' + elapsed + 's</span>';
+                        }} else {{
+                            statusEl.innerHTML = '<span class="dispatch-pill failed">' + failed + ' failed (' + elapsed + 's)</span>';
+                        }}
+                    }}
+                }}
+            }}, 2000);
+        }}
+
+        function stopDispatchPolling() {{
+            if (_dispatchPollTimer) {{ clearInterval(_dispatchPollTimer); _dispatchPollTimer = null; }}
+        }}
+
+        async function dispatchAllRunners() {{
+            const btn = document.getElementById('btn-dispatch-all');
+            const statusEl = document.getElementById('dispatch-all-status');
+            btn.disabled = true;
+            btn.textContent = 'Dispatching...';
+            statusEl.style.display = 'inline-block';
+            statusEl.innerHTML = '<span class="dispatch-pill queued">Queued</span>';
+
+            try {{
+                const pipesRes = await fetch('/api/pipes');
+                const pipesData = await pipesRes.json();
+                const pipeIds = (pipesData.pipes || []).map(p => p.pipe_id).filter(Boolean);
+
+                if (pipeIds.length === 0) {{
+                    showToast('No pipes to dispatch', 'warning');
+                    btn.disabled = false;
+                    btn.textContent = 'Dispatch Runner';
+                    statusEl.style.display = 'none';
+                    return;
+                }}
+
+                const res = await fetch('/api/runners/dispatch-batch', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{ pipe_ids: pipeIds, trigger: 'manual' }})
+                }});
+                const data = await res.json();
+
+                if (res.ok) {{
+                    const dispatched = data.dispatched || 0;
+                    const errors = data.errors || 0;
+                    statusEl.innerHTML = '<span class="dispatch-pill running">' + dispatched + ' queued</span>';
+                    showToast(dispatched + ' jobs queued for execution', 'success');
+                    _startDispatchCounter(dispatched);
+                    openDispatchPanel();
+                    startDispatchPolling();
+                }} else {{
+                    statusEl.innerHTML = '<span class="dispatch-pill failed">Failed</span>';
+                    showToast('Dispatch failed: ' + (data.detail || res.status), 'error');
+                    btn.disabled = false;
+                    btn.textContent = 'Dispatch Runner';
+                }}
+            }} catch (e) {{
+                statusEl.innerHTML = '<span class="dispatch-pill failed">Error</span>';
+                showToast('Error: ' + e.message, 'error');
+                btn.disabled = false;
+                btn.textContent = 'Dispatch Runner';
+            }}
+        }}
+
+        // ── Dispatch Panel ──
+        let _dpFilter = 'all';
+        let _dpData = null;
+
+        function openDispatchPanel() {{
+            document.getElementById('dispatch-overlay').classList.add('visible');
+            loadDispatchData();
+        }}
+
+        function closeDispatchPanel() {{
+            document.getElementById('dispatch-overlay').classList.remove('visible');
+            stopDispatchPolling();
+        }}
+
+        function setDpFilter(f, el) {{
+            _dpFilter = f;
+            document.querySelectorAll('.dp-filter-btn').forEach(b => b.classList.remove('active'));
+            el.classList.add('active');
+            renderDispatchJobs(_dpData);
+        }}
+
+        async function loadDispatchData() {{
+            const body = document.getElementById('dp-body');
+            body.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--slate-500);">Loading...</td></tr>';
+            try {{
+                const res = await fetch('/api/runners/jobs?limit=200');
+                const data = await res.json();
+                _dpData = data.jobs || [];
+                renderDispatchSummary(_dpData);
+                renderDispatchJobs(_dpData);
+            }} catch (e) {{
+                body.innerHTML = '<tr><td colspan="5" style="color:#f87171;">Error: ' + e.message + '</td></tr>';
+            }}
+        }}
+
+        function renderDispatchSummary(jobs) {{
+            const counts = {{ completed: 0, failed: 0, running: 0, queued: 0, pushing: 0 }};
+            let totalRows = 0;
+            jobs.forEach(j => {{
+                const s = j.status || 'queued';
+                if (counts[s] !== undefined) counts[s]++;
+                totalRows += j.rows_transferred || 0;
+            }});
+            document.getElementById('dp-total').textContent = jobs.length;
+            document.getElementById('dp-completed').textContent = counts.completed;
+            document.getElementById('dp-failed').textContent = counts.failed;
+            document.getElementById('dp-running').textContent = counts.running + counts.pushing;
+            document.getElementById('dp-rows').textContent = totalRows;
+        }}
+
+        function renderDispatchJobs(jobs) {{
+            const body = document.getElementById('dp-body');
+            let filtered = jobs;
+            if (_dpFilter !== 'all') {{
+                filtered = jobs.filter(j => (j.status || 'queued') === _dpFilter);
+            }}
+            if (filtered.length === 0) {{
+                body.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:16px;color:var(--slate-500);">No jobs</td></tr>';
+                return;
+            }}
+            body.innerHTML = filtered.map(j => {{
+                const s = j.status || 'queued';
+                const rows = j.rows_transferred || 0;
+                const err = j.error_message ? '<div class="dp-error" title="' + (j.error_message||'').replace(/"/g,'&quot;') + '">' + (j.error_message||'').substring(0,80) + '</div>' : '';
+                const pipeId = j.pipe_id || j.job_id || '';
+                const shortPipe = pipeId.length > 35 ? pipeId.substring(0,32) + '...' : pipeId;
+                const ts = j.completed_at || j.started_at || j.created_at || '';
+                const shortTs = ts ? new Date(ts).toLocaleTimeString() : '-';
+                return '<tr>' +
+                    '<td title="' + pipeId + '">' + shortPipe + '</td>' +
+                    '<td><span class="dp-status ' + s + '">' + s + '</span></td>' +
+                    '<td style="text-align:right;">' + rows + '</td>' +
+                    '<td>' + shortTs + '</td>' +
+                    '<td>' + err + '</td>' +
+                    '</tr>';
+            }}).join('');
+        }}
+
         // Initialize
         loadTopology();
     </script>
+
+    <div class="dispatch-overlay" id="dispatch-overlay" data-testid="dispatch-overlay" onclick="if(event.target===this)closeDispatchPanel()">
+        <div class="dispatch-panel">
+            <div class="dp-header">
+                <h2>Dispatch Details</h2>
+                <button class="dp-close" onclick="closeDispatchPanel()" data-testid="btn-close-dispatch">&times;</button>
+            </div>
+            <div class="dp-summary">
+                <div class="dp-stat total"><span class="dp-val" id="dp-total">-</span><span class="dp-lbl">Total</span></div>
+                <div class="dp-stat completed"><span class="dp-val" id="dp-completed">-</span><span class="dp-lbl">Done</span></div>
+                <div class="dp-stat failed"><span class="dp-val" id="dp-failed">-</span><span class="dp-lbl">Failed</span></div>
+                <div class="dp-stat running"><span class="dp-val" id="dp-running">-</span><span class="dp-lbl">Active</span></div>
+                <div class="dp-stat rows"><span class="dp-val" id="dp-rows">-</span><span class="dp-lbl">Rows</span></div>
+            </div>
+            <div class="dp-filter">
+                <button class="dp-filter-btn active" onclick="setDpFilter('all',this)" data-testid="dp-filter-all">All</button>
+                <button class="dp-filter-btn" onclick="setDpFilter('completed',this)" data-testid="dp-filter-completed">Completed</button>
+                <button class="dp-filter-btn" onclick="setDpFilter('failed',this)" data-testid="dp-filter-failed">Failed</button>
+                <button class="dp-filter-btn" onclick="setDpFilter('running',this)" data-testid="dp-filter-running">Running</button>
+                <button class="dp-filter-btn" onclick="setDpFilter('queued',this)" data-testid="dp-filter-queued">Queued</button>
+            </div>
+            <div class="dp-jobs">
+                <table>
+                    <thead><tr><th>Pipe</th><th>Status</th><th style="text-align:right;">Rows</th><th>Time</th><th>Error</th></tr></thead>
+                    <tbody id="dp-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
 </body>
 </html>
 """)
@@ -2298,7 +2862,7 @@ async def ui_reconcile(aod_run_id: str):
     sor_content = ""
     
     if not has_aod_sor:
-        sor_content += '<div style="color: var(--slate-400); font-size: 0.85rem; margin-bottom: 12px; padding: 8px; background: rgba(255,255,255,0.02); border-radius: 6px;">No SOR declarations found for this run. SORs are sent by Farm via AOD handoff.</div>'
+        sor_content += '<div style="color: var(--slate-400); font-size: 0.85rem; margin-bottom: 12px; padding: 8px; background: rgba(255,255,255,0.02); border-radius: 6px;">No SOR declarations found for this run. SORs are declared via AOD handoff.</div>'
     else:
         # Accuracy bar
         acc_color = "var(--green-400)" if sor_accuracy >= 80 else ("var(--orange-400)" if sor_accuracy >= 50 else "var(--red-400)")
@@ -2372,9 +2936,9 @@ async def ui_reconcile(aod_run_id: str):
             
             source_badge = ""
             if source == "farm":
-                source_badge = '<span style="background: rgba(251,191,36,0.15); color: #fbbf24; padding: 2px 6px; border-radius: 3px; font-size: 0.7rem; font-weight: 600;">Farm</span>'
+                source_badge = '<span style="background: rgba(251,191,36,0.15); color: #fbbf24; padding: 2px 6px; border-radius: 3px; font-size: 0.7rem; font-weight: 600;">Declared</span>'
             else:
-                source_badge = '<span style="background: rgba(99,102,241,0.15); color: #a5b4fc; padding: 2px 6px; border-radius: 3px; font-size: 0.7rem; font-weight: 500;">AOD</span>'
+                source_badge = '<span style="background: rgba(99,102,241,0.15); color: #a5b4fc; padding: 2px 6px; border-radius: 3px; font-size: 0.7rem; font-weight: 500;">Inferred</span>'
             
             if verdict == "ok":
                 verdict_html = '<span style="color: var(--green-400);">&#10003; OK</span>'
@@ -2718,7 +3282,10 @@ async def ui_reconcile(aod_run_id: str):
             headers: {{'Content-Type': 'application/json'}},
             body: JSON.stringify({{status: status, operator_notes: notes || ''}})
         }})
-        .then(r => r.json())
+        .then(r => {{
+            if (!r.ok) throw new Error('Request failed: ' + r.status);
+            return r.json();
+        }})
         .then(() => location.reload())
         .catch(e => alert('Error setting disposition: ' + e));
     }}

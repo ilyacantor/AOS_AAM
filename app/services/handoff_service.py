@@ -18,7 +18,7 @@ from ..constants import SOR_CATEGORIES, PLANE_TYPE_ALIASES
 from ..db import (
     store_fabric_plane,
     store_sor_declaration,
-    create_candidate,
+    create_candidates_batch,
     create_handoff_log,
     get_handoff_log,
     list_handoff_logs,
@@ -155,7 +155,7 @@ def load_aod_payload() -> Optional[dict]:
         return None
 
 
-def resolve_fabric_planes(request: AODHandoffRequest) -> tuple[dict, int]:
+def resolve_fabric_planes(request: AODHandoffRequest) -> tuple[dict, int, list]:
     """
     Store explicit fabric planes that AOD sent.
 
@@ -163,11 +163,12 @@ def resolve_fabric_planes(request: AODHandoffRequest) -> tuple[dict, int]:
     infer infrastructure from candidate metadata.  AOD owns fabric-plane
     detection; AAM only allocates assets to planes AOD discovered.
 
-    Returns (fabric_plane_map, planes_stored) where fabric_plane_map
-    maps vendor-lowercase → plane_id.
+    Returns (fabric_plane_map, planes_stored, errors) where fabric_plane_map
+    maps vendor-lowercase → plane_id and errors is a list of error strings.
     """
     fabric_plane_map: dict[str, str] = {}
     fabric_planes_stored = 0
+    errors: list[str] = []
 
     for plane in request.fabric_planes or []:
         try:
@@ -177,15 +178,32 @@ def resolve_fabric_planes(request: AODHandoffRequest) -> tuple[dict, int]:
             fabric_plane_map[plane.vendor.lower()] = plane_id
             fabric_planes_stored += 1
         except Exception as e:
-            _log.error("Failed to store fabric plane %s: %s", plane.vendor, e)
+            msg = f"Failed to store fabric plane {plane.vendor}: {e}"
+            _log.error(msg)
+            errors.append(msg)
 
-    return fabric_plane_map, fabric_planes_stored
+    return fabric_plane_map, fabric_planes_stored, errors
+
+
+def build_plane_lookups(fabric_plane_map: dict[str, str]) -> tuple[dict, list]:
+    """Pre-build lookup structures for plane linking (call once, not per candidate)."""
+    type_to_plane_id: dict[str, str] = {}
+    for _vendor_key, plane_id in fabric_plane_map.items():
+        plane_type = plane_id.split(":")[0] if ":" in plane_id else plane_id
+        if plane_type not in type_to_plane_id:
+            type_to_plane_id[plane_type] = plane_id
+
+    vendor_norms = [
+        (vendor.replace("_", " "), plane_id)
+        for vendor, plane_id in fabric_plane_map.items()
+    ]
+    return type_to_plane_id, vendor_norms
 
 
 def link_candidate_to_plane(
     candidate,
-    fabric_plane_map: dict[str, str],
-    request_planes,
+    type_to_plane_id: dict[str, str],
+    vendor_norms: list,
 ) -> Optional[str]:
     """
     Link a candidate to a fabric plane.
@@ -198,13 +216,6 @@ def link_candidate_to_plane(
     We do NOT guess a default plane from the preset; that was creating
     the 654-into-API_GATEWAY pile-up.
     """
-    # Build type → plane_id lookup from the stored planes
-    type_to_plane_id: dict[str, str] = {}
-    for _vendor_key, plane_id in fabric_plane_map.items():
-        plane_type = plane_id.split(":")[0] if ":" in plane_id else plane_id
-        if plane_type not in type_to_plane_id:
-            type_to_plane_id[plane_type] = plane_id
-
     # 1. Use connected_via_plane routing hint from AOD
     if candidate.connected_via_plane:
         plane_type = candidate.connected_via_plane.value  # e.g. "API_GATEWAY"
@@ -212,10 +223,8 @@ def link_candidate_to_plane(
             return type_to_plane_id[plane_type]
 
     # 2. Direct vendor-name match (normalize underscores/spaces for comparison)
-    vendor_lower = candidate.vendor_name.lower()
-    vendor_norm = vendor_lower.replace("_", " ")
-    for plane_vendor, plane_id in fabric_plane_map.items():
-        plane_norm = plane_vendor.replace("_", " ")
+    vendor_norm = candidate.vendor_name.lower().replace("_", " ")
+    for plane_norm, plane_id in vendor_norms:
         if plane_norm in vendor_norm or vendor_norm in plane_norm:
             return plane_id
 
@@ -329,27 +338,81 @@ def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
     _log.info("Clearing previous run state before processing new handoff")
     reset_aod_state()
 
-    # 1a. Store authoritative SOR declarations from Farm (if provided)
+    # 1a. Store authoritative SOR declarations (batch insert — table already cleared)
     sors_stored = 0
+    sor_store_errors: list[str] = []
     if request.sors:
+        from ..db import supabase_client as sb
+        from datetime import datetime as _dt
+        sor_rows = []
         for sor in request.sors:
-            try:
-                sor_dict = sor.model_dump()
-                store_sor_declaration(sor_dict, request.run_id)
-                sors_stored += 1
-                _log.info("Stored SOR declaration: %s / %s (confidence=%s, source=%s)",
-                          sor.domain, sor.vendor, sor.confidence, sor.source)
-            except Exception as e:
-                _log.error("Failed to store SOR declaration %s/%s: %s", sor.domain, sor.vendor, e)
+            domain = (sor.domain or "").upper()
+            vendor = sor.vendor or ""
+            now = _dt.utcnow().isoformat()
+            sor_rows.append({
+                "sor_id": f"sor:{domain.lower()}:{vendor.lower()}",
+                "domain": domain,
+                "vendor": vendor,
+                "category": (sor.category or "").lower(),
+                "confidence": (sor.confidence or "high").lower(),
+                "source": (sor.source or "farm").lower(),
+                "aod_run_id": request.run_id,
+                "created_at": now,
+                "updated_at": now,
+            })
+        try:
+            sb.insert_many("sor_declarations", sor_rows)
+            sors_stored = len(sor_rows)
+        except Exception as e:
+            msg = f"Failed to batch-store SOR declarations: {e}"
+            _log.error(msg)
+            sor_store_errors.append(msg)
         _log.info("SOR declarations stored: %d", sors_stored)
 
-    # 1b. Resolve fabric planes
-    fabric_plane_map, fabric_planes_stored = resolve_fabric_planes(request)
+    # 1b. Resolve fabric planes (batch insert — table already cleared)
+    fabric_plane_map: dict[str, str] = {}
+    fabric_planes_stored = 0
+    plane_store_errors: list[str] = []
+    if request.fabric_planes:
+        from ..db import supabase_client as sb
+        from datetime import datetime as _dt
+        plane_rows = []
+        for plane in request.fabric_planes:
+            pt = (plane.plane_type or "").upper()
+            plane_id = f"{pt}:{plane.vendor}"
+            now = _dt.utcnow().isoformat()
+            is_healthy = plane.is_healthy
+            if is_healthy is not None:
+                is_healthy = bool(is_healthy)
+            plane_rows.append({
+                "plane_id": plane_id,
+                "plane_type": pt,
+                "vendor": plane.vendor,
+                "display_name": f"{plane.vendor} {pt}",
+                "domain": None,
+                "managed_asset_count": 0,
+                "is_healthy": is_healthy,
+                "aod_run_id": request.run_id,
+                "created_at": now,
+                "updated_at": now,
+            })
+            fabric_plane_map[plane.vendor.lower()] = plane_id
+        try:
+            sb.insert_many("fabric_planes", plane_rows)
+            fabric_planes_stored = len(plane_rows)
+        except Exception as e:
+            msg = f"Failed to batch-store fabric planes: {e}"
+            _log.error(msg)
+            plane_store_errors.append(msg)
     _log.info("Fabric planes resolved: %d stored", fabric_planes_stored)
 
-    # 2. Process candidates with typed error classification
+    # Pre-build plane lookup structures once (not per candidate)
+    type_to_plane_id, vendor_norms = build_plane_lookups(fabric_plane_map)
+
+    # 2. Process candidates — validate and collect dicts, then batch-insert
     accepted = []
     rejected: list[CandidateRejection] = []
+    batch: list[dict] = []
 
     for candidate in request.candidates:
         try:
@@ -367,7 +430,7 @@ def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
 
             # Link to fabric plane (AOD hint or vendor-name match only)
             fabric_plane_id = link_candidate_to_plane(
-                candidate, fabric_plane_map, request.fabric_planes
+                candidate, type_to_plane_id, vendor_norms,
             )
             if fabric_plane_id:
                 candidate_dict["fabric_plane_id"] = fabric_plane_id
@@ -376,10 +439,10 @@ def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
                     plane_type = fabric_plane_id.split(":")[0] if ":" in fabric_plane_id else fabric_plane_id
                     candidate_dict["connected_via_plane"] = plane_type
 
-            result = create_candidate(candidate_dict)
+            batch.append(candidate_dict)
             accepted.append({
                 "aod_asset_id": candidate.aod_asset_id,
-                "candidate_id": result["candidate_id"],
+                "candidate_id": None,  # filled after batch insert
                 "execution_allowed": candidate.execution_allowed,
                 "action_type": candidate.action_type.value,
             })
@@ -392,22 +455,16 @@ def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
                 rejection_type=RejectionType.SYSTEM,
             ))
 
-    aod_accepted_count = len(accepted)  # snapshot BEFORE infra candidates
-    _log.info("Candidates processed: %d accepted, %d rejected", aod_accepted_count, len(rejected))
-
     # 2b. Ensure every fabric plane vendor has a representative candidate.
-    #     AOD declares fabric planes (infrastructure endpoints) but doesn't
-    #     always include them as candidates.  Without a candidate record the
-    #     plane is invisible in pipes / candidates views even though it shows
-    #     in topology and reconciliation.  This is NOT fabrication — AOD
-    #     explicitly told us this infrastructure exists.
-    accepted_vendors = {c.vendor_name.lower() for c in request.candidates if c.vendor_name}
+    accepted_vendors_norm = {
+        c.vendor_name.lower().replace("_", " ")
+        for c in request.candidates if c.vendor_name
+    }
     for plane in request.fabric_planes or []:
         vendor_lower = plane.vendor.lower().replace("_", " ")
-        # Check if any accepted candidate already covers this vendor
         already_covered = any(
-            v and (vendor_lower in v.replace("_", " ") or v.replace("_", " ") in vendor_lower)
-            for v in accepted_vendors
+            vendor_lower in v or v in vendor_lower
+            for v in accepted_vendors_norm
         )
         if already_covered:
             continue
@@ -438,18 +495,25 @@ def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
             "fabric_plane_id": plane_id,
             "status": CandidateStatus.NEW,
         }
-        try:
-            result = create_candidate(infra_candidate)
-            accepted.append({
-                "aod_asset_id": infra_candidate["aod_asset_id"],
-                "candidate_id": result["candidate_id"],
-                "execution_allowed": True,
-                "action_type": "provision",
-            })
-            _log.info("Created infrastructure candidate for plane %s (%s)",
-                       plane.vendor, plane.plane_type)
-        except Exception as e:
-            _log.warning("Failed to create infra candidate for %s: %s", plane.vendor, e)
+        batch.append(infra_candidate)
+        accepted.append({
+            "aod_asset_id": infra_candidate["aod_asset_id"],
+            "candidate_id": None,
+            "execution_allowed": True,
+            "action_type": "provision",
+        })
+        _log.info("Queued infrastructure candidate for plane %s (%s)",
+                   plane.vendor, plane.plane_type)
+
+    # Batch-insert ALL candidates in a single HTTP call
+    aod_accepted_count = sum(
+        1 for a in accepted if a["aod_asset_id"] and not str(a["aod_asset_id"]).startswith("infra-")
+    )
+    results = create_candidates_batch(batch)
+    for i, result in enumerate(results):
+        accepted[i]["candidate_id"] = result["candidate_id"]
+    _log.info("Candidates processed: %d accepted (%d batch-inserted), %d rejected",
+              aod_accepted_count, len(results), len(rejected))
 
     # 3. Build reconciliation data
     aod_fabric_planes_data, aod_sor_vendors = _build_reconciliation_data(request)
@@ -477,4 +541,6 @@ def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
         rejected_reasons=rejected_dicts,
         handoff_id=handoff_log["handoff_id"],
         processed_at=datetime.utcnow(),
+        plane_store_errors=plane_store_errors,
+        sor_store_errors=sor_store_errors,
     )

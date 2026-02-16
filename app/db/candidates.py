@@ -3,11 +3,10 @@ Candidate CRUD operations
 """
 import json
 import uuid
-import sqlite3
 from datetime import datetime
 from typing import Optional
 
-from .connection import get_connection
+from . import supabase_client as sb
 
 # ============================================================================
 # CANDIDATE OPERATIONS
@@ -15,80 +14,129 @@ from .connection import get_connection
 
 def create_candidate(candidate_data: dict) -> dict:
     """Create a new connection candidate"""
-    conn = get_connection()
-    cursor = conn.cursor()
-
     candidate_id = str(uuid.uuid4())
     now = datetime.utcnow().isoformat()
 
-    # Handle AOD execution_allowed (convert bool to int for SQLite)
-    # Default None — AOD must explicitly grant permission, not permissive-by-default
     execution_allowed = candidate_data.get("execution_allowed")
-    if execution_allowed is None:
-        execution_allowed = None  # stored as NULL — operator must review
-    elif isinstance(execution_allowed, bool):
-        execution_allowed = 1 if execution_allowed else 0
+    if isinstance(execution_allowed, bool):
+        pass
+    elif execution_allowed is not None:
+        execution_allowed = bool(execution_allowed)
 
-    # Deduplication: Delete existing candidate with same asset_key to prevent duplicates
     asset_key = candidate_data["asset_key"]
-    cursor.execute("DELETE FROM connection_candidates WHERE asset_key = ?", (asset_key,))
+    sb.delete("connection_candidates", filters={"asset_key": asset_key})
 
-    cursor.execute("""
-        INSERT INTO connection_candidates (
-            candidate_id, asset_key, vendor_name, display_name, category,
-            governance_status, findings, sor_tagging, evidence_refs,
-            signals_summary, known_endpoints, preferred_modality, priority_score,
-            status, execution_allowed, action_type, blocking_findings,
-            connected_via_plane, aod_run_id, aod_asset_id, fabric_plane_id,
-            created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        candidate_id,
-        candidate_data["asset_key"],
-        candidate_data["vendor_name"],
-        candidate_data["display_name"],
-        candidate_data["category"],
-        candidate_data.get("governance_status"),
-        json.dumps(candidate_data.get("findings", [])),
-        candidate_data.get("sor_tagging"),
-        json.dumps(candidate_data.get("evidence_refs", [])),
-        candidate_data.get("signals_summary"),
-        json.dumps(candidate_data.get("known_endpoints", [])),
-        candidate_data.get("preferred_modality"),
-        candidate_data.get("priority_score"),
-        candidate_data.get("status") or "new",
-        execution_allowed,
-        candidate_data.get("action_type"),
-        json.dumps(candidate_data.get("blocking_findings", [])),
-        candidate_data.get("connected_via_plane"),
-        candidate_data.get("aod_run_id"),
-        candidate_data.get("aod_asset_id"),
-        candidate_data.get("fabric_plane_id"),
-        now,
-        now
-    ))
+    row = {
+        "candidate_id": candidate_id,
+        "asset_key": candidate_data["asset_key"],
+        "vendor_name": candidate_data["vendor_name"],
+        "display_name": candidate_data["display_name"],
+        "category": candidate_data["category"],
+        "governance_status": candidate_data.get("governance_status"),
+        "findings": json.dumps(candidate_data.get("findings", [])),
+        "sor_tagging": candidate_data.get("sor_tagging"),
+        "evidence_refs": json.dumps(candidate_data.get("evidence_refs", [])),
+        "signals_summary": candidate_data.get("signals_summary"),
+        "known_endpoints": json.dumps(candidate_data.get("known_endpoints", [])),
+        "preferred_modality": candidate_data.get("preferred_modality"),
+        "priority_score": candidate_data.get("priority_score"),
+        "status": candidate_data.get("status") or "new",
+        "execution_allowed": execution_allowed,
+        "action_type": candidate_data.get("action_type"),
+        "blocking_findings": json.dumps(candidate_data.get("blocking_findings", [])),
+        "connected_via_plane": candidate_data.get("connected_via_plane"),
+        "aod_run_id": candidate_data.get("aod_run_id"),
+        "aod_asset_id": candidate_data.get("aod_asset_id"),
+        "fabric_plane_id": candidate_data.get("fabric_plane_id"),
+        "created_at": now,
+        "updated_at": now,
+    }
 
-    conn.commit()
-    conn.close()
+    sb.insert("connection_candidates", row)
 
     return {
         "candidate_id": candidate_id,
         "status": "connected",
-        "execution_allowed": bool(execution_allowed) if execution_allowed is not None else None,
+        "execution_allowed": execution_allowed,
         "action_type": candidate_data.get("action_type"),
         "created_at": now,
-        "updated_at": now
+        "updated_at": now,
     }
+
+
+def _build_row(candidate_data: dict) -> tuple[str, str, dict]:
+    """Build (candidate_id, now, row_dict) for insert — no I/O."""
+    candidate_id = str(uuid.uuid4())
+    now = datetime.utcnow().isoformat()
+
+    execution_allowed = candidate_data.get("execution_allowed")
+    if isinstance(execution_allowed, bool):
+        pass
+    elif execution_allowed is not None:
+        execution_allowed = bool(execution_allowed)
+
+    row = {
+        "candidate_id": candidate_id,
+        "asset_key": candidate_data["asset_key"],
+        "vendor_name": candidate_data["vendor_name"],
+        "display_name": candidate_data["display_name"],
+        "category": candidate_data["category"],
+        "governance_status": candidate_data.get("governance_status"),
+        "findings": json.dumps(candidate_data.get("findings", [])),
+        "sor_tagging": candidate_data.get("sor_tagging"),
+        "evidence_refs": json.dumps(candidate_data.get("evidence_refs", [])),
+        "signals_summary": candidate_data.get("signals_summary"),
+        "known_endpoints": json.dumps(candidate_data.get("known_endpoints", [])),
+        "preferred_modality": candidate_data.get("preferred_modality"),
+        "priority_score": candidate_data.get("priority_score"),
+        "status": candidate_data.get("status") or "new",
+        "execution_allowed": execution_allowed,
+        "action_type": candidate_data.get("action_type"),
+        "blocking_findings": json.dumps(candidate_data.get("blocking_findings", [])),
+        "connected_via_plane": candidate_data.get("connected_via_plane"),
+        "aod_run_id": candidate_data.get("aod_run_id"),
+        "aod_asset_id": candidate_data.get("aod_asset_id"),
+        "fabric_plane_id": candidate_data.get("fabric_plane_id"),
+        "created_at": now,
+        "updated_at": now,
+    }
+    return candidate_id, now, row
+
+
+def create_candidates_batch(candidates: list[dict]) -> list[dict]:
+    """Insert many candidates in one HTTP call via insert_many.
+
+    Assumes the table was already cleared (by reset_aod_state),
+    so per-row DELETE dedup is skipped.
+    """
+    if not candidates:
+        return []
+
+    rows = []
+    results = []
+    for cd in candidates:
+        candidate_id, now, row = _build_row(cd)
+        rows.append(row)
+        results.append({
+            "candidate_id": candidate_id,
+            "status": "connected",
+            "execution_allowed": cd.get("execution_allowed"),
+            "action_type": cd.get("action_type"),
+            "created_at": now,
+            "updated_at": now,
+        })
+
+    sb.insert_many("connection_candidates", rows)
+    return results
 
 
 def get_candidate(candidate_id: str) -> Optional[dict]:
     """Get a candidate by ID"""
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM connection_candidates WHERE candidate_id = ?", (candidate_id,))
-    row = cursor.fetchone()
-    conn.close()
-    
+    row = sb.select(
+        "connection_candidates",
+        filters={"candidate_id": candidate_id},
+        single=True,
+    )
     if row:
         return _row_to_candidate(row)
     return None
@@ -96,45 +144,32 @@ def get_candidate(candidate_id: str) -> Optional[dict]:
 
 def list_candidates(status: Optional[str] = None, limit: Optional[int] = None) -> list[dict]:
     """List candidates with optional status filter, sorted by category"""
-    conn = get_connection()
-    cursor = conn.cursor()
-    
+    filters = {}
     if status:
-        query = "SELECT * FROM connection_candidates WHERE status = ? ORDER BY category ASC, created_at DESC"
-        params = [status]
-    else:
-        query = "SELECT * FROM connection_candidates ORDER BY category ASC, created_at DESC"
-        params = []
-    
-    if limit:
-        query += " LIMIT ?"
-        params.append(limit)
-    
-    cursor.execute(query, params)
-    rows = cursor.fetchall()
-    conn.close()
-    
+        filters["status"] = status
+
+    rows = sb.select(
+        "connection_candidates",
+        filters=filters if filters else None,
+        order="category.asc,created_at.desc",
+        limit=limit,
+    )
+
     return [_row_to_candidate(row) for row in rows]
 
 
 def update_candidate_status(candidate_id: str, status: str) -> bool:
     """Update candidate status"""
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "UPDATE connection_candidates SET status = ?, updated_at = ? WHERE candidate_id = ?",
-        (status, datetime.utcnow().isoformat(), candidate_id)
+    result = sb.update(
+        "connection_candidates",
+        {"status": status, "updated_at": datetime.utcnow().isoformat()},
+        filters={"candidate_id": candidate_id},
     )
-    affected = cursor.rowcount
-    conn.commit()
-    conn.close()
-    return affected > 0
+    return len(result) > 0
 
 
 def _row_to_candidate(row) -> dict:
     """Convert database row to candidate dict"""
-    keys = row.keys()
-
     result = {
         "candidate_id": row["candidate_id"],
         "asset_key": row["asset_key"],
@@ -151,35 +186,20 @@ def _row_to_candidate(row) -> dict:
         "priority_score": row["priority_score"],
         "status": row["status"],
         "created_at": row["created_at"],
-        "updated_at": row["updated_at"]
+        "updated_at": row["updated_at"],
     }
 
-    # Match/defer fields
-    if "matched_pipe_id" in keys:
-        result["matched_pipe_id"] = row["matched_pipe_id"]
-    if "match_score" in keys:
-        result["match_score"] = row["match_score"]
-    if "match_reason" in keys:
-        result["match_reason"] = row["match_reason"]
-    if "deferred_reason" in keys:
-        result["deferred_reason"] = row["deferred_reason"]
+    result["matched_pipe_id"] = row.get("matched_pipe_id")
+    result["match_score"] = row.get("match_score")
+    result["match_reason"] = row.get("match_reason")
+    result["deferred_reason"] = row.get("deferred_reason")
 
-    # AOD Handoff fields
-    if "execution_allowed" in keys:
-        result["execution_allowed"] = bool(row["execution_allowed"]) if row["execution_allowed"] is not None else None
-    if "action_type" in keys:
-        result["action_type"] = row["action_type"]
-    if "blocking_findings" in keys:
-        result["blocking_findings"] = json.loads(row["blocking_findings"]) if row["blocking_findings"] else []
-    if "connected_via_plane" in keys:
-        result["connected_via_plane"] = row["connected_via_plane"]
-    if "aod_run_id" in keys:
-        result["aod_run_id"] = row["aod_run_id"]
-    if "aod_asset_id" in keys:
-        result["aod_asset_id"] = row["aod_asset_id"]
-    if "fabric_plane_id" in keys:
-        result["fabric_plane_id"] = row["fabric_plane_id"]
+    result["execution_allowed"] = row.get("execution_allowed")
+    result["action_type"] = row.get("action_type")
+    result["blocking_findings"] = json.loads(row["blocking_findings"]) if row.get("blocking_findings") else []
+    result["connected_via_plane"] = row.get("connected_via_plane")
+    result["aod_run_id"] = row.get("aod_run_id")
+    result["aod_asset_id"] = row.get("aod_asset_id")
+    result["fabric_plane_id"] = row.get("fabric_plane_id")
 
     return result
-
-

@@ -1,0 +1,208 @@
+To answer strictly about the mechanics of the data flow ("how/where/how") for 500 production pipes without discussing UI:
+The Runner (or Worker):
+In an "IRL" architecture with 500 pipes, the "connection" is not a static line; it is a process. Here is exactly how the data flows and connects mechanically.
+1. The "Where": The Execution Environment
+The "Pipe" is actually a small piece of compute (a container, a serverless function, or a pod) that spins up, does the work, and dies.
+It does NOT live in AAM: AAM is just a database of configurations (credentials, schedules, schemas).
+It does NOT live in DCL: DCL is the destination storage/API.
+It lives in between: Often called the "Ingestion Plane" or "Connector Runner."
+2. The "How": The 4-Step Mechanical Flow
+Here is the lifecycle of a single data run for one of your 500 pipes (e.g., "Salesforce Revenue").
+Step A: The Trigger (AAM)
+Action: AAM checks its schedule. "It is 10:00 AM. Time to run Pipe #42."
+Output: AAM generates a Job Manifest. This is a JSON object containing:
+Source Credentials (encrypted).
+Source Query ("SELECT * FROM Opportunities").
+Destination Target (DCL Endpoint).
+Run ID (generated new for this run).
+Step B: The Worker Spin-up (The "Connection")
+Action: AAM dispatches this manifest to a Worker Queue.
+Mechanism: An ephemeral worker (The "Pipe") picks up the job.
+The Connection: This worker opens a socket connection to the Source (Salesforce) using the credentials from the manifest.
+Step C: The Payload Transfer (Bypassing AAM)
+Action: The worker streams the data.
+Flow: Source $\rightarrow$ Worker $\rightarrow$ DCL Ingestion API.
+Crucial Detail: The data bytes never touch AAM. AAM has no idea what the data is, only that it is moving.
+Scale: With 500 pipes, you simply have 500 workers running in parallel (or queued). This scales infinitely because it is horizontally distributed.
+Step D: The Receipt (DCL)
+Action: DCL receives the POST request from the Worker.
+Validation: DCL checks the Run ID against AAM to ensure it's a valid, authorized run.
+Storage: DCL commits the data to its internal store (Fact Base) and tags it with the Run ID.
+3. Visualizing the "Hidden" Architecture
+If you were to draw the physical data flow (not the logical one), it looks like this:
+Plaintext
+[ SOURCE SYSTEMS ]      [ INGESTION PLANE ]        [ DCL LAYER ]
+(500x External APIs)    (Ephemeral Workers)       (Storage & API)
+
+   Salesforce  ──────┐
+                     ├──▶  [ Worker #1 ]  ──────▶  POST /api/dcl/ingest
+   Snowflake   ──────┘           ▲                         │
+                                 │ (Job Manifest)          │
+   NetSuite    ──────┐           │                         │
+                     ├──▶  [ Worker #2 ]  ──────▶  POST /api/dcl/ingest
+   Jira        ──────┘           ▲                         │
+                                 │                         │
+                                 │                         │
+                        [ AAM CONTROL PLANE ] ◀────────────┘
+                        (Status Updates Only)
+
+Summary of the "Connection"
+Where is the connection? It is a temporary "Worker" process that exists only for the duration of the transfer.
+How does it flow? Source $\rightarrow$ Worker $\rightarrow$ DCL.
+How does it scale? You don't keep 500 permanent open connections. You spin up 500 workers when needed (or keep a pool of them).
+This is why your DCL injection point is correct. DCL is the "Loading Dock." AAM is the "Logistics Manager" who tells the trucks (Workers) where to go, but never touches the boxes.
+
+This architecture shifts DCL from a static file reader to a high-throughput Ingestion Engine. To handle 500 pipes "IRL," you cannot have DCL manually polling 500 APIs. That creates a bottleneck. Instead, you need a Push-Based Architecture where "Runners" (workers) fetch the data and push it into DCL. Here is the architectural blueprint for the AAM $\rightarrow$ Runner $\rightarrow$ DCL pipeline.
+The Three Components To make this scalable and secure, we decouple the Instruction from the Execution.
+AAM (The Brain / Control Plane):
+Role: Scheduler & Secrets Manager.
+Responsibility: Knows when to run Pipe #42 and how (credentials), but never touches the data.
+Artifact: Produces a Job Manifest.
+The Runner (The Muscle / Ingestion Plane):
+Role: Ephemeral Worker (Docker container / Serverless Function).
+Responsibility: Spun up by AAM. Accepts the Job Manifest. Connects to Source. Formats data. Pushes to DCL. Dies.
+Scale: You can run 1 or 500 of these in parallel.
+DCL (The Vault / Data Plane):
+Role: Ingestion API & Semantic Store.
+Responsibility: Exposes a secure POST /ingest endpoint. Validates the run_id. Stores the data.
+The Architecture Diagram (Data Flow) This is how the data moves without AAM ever seeing a byte of payload. Code snippet sequenceDiagram participant AAM as AAM (Control Plane) participant Runner as Ephemeral Runner participant Source as Source (e.g., Salesforce) participant DCL as DCL (Data Plane) Note over AAM: 1. Schedule Trigger AAM->>AAM: Generate Run_ID (run_555) AAM->>Runner: 2. Dispatch Job Manifest (Creds + Query) Note over Runner: 3. Worker Starts Runner->>Source: 4. Fetch Data (Select * From Opps) Source-->>Runner: Return JSON Payload Runner->>Runner: 5. Format to DCL Schema Runner->>DCL: 6. POST /api/dcl/ingest (Payload + run_555) DCL->>DCL: Validate Run_ID with AAM (Optional) DCL-->>Runner: 200 OK (Received) Runner->>AAM: 7. Update Status: "Success" Note over Runner: 8. Worker Dies
+The API Specification This is the interface you need to build on the DCL side to accept these connections. Endpoint: POST /api/dcl/ingest Headers:
+x-api-key: The secure token for the runner.
+x-run-id: The provenance ID generated by AAM (e.g., run_8923_sf_revenue). Payload Body (JSON): JSON { "meta": { "source_system": "salesforce", "pipe_id": "pipe_sf_01", "run_timestamp": "2026-02-15T10:00:00Z", "schema_version": "1.2" }, "data": [ { "entity_id": "opp_001", "metric_revenue": 50000, "dimension_region": "North America", "dimension_segment": "Enterprise" }, { "entity_id": "opp_002", "metric_revenue": 12000, "dimension_region": "EMEA", "dimension_segment": "SMB" } ] }
+Handling the "500 Pipes" Logic How do you map 500 disparate sources into a clean DCL? The "Schema Normalization" Strategy: You don't want DCL to have 500 different table structures. You want it to have unified concepts (like "Revenue" or "User").
+Option A: Transformation at Runner (Preferred) The Runner is responsible for mapping "Salesforce_Amount_c" to "metric_revenue" before sending it to DCL.
+Pro: DCL stays clean. It only accepts compliant data.
+Con: The Runner logic is more complex.
+Option B: Transformation at DCL (ELT) The Runner dumps raw JSON into DCL. DCL runs a post-processing SQL job to normalize it.
+Pro: Runners are dumb/simple.
+Con: DCL gets bloated with raw junk data. Recommendation: Go with Option A. Keep DCL as the "Pristine Semantic Layer." If the data isn't clean, the Runner should reject it before it touches your high-value API.
+Provenance & Audit (The "IRL" Requirement) To satisfy your requirement for identifying "Snapshot Z from Time Y":
+The Token: AAM generates a signed JWT (Json Web Token) for every single run.
+The Tag: DCL stores every row with a _run_id column.
+The Trace: When NLQ shows a number (e.g., "$150M"), it can query DCL: "Show me the metadata for the runs that contributed to this number."
+DCL responds: "This includes data from Run #555 (Salesforce) and Run #556 (Stripe), both executed at 10:00 AM." Next Step: Implementation We need to define the Job Manifest structure.
+
+Yes, this is exactly right. And it maps directly onto RACI concepts that already exist — the "Runner" IS the RACI's "Collector." AAM already has "Collector Operations" defined with this exact lifecycle:
+RACI Capability
+Your Architecture
+Register Collectors
+Runner template registration
+Collector Run Execution
+Runner spun up with Job Manifest
+Track Collector Runs
+AAM tracks run_id status
+Generate Observations
+Runner reports success/failure back to AAM
+One nuance worth flagging: the RACI also describes "Just-in-Time Payload Fetching — Fetch only on Semantic Map request." That's a pull-based pattern for low-frequency pipes where pre-loading doesn't make sense. But for the 500-pipe scale, your push architecture is the right default. JIT becomes an edge case optimization (DCL asks AAM to fire a Runner on-demand for a specific query).
+Job Manifest Structure
+This is what AAM hands to the Runner when it dispatches a collection job:
+{
+  "manifest_version": "1.0",
+  "run_id": "run_20260215_sf_revenue_001",
+
+  "source": {
+    "pipe_id": "pipe_sf_01",
+    "system": "salesforce",
+    "adapter": "rest_api",
+    "endpoint": "https://acme.my.salesforce.com/services/data/v58.0/query",
+    "credentials_ref": "vault://aam/secrets/pipe_sf_01",
+    "query": "SELECT Id, Amount, Region__c, Segment__c FROM Opportunity WHERE CloseDate >= 2026-01-01"
+  },
+
+  "transform": {
+    "schema_map": {
+      "Amount": {"target": "revenue", "unit": "USD", "scale": 0.000001},
+      "Region__c": {"target": "region", "dimension": true},
+      "Segment__c": {"target": "segment", "dimension": true}
+    },
+    "grain": "quarter",
+    "period_field": "CloseDate",
+    "period_format": "YYYY-Qq"
+  },
+
+  "target": {
+    "dcl_url": "https://dcl.internal/api/dcl/ingest",
+    "auth_token_ref": "vault://aam/tokens/dcl_ingest",
+    "tenant_id": "acme_prod",
+    "snapshot_name": "Q4-2026-weekly"
+  },
+
+  "provenance": {
+    "run_timestamp": "2026-02-15T18:00:00Z",
+    "triggered_by": "cron:daily_0600_pst",
+    "farm_verification": false
+  },
+
+  "limits": {
+    "max_rows": 100000,
+    "timeout_seconds": 300,
+    "retry_count": 2
+  }
+}
+
+Why this shape
+source — Everything the Runner needs to connect and extract. Credentials are vault references, never inline. The adapter field tells the Runner which extraction strategy to use (maps to AAM's adapter types: REST, JDBC, Kafka, iPaaS).
+
+transform — The schema normalization rules (Option A). The Runner maps source fields to DCL concepts before pushing. This keeps DCL clean. The schema_map is the bridge between raw source fields and DCL's semantic catalog IDs.
+
+target — Where to push. Includes tenant_id and snapshot_name so DCL can tag every row with provenance. Auth token is also a vault reference.
+
+provenance — Run metadata that DCL stores alongside the data. farm_verification: true would trigger FARM to validate the loaded data against ground truth after ingestion.
+
+limits — Safety rails so a bad source can't blow up the Runner or flood DCL.
+
+The closed loop (FARM verification)
+When farm_verification: true:
+Runner pushes to DCL → DCL stores with run_id
+  → DCL notifies FARM: "run_20260215_sf_revenue_001 complete"
+  → FARM queries DCL: "what's revenue for Q4 from this run?"
+  → FARM compares to ground truth
+  → FARM reports: pass/fail + delta
+
+This is the RACI's "Injects at AAM, verifies at DCL" pattern.
+What each team builds
+Team
+Deliverable
+AAM
+Job Manifest generator, Runner dispatcher, secret injection, run tracking, cron/event triggers
+Runner
+Generic worker image: accept manifest → connect → extract → transform → POST /ingest → report status → die
+DCL
+POST /api/dcl/ingest endpoint, run_id storage, tag all rows with provenance, expose run metadata in query responses
+NLQ
+Already pre-wired — consume metadata.run_id, tenant_id, run_timestamp from DCL responses, surface in Galaxy UI
+FARM
+Post-ingestion verification hook, ground truth comparison, pass/fail reporting
+Want me to spec the DCL POST /api/dcl/ingest contract next, so you can hand it to the DCL agent?
+Step 1: The Trigger (AAM UI)
+Where: Go to the AAM Monitor / Pipes Dashboard.
+Action: Find the "Salesforce Revenue" pipe (or similar). Click the "Run Now" (or "Dispatch") button.
+Visual Confirmation: Watch the status pill change:
+Queued (Grey) $\rightarrow$ Running (Blue) $\rightarrow$ Completed (Green).
+Note: If it turns Red, the Runner failed to hit DCL.
+Step 2: The Handshake (DCL)
+Since DCL is headless, you rely on the AAM "Completed" green light. That green light now means DCL returned a 200 OK receipt.
+Step 3: The Verification (NLQ UI)
+Where: Go to the Galaxy / Chat Interface.
+Action: Ask: "What is the revenue?"
+Visual Confirmation: Look at the result card.
+Before: It likely showed a generic icon or no source info.
+After (Success): You should see a Green "Verified" Badge (or checkmark).
+The Proof: Hover over that badge. It should say something like: "Source: Salesforce (Run #555...)".
+Revised Agent Prompts (UI Focused)
+I have tweaked the prompts slightly to ensure the backend logic hooks up to your existing UI buttons.
+AAM Agent Prompt (The Dispatcher)
+"DCL is ready. I need you to wire the UI 'Run' Button to the new DCL ingestion path.
+Please update the execute_job_inline logic so that when I click 'Run' in the Dashboard:
+Target: The Runner pushes data to DCL_API_URL/ingest.
+Headers: Inject x-run-id and x-schema-hash from the manifest.
+Feedback: If DCL returns 200, the UI status pill must turn GREEN (Completed). If it fails, it must turn RED (Failed).
+I need to see this visual feedback in the Monitor tab immediately."
+NLQ Agent Prompt (The Trust Badge)
+"DCL is now sending provenance data. I need to see it in the Galaxy Chat UI.
+Please update the 'Source/Lineage' component in the answer card:
+Visual Logic:
+If metadata.mode == 'Ingest', render a Green 'Verified' Badge.
+If metadata.mode == 'Demo', render a Blue 'Simulation' Badge.
+Tooltip: When I hover over the badge, show me the Run ID and Freshness timestamp.
+I want to distinguish 'Real Data' from 'Demo Data' at a glance."
