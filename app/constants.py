@@ -171,4 +171,48 @@ CATEGORY_STANDARD_FIELDS: dict[str, list[str]] = {
         "owner", "department", "vendor", "version", "ip_address",
         "location", "criticality", "last_discovered", "created_date", "modified_date",
     ],
+    "ipaas": [
+        "recipe_id", "connection_name", "workflow_status", "trigger_type", "action_count",
+        "source_app", "target_app", "last_run", "error_count", "created_date",
+        "owner", "folder", "active", "run_count", "modified_date",
+    ],
+    # "other" is AOD's catch-all for infrastructure platforms that don't fit
+    # SOR categories.  Generic fields that DCL can still map semantically.
+    "other": [
+        "resource_id", "resource_name", "resource_type", "status", "environment",
+        "owner", "endpoint_url", "version", "health_status", "created_date",
+        "last_active", "region", "tags", "configuration", "modified_date",
+    ],
+}
+
+
+# ---------------------------------------------------------------------------
+# Standard field definitions per fabric plane type.
+#
+# Infrastructure platforms categorised as "other" by AOD are really fabric
+# plane vendors (Kong → API_GATEWAY, Snowflake → DATA_WAREHOUSE, etc.).
+# These fields describe what that plane type exposes to downstream consumers.
+# Used when a candidate's vendor maps to a known plane via INFRA_VENDOR_PLANE.
+# ---------------------------------------------------------------------------
+PLANE_STANDARD_FIELDS: dict[str, list[str]] = {
+    "IPAAS": [
+        "recipe_id", "connection_name", "workflow_status", "trigger_type", "action_count",
+        "source_app", "target_app", "last_run", "error_count", "created_date",
+        "owner", "folder", "active", "run_count", "modified_date",
+    ],
+    "API_GATEWAY": [
+        "api_id", "api_name", "route_path", "method", "consumer_id",
+        "rate_limit", "upstream_url", "status", "latency_ms", "request_count",
+        "error_rate", "version", "tags", "created_date", "modified_date",
+    ],
+    "EVENT_BUS": [
+        "topic_name", "partition_count", "consumer_group", "message_count", "offset",
+        "retention_ms", "schema_id", "producer_id", "consumer_lag", "throughput",
+        "replication_factor", "status", "created_date", "modified_date", "tags",
+    ],
+    "DATA_WAREHOUSE": [
+        "table_name", "schema_name", "database_name", "row_count", "column_count",
+        "size_bytes", "last_modified", "owner", "cluster_id", "storage_type",
+        "query_count", "freshness_hours", "tags", "created_date", "modified_date",
+    ],
 }

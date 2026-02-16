@@ -24,7 +24,7 @@ from .db import (
     get_all_schema_samples,
 )
 from .db import supabase_client as sb
-from .constants import CATEGORY_STANDARD_FIELDS
+from .constants import CATEGORY_STANDARD_FIELDS, PLANE_STANDARD_FIELDS, INFRA_VENDOR_PLANE
 
 _log = logging.getLogger(__name__)
 
@@ -139,7 +139,8 @@ def _resolve_fields(candidate: dict, field_maps: dict) -> List[str]:
       1. Observation linked by candidate_id  (real adapter schema)
       2. Observation matched by source_system ↔ vendor_name  (fuzzy match)
       3. Declared pipe identity_keys + entity_scope via matched_pipe_id
-      4. Category-based standard fields  (metadata inference)
+      4. Vendor→plane mapping fields  (infrastructure vendors in "other" category)
+      5. Category-based standard fields  (metadata inference)
     """
     cid = candidate.get("candidate_id", "")
     vendor = (candidate.get("vendor_name") or "").lower()
@@ -162,7 +163,15 @@ def _resolve_fields(candidate: dict, field_maps: dict) -> List[str]:
         if fields:
             return fields
 
-    # Priority 4: Category standard fields
+    # Priority 4: Vendor→plane mapping (infrastructure vendors like Kong,
+    # Snowflake, Kafka categorised as "other" by AOD).
+    plane_type = INFRA_VENDOR_PLANE.get(vendor)
+    if plane_type:
+        fields = PLANE_STANDARD_FIELDS.get(plane_type)
+        if fields:
+            return list(fields)
+
+    # Priority 5: Category standard fields
     fields = CATEGORY_STANDARD_FIELDS.get(category)
     if fields:
         return list(fields)  # Return a copy

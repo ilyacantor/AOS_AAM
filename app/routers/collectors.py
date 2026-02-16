@@ -28,6 +28,7 @@ from ..services.matching_service import (
     match_candidate as match_candidate_service,
     infer_fabric_plane_for_candidate,
 )
+from ..constants import CATEGORY_STANDARD_FIELDS, PLANE_STANDARD_FIELDS, INFRA_VENDOR_PLANE
 
 _log = logging.getLogger("aam.infer")
 
@@ -167,6 +168,23 @@ async def infer_pipes():
 
                 provenance = {"discovered_by": "auto-match", "discovered_at": now, "lineage_hints": lineage}
 
+                # Derive entity_scope and identity_keys from category
+                # and fabric plane.  Infrastructure vendors categorised
+                # as "other" by AOD get plane-specific fields via
+                # INFRA_VENDOR_PLANE lookup.
+                cat_lower = (candidate.get("category") or "other").lower()
+                inferred_fields: list[str] = []
+                if cat_lower == "other":
+                    plane_for_vendor = INFRA_VENDOR_PLANE.get(vendor_lower)
+                    if plane_for_vendor:
+                        inferred_fields = list(PLANE_STANDARD_FIELDS.get(plane_for_vendor, []))
+                if not inferred_fields:
+                    inferred_fields = list(CATEGORY_STANDARD_FIELDS.get(cat_lower, []))
+                # entity_scope: non-key fields (semantic entities the pipe covers)
+                entity_scope = [f for f in inferred_fields if not f.endswith("_id")]
+                # identity_keys: fields that look like primary/foreign keys
+                identity_keys = [f for f in inferred_fields if f.endswith("_id")]
+
                 new_pipes.append({
                     "pipe_id": pipe_id,
                     "display_name": candidate.get("display_name") or vendor,
@@ -175,13 +193,13 @@ async def infer_pipes():
                     "source_system": vendor,
                     "transport_kind": transport_kind,
                     "endpoint_ref": json.dumps({}),
-                    "entity_scope": json.dumps([]),
-                    "identity_keys": json.dumps([]),
+                    "entity_scope": json.dumps(entity_scope),
+                    "identity_keys": json.dumps(identity_keys),
                     "change_semantics": "UNKNOWN",
                     "provenance": json.dumps(provenance),
                     "owner_signals": json.dumps([]),
                     "trust_labels": json.dumps(trust_labels),
-                    "schema_info": None,
+                    "schema_info": json.dumps({"schema_version": "category_inferred"}) if inferred_fields else None,
                     "freshness": None,
                     "access_info": None,
                     "version": 1,

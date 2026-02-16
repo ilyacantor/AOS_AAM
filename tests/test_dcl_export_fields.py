@@ -6,13 +6,20 @@ connection using the priority cascade:
   1. Observation schema_sample (by candidate_id)
   2. Observation schema_sample (by source_system ↔ vendor_name)
   3. Declared pipe identity_keys + entity_scope (via matched_pipe_id)
-  4. Category-based standard fields (metadata inference)
+  4. Vendor→plane mapping fields (infrastructure vendors in "other" category)
+  5. Category-based standard fields (metadata inference)
 
 These tests are pure unit tests — no database connection required.
 """
 import pytest
 from app.dcl_export import _resolve_fields, DCLConnectionSchema, DCLExportResponse
-from app.constants import CATEGORY_STANDARD_FIELDS, SOR_CATEGORIES
+from app.constants import (
+    CATEGORY_STANDARD_FIELDS,
+    PLANE_STANDARD_FIELDS,
+    INFRA_VENDOR_PLANE,
+    SOR_CATEGORIES,
+    ALL_PLANE_TYPES,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -64,11 +71,11 @@ def _make_candidate(**overrides):
 
 
 # ---------------------------------------------------------------------------
-# CATEGORY_STANDARD_FIELDS completeness
+# CATEGORY_STANDARD_FIELDS + PLANE_STANDARD_FIELDS completeness
 # ---------------------------------------------------------------------------
 
-class TestCategoryStandardFields:
-    """Verify the category field definitions are well-formed."""
+class TestFieldDefinitionCompleteness:
+    """Verify field definitions are well-formed and cover all known categories/planes."""
 
     def test_all_sor_categories_have_fields(self):
         """Every SOR category recognized by AAM must have standard fields."""
@@ -77,11 +84,29 @@ class TestCategoryStandardFields:
             assert fields is not None, f"Category '{cat}' missing from CATEGORY_STANDARD_FIELDS"
             assert len(fields) >= 5, f"Category '{cat}' has too few fields ({len(fields)})"
 
+    def test_ipaas_and_other_have_fields(self):
+        """AOD sends 'ipaas' and 'other' — both must have field definitions."""
+        for cat in ["ipaas", "other"]:
+            fields = CATEGORY_STANDARD_FIELDS.get(cat)
+            assert fields is not None, f"Category '{cat}' missing from CATEGORY_STANDARD_FIELDS"
+            assert len(fields) >= 10, f"Category '{cat}' has too few fields ({len(fields)})"
+
+    def test_all_plane_types_have_fields(self):
+        """Every fabric plane type must have standard fields."""
+        for pt in ALL_PLANE_TYPES:
+            fields = PLANE_STANDARD_FIELDS.get(pt)
+            assert fields is not None, f"Plane type '{pt}' missing from PLANE_STANDARD_FIELDS"
+            assert len(fields) >= 10, f"Plane type '{pt}' has too few fields ({len(fields)})"
+
     def test_all_fields_are_strings(self):
         for cat, fields in CATEGORY_STANDARD_FIELDS.items():
             for f in fields:
                 assert isinstance(f, str), f"Field in {cat} is not a string: {f!r}"
                 assert len(f) > 0, f"Empty field name in category {cat}"
+        for pt, fields in PLANE_STANDARD_FIELDS.items():
+            for f in fields:
+                assert isinstance(f, str), f"Field in plane {pt} is not a string: {f!r}"
+                assert len(f) > 0, f"Empty field name in plane {pt}"
 
     def test_no_duplicate_fields_within_category(self):
         for cat, fields in CATEGORY_STANDARD_FIELDS.items():
@@ -90,9 +115,16 @@ class TestCategoryStandardFields:
                 f"{[f for f in fields if fields.count(f) > 1]}"
             )
 
+    def test_no_duplicate_fields_within_plane(self):
+        for pt, fields in PLANE_STANDARD_FIELDS.items():
+            assert len(fields) == len(set(fields)), (
+                f"Duplicate fields in plane '{pt}': "
+                f"{[f for f in fields if fields.count(f) > 1]}"
+            )
+
     def test_common_categories_present(self):
         """Core enterprise categories must be defined."""
-        for cat in ["crm", "erp", "hcm", "itsm", "idp", "finance", "saas"]:
+        for cat in ["crm", "erp", "hcm", "itsm", "idp", "finance", "saas", "ipaas", "other"]:
             assert cat in CATEGORY_STANDARD_FIELDS, f"Missing core category: {cat}"
 
 
@@ -130,26 +162,71 @@ class TestResolveFieldsPriority:
         fields = _resolve_fields(candidate, populated_maps)
         assert fields == ["pipe_entity_x", "pipe_key_y"]
 
-    def test_priority_4_category_standard_fields(self, empty_maps):
-        """Category defaults used as last resort."""
+    def test_priority_4_vendor_plane_mapping(self, empty_maps):
+        """Infrastructure vendors get plane-specific fields via INFRA_VENDOR_PLANE."""
+        candidate = _make_candidate(
+            vendor_name="Snowflake",  # maps to DATA_WAREHOUSE
+            category="other",
+        )
+        fields = _resolve_fields(candidate, empty_maps)
+        assert fields == PLANE_STANDARD_FIELDS["DATA_WAREHOUSE"]
+
+    def test_priority_4_kong_gets_api_gateway_fields(self, empty_maps):
+        """Kong (API_GATEWAY vendor) gets gateway-specific fields, not 'other' generic."""
+        candidate = _make_candidate(
+            vendor_name="Kong",
+            category="other",
+        )
+        fields = _resolve_fields(candidate, empty_maps)
+        assert fields == PLANE_STANDARD_FIELDS["API_GATEWAY"]
+
+    def test_priority_4_confluent_gets_event_bus_fields(self, empty_maps):
+        """Confluent (EVENT_BUS vendor) gets event-bus-specific fields."""
+        candidate = _make_candidate(
+            vendor_name="Confluent",
+            category="other",
+        )
+        fields = _resolve_fields(candidate, empty_maps)
+        assert fields == PLANE_STANDARD_FIELDS["EVENT_BUS"]
+
+    def test_priority_4_workato_gets_ipaas_fields(self, empty_maps):
+        """Workato (IPAAS vendor) gets iPaaS-specific fields."""
+        candidate = _make_candidate(
+            vendor_name="Workato",
+            category="other",
+        )
+        fields = _resolve_fields(candidate, empty_maps)
+        assert fields == PLANE_STANDARD_FIELDS["IPAAS"]
+
+    def test_priority_5_category_standard_fields(self, empty_maps):
+        """Category defaults used when vendor isn't a known infra vendor."""
         candidate = _make_candidate(category="crm")
         fields = _resolve_fields(candidate, empty_maps)
         assert fields == CATEGORY_STANDARD_FIELDS["crm"]
 
+    def test_priority_5_other_category_fallback(self, empty_maps):
+        """Unknown vendors in 'other' get generic 'other' category fields."""
+        candidate = _make_candidate(
+            vendor_name="SomeUnknownPlatform",
+            category="other",
+        )
+        fields = _resolve_fields(candidate, empty_maps)
+        assert fields == CATEGORY_STANDARD_FIELDS["other"]
+        assert len(fields) >= 10
+
     def test_unknown_category_returns_empty(self, empty_maps):
-        """Unknown category with no other data → empty fields (not crash)."""
+        """Truly unknown category with no other data → empty fields (not crash)."""
         candidate = _make_candidate(category="alien_system")
         fields = _resolve_fields(candidate, empty_maps)
         assert fields == []
 
-    def test_priority_1_beats_priority_4(self, populated_maps):
+    def test_priority_1_beats_priority_5(self, populated_maps):
         """Even if category has fields, observation data wins."""
         candidate = _make_candidate(
             candidate_id="cand-obs-direct",
             category="erp",  # has CATEGORY_STANDARD_FIELDS
         )
         fields = _resolve_fields(candidate, populated_maps)
-        # Should return observation fields, not ERP category defaults
         assert fields == ["obs_field_a", "obs_field_b", "obs_field_c"]
 
     def test_category_fields_are_copies(self, empty_maps):
@@ -168,6 +245,57 @@ class TestResolveFieldsPriority:
         )
         fields = _resolve_fields(candidate, populated_maps)
         assert fields == ["hs_account_id", "hs_contact", "hs_deal"]
+
+
+# ---------------------------------------------------------------------------
+# Seed data coverage: verify all 30 candidates from seed get fields
+# ---------------------------------------------------------------------------
+
+class TestSeedDataCoverage:
+    """Verify that every candidate from the actual AOD seed payload gets fields."""
+
+    SEED_CANDIDATES = [
+        ("Salesforce", "crm"),
+        ("Workday", "hcm"),
+        ("ServiceNow", "itsm"),
+        ("SAP", "erp"),
+        ("Okta", "idp"),
+        ("NetSuite", "erp"),
+        ("HubSpot", "crm"),
+        ("Zendesk", "itsm"),
+        ("BambooHR", "hcm"),
+        ("Atlassian", "itsm"),
+        ("MuleSoft", "ipaas"),
+        ("Kong", "other"),         # → API_GATEWAY plane fields
+        ("Confluent", "other"),    # → EVENT_BUS plane fields
+        ("Snowflake", "other"),    # → DATA_WAREHOUSE plane fields
+        ("Workato", "other"),      # → IPAAS plane fields
+        ("Apigee", "other"),       # → API_GATEWAY plane fields
+        ("Databricks", "other"),   # → DATA_WAREHOUSE plane fields
+        ("EventBridge", "other"),  # → EVENT_BUS plane fields
+        ("Coupa", "finance"),
+        ("DocuSign", "saas"),
+        ("Boomi", "other"),        # → IPAAS plane fields
+        ("BigQuery", "other"),     # → DATA_WAREHOUSE plane fields
+        ("Slack", "saas"),
+        ("Greenhouse", "hr"),
+        ("Zapier", "other"),       # → IPAAS plane fields
+        ("Azure APIM", "other"),   # → API_GATEWAY plane fields
+        ("RabbitMQ", "other"),     # → EVENT_BUS plane fields
+        ("Redshift", "other"),     # → DATA_WAREHOUSE plane fields
+        ("Microsoft Dynamics", "crm"),
+        ("CyberArk", "identity"),
+    ]
+
+    @pytest.mark.parametrize("vendor_name,category", SEED_CANDIDATES)
+    def test_seed_candidate_gets_fields(self, vendor_name, category, empty_maps):
+        """Every candidate from the AOD seed payload must resolve to non-empty fields."""
+        candidate = _make_candidate(vendor_name=vendor_name, category=category)
+        fields = _resolve_fields(candidate, empty_maps)
+        assert len(fields) >= 10, (
+            f"{vendor_name} ({category}) resolved to {len(fields)} fields: {fields}"
+        )
+        assert all(isinstance(f, str) for f in fields)
 
 
 # ---------------------------------------------------------------------------
@@ -345,8 +473,47 @@ class TestBuildDCLExportWithMocks:
 
         conn = result.fabric_planes[0].connections[0]
         assert conn.fields == ["real_field_1", "real_field_2", "real_field_3"]
-        # Must NOT be the CRM category defaults
         assert conn.fields != CATEGORY_STANDARD_FIELDS["crm"]
+
+    def test_infra_vendor_other_gets_plane_fields(self, monkeypatch):
+        """Infrastructure vendors categorised as 'other' get plane-specific fields."""
+        mock_planes = [
+            {
+                "plane_id": "DATA_WAREHOUSE:snowflake",
+                "plane_type": "DATA_WAREHOUSE",
+                "vendor": "snowflake",
+                "display_name": "Snowflake",
+                "is_healthy": True,
+            }
+        ]
+        mock_candidates = [
+            {
+                "candidate_id": "c-snow",
+                "asset_key": "snowflake.com",
+                "vendor_name": "Snowflake",
+                "display_name": "Snowflake Data Warehouse",
+                "category": "other",
+                "governance_status": "governed",
+                "status": "connected",
+                "fabric_plane_id": "DATA_WAREHOUSE:snowflake",
+                "connected_via_plane": "DATA_WAREHOUSE",
+                "matched_pipe_id": None,
+                "updated_at": "2026-02-16T00:00:00Z",
+                "aod_asset_id": "aod-snow",
+            },
+        ]
+
+        monkeypatch.setattr("app.dcl_export.get_fabric_planes", lambda aod_run_id=None: mock_planes)
+        monkeypatch.setattr("app.dcl_export.list_candidates", lambda **kwargs: mock_candidates)
+        monkeypatch.setattr("app.dcl_export.get_all_schema_samples", lambda: [])
+        monkeypatch.setattr("app.dcl_export.sb.select", lambda *a, **kw: [])
+
+        from app.dcl_export import build_dcl_export
+        result = build_dcl_export()
+
+        conn = result.fabric_planes[0].connections[0]
+        assert conn.fields == PLANE_STANDARD_FIELDS["DATA_WAREHOUSE"]
+        assert "table_name" in conn.fields
 
     def test_no_empty_fields_across_all_known_categories(self, monkeypatch):
         """Every known category should produce non-empty fields via category defaults."""
