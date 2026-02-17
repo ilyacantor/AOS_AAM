@@ -1810,10 +1810,11 @@ async def ui_topology():
         }}
         .dp-status.completed {{ background: rgba(34,197,94,0.15); color: #4ade80; }}
         .dp-status.failed {{ background: rgba(248,113,113,0.15); color: #f87171; }}
+        .dp-status.cancelled {{ background: rgba(248,113,113,0.10); color: #fb923c; }}
         .dp-status.running {{ background: rgba(59,130,246,0.15); color: #60a5fa; }}
-        .dp-status.queued {{ background: rgba(148,163,184,0.15); color: #94a3b8; }}
         .dp-status.pushing {{ background: rgba(167,139,250,0.15); color: #a78bfa; }}
-        .dp-status.cancelled {{ background: rgba(248,113,113,0.1); color: #f87171; }}
+        .dp-status.dispatched {{ background: rgba(34,211,238,0.12); color: #22d3ee; }}
+        .dp-status.queued {{ background: rgba(148,163,184,0.15); color: #94a3b8; }}
         .dp-error {{ color: #f87171; font-size: 0.6rem; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
         .dp-error:hover {{ white-space: normal; word-break: break-all; }}
         .dp-filter {{
@@ -2582,18 +2583,17 @@ async def ui_topology():
         }}
 
         function renderDispatchSummary(jobs) {{
-            const counts = {{ completed: 0, failed: 0, running: 0, queued: 0, pushing: 0, cancelled: 0 }};
-            let totalRows = 0;
+            const counts = {{ dispatched: 0, completed: 0, failed: 0, running: 0, queued: 0, pushing: 0, cancelled: 0 }};
             jobs.forEach(j => {{
                 const s = j.status || 'queued';
                 if (counts[s] !== undefined) counts[s]++;
-                totalRows += j.rows_transferred || 0;
             }});
             document.getElementById('dp-total').textContent = jobs.length;
+            document.getElementById('dp-dispatched').textContent = counts.dispatched;
+            document.getElementById('dp-running').textContent = counts.running + counts.pushing;
             document.getElementById('dp-completed').textContent = counts.completed;
             document.getElementById('dp-failed').textContent = counts.failed + counts.cancelled;
-            document.getElementById('dp-running').textContent = counts.running + counts.pushing;
-            document.getElementById('dp-rows').textContent = totalRows;
+            document.getElementById('dp-queued').textContent = counts.queued;
             const hasActive = counts.queued > 0 || counts.running > 0 || counts.pushing > 0;
             document.getElementById('btn-stop-all').style.display = hasActive ? 'block' : 'none';
         }}
@@ -2602,7 +2602,12 @@ async def ui_topology():
             const body = document.getElementById('dp-body');
             let filtered = jobs;
             if (_dpFilter !== 'all') {{
-                filtered = jobs.filter(j => (j.status || 'queued') === _dpFilter);
+                filtered = jobs.filter(j => {{
+                    const s = j.status || 'queued';
+                    if (_dpFilter === 'running') return s === 'running' || s === 'pushing';
+                    if (_dpFilter === 'failed') return s === 'failed' || s === 'cancelled';
+                    return s === _dpFilter;
+                }});
             }}
             if (filtered.length === 0) {{
                 body.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:16px;color:var(--slate-500);">No jobs</td></tr>';
@@ -2612,12 +2617,14 @@ async def ui_topology():
                 const s = j.status || 'queued';
                 const rows = j.rows_transferred || 0;
                 const err = j.error_message ? '<div class="dp-error" title="' + (j.error_message||'').replace(/"/g,'&quot;') + '">' + (j.error_message||'').substring(0,80) + '</div>' : '';
-                const pipeId = j.pipe_id || j.job_id || '';
-                const shortPipe = pipeId.length > 35 ? pipeId.substring(0,32) + '...' : pipeId;
+                const jobId = j.job_id || '';
+                const pipeId = j.pipe_id || '';
+                const src = j.source_system || jobId.replace(/^run_\d+_/, '').replace(/_\d+$/, '') || pipeId;
+                const label = src.length > 25 ? src.substring(0,22) + '...' : src;
                 const ts = j.completed_at || j.started_at || j.created_at || '';
                 const shortTs = ts ? new Date(ts).toLocaleTimeString() : '-';
                 return '<tr>' +
-                    '<td title="' + pipeId + '">' + shortPipe + '</td>' +
+                    '<td title="pipe: ' + pipeId + '&#10;job: ' + jobId + '">' + label + '</td>' +
                     '<td><span class="dp-status ' + s + '">' + s + '</span></td>' +
                     '<td style="text-align:right;">' + rows + '</td>' +
                     '<td>' + shortTs + '</td>' +
@@ -2639,17 +2646,20 @@ async def ui_topology():
             </div>
             <div class="dp-summary">
                 <div class="dp-stat total"><span class="dp-val" id="dp-total">-</span><span class="dp-lbl">Total</span></div>
-                <div class="dp-stat completed"><span class="dp-val" id="dp-completed">-</span><span class="dp-lbl">Done</span></div>
+                <div class="dp-stat dispatched"><span class="dp-val" id="dp-dispatched">-</span><span class="dp-lbl">Dispatched</span></div>
+                <div class="dp-stat running"><span class="dp-val" id="dp-running">-</span><span class="dp-lbl">Running</span></div>
+                <div class="dp-stat completed"><span class="dp-val" id="dp-completed">-</span><span class="dp-lbl">Completed</span></div>
                 <div class="dp-stat failed"><span class="dp-val" id="dp-failed">-</span><span class="dp-lbl">Failed</span></div>
-                <div class="dp-stat running"><span class="dp-val" id="dp-running">-</span><span class="dp-lbl">Active</span></div>
-                <div class="dp-stat rows"><span class="dp-val" id="dp-rows">-</span><span class="dp-lbl">Rows</span></div>
+                <div class="dp-stat queued"><span class="dp-val" id="dp-queued">-</span><span class="dp-lbl">Queued</span></div>
             </div>
             <div class="dp-filter">
                 <button class="dp-filter-btn active" onclick="setDpFilter('all',this)" data-testid="dp-filter-all">All</button>
+                <button class="dp-filter-btn" onclick="setDpFilter('dispatched',this)" data-testid="dp-filter-dispatched">Dispatched</button>
+                <button class="dp-filter-btn" onclick="setDpFilter('running',this)" data-testid="dp-filter-running">Running</button>
                 <button class="dp-filter-btn" onclick="setDpFilter('completed',this)" data-testid="dp-filter-completed">Completed</button>
                 <button class="dp-filter-btn" onclick="setDpFilter('failed',this)" data-testid="dp-filter-failed">Failed</button>
-                <button class="dp-filter-btn" onclick="setDpFilter('running',this)" data-testid="dp-filter-running">Running</button>
                 <button class="dp-filter-btn" onclick="setDpFilter('queued',this)" data-testid="dp-filter-queued">Queued</button>
+                <button class="dp-filter-btn" onclick="setDpFilter('cancelled',this)" data-testid="dp-filter-cancelled">Cancelled</button>
             </div>
             <div class="dp-jobs">
                 <table>
