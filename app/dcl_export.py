@@ -32,6 +32,7 @@ from .db import (
     get_fabric_planes,
     get_all_schema_samples,
 )
+from .db.handoff import list_handoff_logs
 from .db import supabase_client as sb
 from .constants import CATEGORY_STANDARD_FIELDS, PLANE_STANDARD_FIELDS, INFRA_VENDOR_PLANE
 
@@ -88,6 +89,7 @@ class SkippedConnection(BaseModel):
 class DCLExportResponse(BaseModel):
     """Response for DCL export endpoint"""
     aod_run_id: Optional[str] = None
+    snapshot_name: Optional[str] = None
     timestamp: str
     fabric_planes: List[DCLFabricPlane]
     total_connections: int                             # Count of exported pipes only
@@ -238,6 +240,19 @@ def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
     Groups candidates by fabric plane and formats for DCL consumption.
     If aod_run_id is provided, filters to that run. Otherwise, uses all candidates.
     """
+    # Resolve snapshot_name from handoff log
+    snapshot_name: Optional[str] = None
+    if aod_run_id:
+        handoffs = list_handoff_logs(aod_run_id=aod_run_id, limit=1)
+        if handoffs:
+            snapshot_name = handoffs[0].get("snapshot_name")
+    else:
+        handoffs = list_handoff_logs(limit=1)
+        if handoffs:
+            snapshot_name = handoffs[0].get("snapshot_name")
+            if not aod_run_id:
+                aod_run_id = handoffs[0].get("aod_run_id")
+
     # Fetch real fabric planes from database
     fabric_planes_db = get_fabric_planes(aod_run_id)
 
@@ -381,6 +396,7 @@ def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
 
     return DCLExportResponse(
         aod_run_id=aod_run_id,
+        snapshot_name=snapshot_name,
         timestamp=datetime.utcnow().isoformat() + "Z",
         fabric_planes=fabric_planes_output,
         total_connections=total_connections,
