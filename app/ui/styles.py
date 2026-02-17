@@ -6,8 +6,24 @@ Extracted from the monolithic main.py for separation of concerns.
 from ..db import get_latest_aod_run
 
 NAV_STYLE = """
+<script>
+(function(){
+  if (window !== window.parent) {
+    document.documentElement.style.scrollBehavior = 'auto';
+    var scrollTop = function(){
+      window.scrollTo(0,0);
+      document.body.scrollTop = 0;
+      document.documentElement.scrollTop = 0;
+    };
+    window.addEventListener('DOMContentLoaded', scrollTop);
+    window.addEventListener('load', scrollTop);
+    setTimeout(scrollTop, 100);
+  }
+})();
+</script>
 <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { overflow-x: hidden; }
     body { font-family: 'Quicksand', sans-serif; background: #0f172a; color: #ffffff; }
     .nav {
         background: rgba(30, 41, 59, 0.9);
