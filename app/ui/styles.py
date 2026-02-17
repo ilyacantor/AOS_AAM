@@ -6,14 +6,6 @@ Extracted from the monolithic main.py for separation of concerns.
 from ..db import get_latest_aod_run
 
 NAV_STYLE = """
-<script>
-(function(){
-  if (window !== window.parent) {
-    window.addEventListener('DOMContentLoaded', function(){ window.scrollTo(0,0); });
-    window.addEventListener('load', function(){ window.scrollTo(0,0); });
-  }
-})();
-</script>
 <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: 'Quicksand', sans-serif; background: #0f172a; color: #ffffff; }
