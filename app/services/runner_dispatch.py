@@ -217,6 +217,8 @@ def build_manifest(
             vendor = vendor or candidate.get("vendor_name")
     category = normalize_category(raw_category, vendor)
 
+    tenant_id = snapshot_name or aod_run_id or "default"
+
     return JobManifest(
         run_id=run_id,
         source=SourceSpec(
@@ -230,6 +232,7 @@ def build_manifest(
         target=TargetSpec(
             dcl_url=settings.DCL_INGEST_URL,
             snapshot_name=snapshot_name,
+            tenant_id=tenant_id,
         ),
         provenance={
             "aod_run_id": aod_run_id,

@@ -68,38 +68,19 @@ async def dispatch_multiple(req: RunnerBatchDispatchRequest):
 
     results = dispatch_batch(req.pipe_ids, req.trigger)
 
-    # Dispatch each manifest to Farm in parallel
-    farm_tasks = []
     for result in results:
-        manifest = result.pop("_manifest", None)
-        if manifest and result.get("status") != "error":
-            farm_tasks.append((result, dispatch_to_farm(manifest)))
+        result.pop("_manifest", None)
 
-    for result, coro in farm_tasks:
-        try:
-            farm_result = await coro
-            result["status"] = farm_result.get("status", "dispatched")
-            if farm_result.get("error"):
-                result["farm_error"] = farm_result["error"]
-            if farm_result.get("status") == "farm_error":
-                update_runner_status(
-                    result["job_id"], "failed",
-                    error_message=farm_result.get("error", "Farm rejected manifest"),
-                )
-        except Exception as exc:
-            _log.warning("Farm dispatch failed: %s", exc)
-            result["farm_error"] = str(exc)
+    queued = [r for r in results if r.get("status") == "queued"]
+    errors = [r for r in results if r.get("status") in ("error", "skipped")]
 
-    dispatched = [r for r in results if r.get("status") == "dispatched"]
-    errors = [r for r in results if r.get("status") == "error"]
-
-    _log.info("Batch dispatch to Farm: %d dispatched, %d errors", len(dispatched), len(errors))
+    _log.info("Batch dispatch: %d queued for Farm, %d skipped/errors", len(queued), len(errors))
 
     return {
-        "dispatched": len(dispatched),
+        "dispatched": len(queued),
         "errors": len(errors),
         "jobs": results,
-        "message": f"{len(dispatched)} manifests dispatched to Farm",
+        "message": f"{len(queued)} manifests queued for Farm worker",
     }
 
 
