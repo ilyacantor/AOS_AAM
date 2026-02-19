@@ -1845,6 +1845,7 @@ async def ui_topology():
                     <div class="sb-stat"><span>Fabrics</span> <span id="stat-fabrics">-</span></div>
                     <div class="sb-stat"><span>SORs</span> <span id="stat-sors">-</span></div>
                     <div class="sb-stat"><span>Drift</span> <span id="stat-drift">-</span></div>
+                    <div class="sb-stat"><span>Exported</span> <span id="stat-exported">-</span></div>
                 </div>
             </div>
             <div class="sb-section">
@@ -2119,6 +2120,16 @@ async def ui_topology():
                 document.getElementById('stat-sors').textContent = data.stats.sors || 0;
                 document.getElementById('stat-drift').textContent = data.stats.pipes_with_drift || 0;
             }}
+
+            // Fetch DCL export count
+            fetch('/api/export/dcl/declared-pipes')
+                .then(r => r.json())
+                .then(exp => {{
+                    document.getElementById('stat-exported').textContent = exp.total_connections || 0;
+                }})
+                .catch(() => {{
+                    document.getElementById('stat-exported').textContent = 0;
+                }});
 
             renderNetwork();
         }}
