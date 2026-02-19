@@ -2035,7 +2035,10 @@ async def ui_topology():
                 showToast(msg, (dclOk && dispatchOk) ? 'success' : 'warning');
                 btn.textContent = 'Done (' + elapsed + 's)';
                 btn.disabled = false;
-                setTimeout(() => location.reload(), 1500);
+                if (dispatchOk) {{
+                    openDispatchPanel();
+                }}
+                setTimeout(() => location.reload(), 2500);
             }} catch (e) {{
                 clearInterval(timer);
                 var elapsed = Math.floor((Date.now() - start) / 1000);
@@ -2583,6 +2586,40 @@ async def ui_topology():
         function openDispatchPanel() {{
             document.getElementById('dispatch-overlay').classList.add('visible');
             loadDispatchData();
+            loadDclDispatchStatus();
+        }}
+
+        async function loadDclDispatchStatus() {{
+            const banner = document.getElementById('dcl-dispatch-banner');
+            try {{
+                const res = await fetch('/api/export/dcl/dispatch-status');
+                const data = await res.json();
+                const d = data.dcl_dispatch;
+                if (!d) {{
+                    banner.style.display = 'none';
+                    return;
+                }}
+                const statusColor = d.ok ? '#4ade80' : '#f87171';
+                const statusLabel = d.dcl_status || (d.ok ? 'ok' : 'failed');
+                const ts = d.timestamp ? new Date(d.timestamp).toLocaleTimeString() : '';
+                banner.style.display = 'block';
+                banner.style.borderColor = d.ok ? 'rgba(34,197,94,0.3)' : 'rgba(248,113,113,0.3)';
+                banner.style.background = d.ok ? 'rgba(34,197,94,0.06)' : 'rgba(248,113,113,0.06)';
+                banner.innerHTML =
+                    '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;gap:4px;">' +
+                    '<strong style="color:var(--slate-200,#e2e8f0);">DCL Dispatch</strong>' +
+                    '<span style="color:' + statusColor + ';font-weight:600;">' + statusLabel + '</span>' +
+                    (d.dispatch_id ? '<span style="color:var(--slate-400,#94a3b8);">' + d.dispatch_id + '</span>' : '') +
+                    '</div>' +
+                    '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:4px;color:var(--slate-400,#94a3b8);">' +
+                    (d.snapshot_name ? '<span>Snapshot: <span style="color:var(--slate-200,#e2e8f0);">' + d.snapshot_name + '</span></span>' : '') +
+                    (d.aod_run_id ? '<span>Run: <span style="color:var(--slate-200,#e2e8f0);">' + d.aod_run_id + '</span></span>' : '') +
+                    (d.pipe_count != null ? '<span>Pipes: <span style="color:var(--slate-200,#e2e8f0);">' + d.pipe_count + '</span></span>' : '') +
+                    (ts ? '<span>At: ' + ts + '</span>' : '') +
+                    '</div>';
+            }} catch (e) {{
+                banner.style.display = 'none';
+            }}
         }}
 
         function closeDispatchPanel() {{
@@ -2677,6 +2714,7 @@ async def ui_topology():
                 <button class="dp-stop-btn" onclick="cancelAllJobs()" data-testid="dp-btn-stop">Stop All</button>
                 <button class="dp-close" onclick="closeDispatchPanel()" data-testid="btn-close-dispatch">&times;</button>
             </div>
+            <div id="dcl-dispatch-banner" data-testid="dcl-dispatch-banner" style="padding:8px 12px;margin:0 0 8px;border-radius:6px;font-size:0.82rem;display:none;background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.2);"></div>
             <div class="dp-summary">
                 <div class="dp-stat total"><span class="dp-val" id="dp-total">-</span><span class="dp-lbl">Total</span></div>
                 <div class="dp-stat dispatched"><span class="dp-val" id="dp-dispatched">-</span><span class="dp-lbl">Dispatched</span></div>

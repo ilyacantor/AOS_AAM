@@ -26,6 +26,8 @@ router = APIRouter(tags=["Export"])
 
 _DCL_TIMEOUT = 15.0
 
+_last_dcl_dispatch: dict | None = None
+
 
 async def _deliver_to_dcl(export_payload: dict) -> dict:
     """POST the export payload to DCL's export-pipes endpoint.
@@ -133,6 +135,17 @@ async def _dispatch_to_dcl(aod_run_id: Optional[str] = None,
                 _log.info("DCL dispatch POST %s → %d  body=%s",
                           settings.DCL_DISPATCH_URL, resp.status_code,
                           resp.text[:300])
+                global _last_dcl_dispatch
+                _last_dcl_dispatch = {
+                    "aod_run_id": aod_run_id,
+                    "snapshot_name": snapshot_name,
+                    "pipe_count": pipe_count,
+                    "dcl_status": report["dispatch"]["body"].get("status") if isinstance(report["dispatch"].get("body"), dict) else None,
+                    "dispatch_id": report["dispatch"]["body"].get("dispatch_id") if isinstance(report["dispatch"].get("body"), dict) else None,
+                    "http_status": resp.status_code,
+                    "ok": resp.is_success,
+                    "timestamp": datetime.utcnow().isoformat() + "Z",
+                }
             except Exception as exc:
                 report["dispatch"] = {
                     "url": settings.DCL_DISPATCH_URL,
@@ -261,6 +274,15 @@ async def export_pipes_for_dcl(aod_run_id: Optional[str] = Query(None)):
     """Alias for /api/export/dcl/declared-pipes — same fabric-plane-grouped format."""
     export_data = build_dcl_export(aod_run_id=aod_run_id)
     return export_data.model_dump()
+
+
+@router.get("/api/export/dcl/dispatch-status", tags=["Export"])
+async def get_dispatch_status():
+    """Return the last DCL dispatch result (in-memory).
+
+    Returns null if no dispatch has been sent since server start.
+    """
+    return {"dcl_dispatch": _last_dcl_dispatch}
 
 
 @router.get("/api/stats", tags=["Stats"])
