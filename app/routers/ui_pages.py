@@ -1859,6 +1859,10 @@ async def ui_topology():
                 <button class="sb-btn" onclick="openDispatchPanel()" id="btn-view-dispatch" data-testid="btn-view-dispatch" style="font-size:0.72rem;">View Dispatch</button>
                 <span id="dispatch-all-status" style="display:none;font-size:0.68rem;margin-top:2px;"></span>
             </div>
+            <div class="sb-section" id="pipeline-log-section" style="display:none;">
+                <div class="sb-title">Pipeline Log</div>
+                <div id="pipeline-log" data-testid="pipeline-log" style="font-size:0.72rem;line-height:1.6;"></div>
+            </div>
             <div class="sb-section">
                 <div class="sb-title">View</div>
                 <select class="sb-select" id="asset-filter" onchange="applyTopologyFilters()">
@@ -1969,6 +1973,11 @@ async def ui_topology():
                 btn.textContent = label + '... 0s';
             }}
 
+            var pipelineLog = [];
+            function logStep(icon, text, ok) {{
+                pipelineLog.push({{ icon: icon, text: text, ok: ok }});
+            }}
+
             try {{
                 // Step 1: Fetch AOD data
                 setStep('1/4 Fetching');
@@ -1978,6 +1987,9 @@ async def ui_topology():
                     throw new Error('Fetch failed: ' + (d.detail || res.status));
                 }}
                 var fetchData = await res.json();
+                var candCount = fetchData.candidates_accepted || fetchData.candidates || 0;
+                var snap = fetchData.snapshot_name || '';
+                logStep('1', 'Fetch: ' + candCount + ' candidates' + (snap ? ' (' + snap + ')' : ''), true);
 
                 // Step 2: Run inference
                 setStep('2/4 Inferring');
@@ -1987,6 +1999,7 @@ async def ui_topology():
                     throw new Error('Inference failed: ' + (d.detail || res.status));
                 }}
                 var inferData = await res.json();
+                logStep('2', 'Infer: ' + (inferData.pipes_created || 0) + ' pipes created', true);
 
                 // Step 3: Export to DCL (structure)
                 setStep('3/4 Exporting');
@@ -1996,6 +2009,9 @@ async def ui_topology():
                     throw new Error('Export failed: ' + (d.detail || res.status));
                 }}
                 var exportData = await res.json();
+                var dclOkExport = exportData.delivery && exportData.delivery.export_pipes && exportData.delivery.export_pipes.ok;
+                var expCount = exportData.export ? exportData.export.total_connections : 0;
+                logStep('3', 'Export: ' + expCount + ' pipes to DCL' + (dclOkExport ? ' (accepted)' : ' (failed)'), dclOkExport);
 
                 // Step 4: Dispatch to DCL (creates dispatch row)
                 setStep('4/4 Dispatching');
@@ -2016,6 +2032,10 @@ async def ui_topology():
                     dispatchData = await res.json();
                     dispatchOk = dispatchData.dispatch && dispatchData.dispatch.ok;
                 }}
+                var dBody = (dispatchData.dispatch && dispatchData.dispatch.body) || {{}};
+                var dStatus = dBody.status || (dispatchOk ? 'ok' : 'failed');
+                var dId = dBody.dispatch_id || '';
+                logStep('4', 'Dispatch: ' + dStatus + (dId ? ' (' + dId + ')' : ''), dispatchOk);
 
                 clearInterval(timer);
                 var elapsed = Math.floor((Date.now() - start) / 1000);
@@ -2023,6 +2043,14 @@ async def ui_topology():
                 var pipesCreated = inferData.pipes_created || 0;
                 var pipeCount = exportData.export ? exportData.export.total_connections : 0;
                 var dclOk = exportData.delivery && exportData.delivery.export_pipes && exportData.delivery.export_pipes.ok;
+
+                logStep('done', 'Complete in ' + elapsed + 's', dclOk && dispatchOk);
+
+                localStorage.setItem('aam_pipeline_log', JSON.stringify({{
+                    steps: pipelineLog,
+                    timestamp: new Date().toISOString(),
+                }}));
+                renderPipelineLog(pipelineLog);
 
                 var msg = 'Pipeline complete (' + elapsed + 's): ' + pipesCreated + ' pipes inferred, ' + pipeCount + ' exported';
                 if (dclOk && dispatchOk) {{
@@ -2035,10 +2063,7 @@ async def ui_topology():
                 showToast(msg, (dclOk && dispatchOk) ? 'success' : 'warning');
                 btn.textContent = 'Done (' + elapsed + 's)';
                 btn.disabled = false;
-                if (dispatchOk) {{
-                    openDispatchPanel();
-                }}
-                setTimeout(() => location.reload(), 2500);
+                setTimeout(() => location.reload(), 3000);
             }} catch (e) {{
                 clearInterval(timer);
                 var elapsed = Math.floor((Date.now() - start) / 1000);
@@ -2702,6 +2727,36 @@ async def ui_topology():
                     '</tr>';
             }}).join('');
         }}
+
+        function renderPipelineLog(steps) {{
+            var section = document.getElementById('pipeline-log-section');
+            var container = document.getElementById('pipeline-log');
+            if (!steps || steps.length === 0) {{
+                section.style.display = 'none';
+                return;
+            }}
+            section.style.display = 'block';
+            container.innerHTML = steps.map(function(s) {{
+                var icon = s.ok ? '<span style="color:#4ade80;">&#10003;</span>' : '<span style="color:#f87171;">&#10007;</span>';
+                return '<div style="display:flex;align-items:center;gap:6px;">' + icon + ' <span style="color:var(--slate-300,#cbd5e1);">' + s.text + '</span></div>';
+            }}).join('');
+        }}
+
+        // Restore pipeline log from previous run
+        (function() {{
+            try {{
+                var saved = localStorage.getItem('aam_pipeline_log');
+                if (saved) {{
+                    var parsed = JSON.parse(saved);
+                    if (parsed.steps && parsed.steps.length > 0) {{
+                        var age = Date.now() - new Date(parsed.timestamp).getTime();
+                        if (age < 3600000) {{
+                            renderPipelineLog(parsed.steps);
+                        }}
+                    }}
+                }}
+            }} catch(e) {{}}
+        }})();
 
         // Initialize
         loadTopology();
