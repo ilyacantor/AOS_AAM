@@ -30,6 +30,7 @@ class Settings:
             "AAM_DCL_INGEST_URL", "/api/dcl/ingest"
         )
         self.DCL_EXPORT_PIPES_URL: str = f"{dcl_base}/api/dcl/export-pipes" if dcl_base else ""
+        self.DCL_DISPATCH_URL: str = f"{dcl_base}/api/dcl/export-pipes/dispatch" if dcl_base else ""
         self.RUNNER_JOB_TIMEOUT_S: int = int(
             os.environ.get("AAM_RUNNER_JOB_TIMEOUT_S", "300")
         )

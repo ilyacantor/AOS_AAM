@@ -79,6 +79,48 @@ async def _deliver_to_dcl(export_payload: dict) -> dict:
     return report
 
 
+async def _dispatch_to_dcl() -> dict:
+    """POST to DCL's dispatch endpoint to create the dispatch row.
+
+    Must be called AFTER _deliver_to_dcl (export-pipes) so DCL has an
+    export receipt.  Must be called BEFORE dispatching the Runner so
+    the dispatch row is visible in DCL's Ingest tab immediately.
+
+    The endpoint is idempotent — calling twice for the same dispatch_id
+    is harmless.  Returns the dispatch_id from DCL for AAM to log.
+    """
+    report: dict = {"dispatch": None}
+
+    async with httpx.AsyncClient(timeout=_DCL_TIMEOUT) as client:
+        if settings.DCL_DISPATCH_URL:
+            try:
+                resp = await client.post(
+                    settings.DCL_DISPATCH_URL,
+                    headers={
+                        "x-api-key": settings.DCL_API_KEY,
+                        "x-source": "aam",
+                    },
+                )
+                report["dispatch"] = {
+                    "url": settings.DCL_DISPATCH_URL,
+                    "status": resp.status_code,
+                    "ok": resp.is_success,
+                    "body": resp.json() if resp.is_success else resp.text[:500],
+                }
+                _log.info("DCL dispatch POST %s → %d",
+                          settings.DCL_DISPATCH_URL, resp.status_code)
+            except Exception as exc:
+                report["dispatch"] = {
+                    "url": settings.DCL_DISPATCH_URL,
+                    "error": str(exc),
+                }
+                _log.warning("DCL dispatch POST failed: %s", exc)
+        else:
+            report["dispatch"] = {"skipped": True, "reason": "DCL_URL not configured"}
+
+    return report
+
+
 @router.get("/api/export/dcl/declared-pipes")
 async def export_for_dcl(aod_run_id: Optional[str] = Query(None)):
     """Export connections grouped by fabric plane for DCL consumption.
@@ -113,6 +155,9 @@ async def push_to_dcl(request: Request):
     export_payload = export_data.model_dump()
 
     delivery_report = await _deliver_to_dcl(export_payload)
+
+    dispatch_report = await _dispatch_to_dcl()
+    delivery_report.update(dispatch_report)
 
     push_record = record_dcl_push(
         pipe_count=export_data.total_connections,
@@ -158,6 +203,25 @@ async def download_push_payload(push_id: str):
         media_type="application/json",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.post("/api/export/dcl/dispatch")
+async def dispatch_dcl():
+    """Notify DCL to create the dispatch row from the latest export receipt.
+
+    Call this AFTER /api/export/dcl/push and BEFORE launching the Runner.
+    The push endpoint already calls this automatically, but this standalone
+    endpoint lets operators trigger dispatch separately if needed.
+
+    Idempotent — calling twice for the same dispatch is harmless.
+    """
+    report = await _dispatch_to_dcl()
+    dispatch = report.get("dispatch", {})
+    if dispatch.get("error"):
+        raise HTTPException(status_code=502, detail=f"DCL dispatch failed: {dispatch['error']}")
+    if dispatch.get("skipped"):
+        raise HTTPException(status_code=400, detail="DCL_URL not configured — cannot dispatch")
+    return report
 
 
 @router.get("/api/dcl/export-pipes", tags=["DCL Export"])
