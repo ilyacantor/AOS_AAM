@@ -1853,7 +1853,7 @@ async def ui_topology():
                 <button class="sb-btn sb-btn-accent" onclick="fetchAodData()" id="fetch-aod-btn">Fetch AOD Data</button>
                 <button class="sb-btn" id="btn-run-inference">Run Inference</button>
                 <button class="sb-btn" id="btn-export-dcl">Export to DCL</button>
-                <button class="sb-btn" onclick="runFullPipeline()" id="btn-full-pipeline" data-testid="btn-full-pipeline" style="background:var(--green-700,#15803d);color:#fff;margin-top:4px;">Fetch → Infer → Export → Dispatch</button>
+                <button class="sb-btn" onclick="runFullPipeline()" id="btn-full-pipeline" data-testid="btn-full-pipeline" style="background:var(--green-700,#15803d);color:#fff;margin-top:4px;">Full Pipeline</button>
                 <button class="sb-btn sb-btn-runner" onclick="dispatchAllRunners()" id="btn-dispatch-all" data-testid="btn-dispatch-all">Dispatch Runner</button>
                 <button class="sb-btn sb-btn-stop" onclick="cancelAllJobs()" id="btn-stop-all" data-testid="btn-stop-all" style="display:none;">Stop All</button>
                 <button class="sb-btn" onclick="openDispatchPanel()" id="btn-view-dispatch" data-testid="btn-view-dispatch" style="font-size:0.72rem;">View Dispatch</button>
@@ -1980,7 +1980,7 @@ async def ui_topology():
 
             try {{
                 // Step 1: Fetch AOD data
-                setStep('1/4 Fetching');
+                setStep('1/5 Fetching');
                 var res = await fetch('/api/handoff/aod/fetch', {{ method: 'POST' }});
                 if (!res.ok) {{
                     var d = await res.json().catch(function() {{ return {{}}; }});
@@ -1992,7 +1992,7 @@ async def ui_topology():
                 logStep('1', 'Fetch: ' + candCount + ' candidates' + (snap ? ' (' + snap + ')' : ''), true);
 
                 // Step 2: Run inference
-                setStep('2/4 Inferring');
+                setStep('2/5 Inferring');
                 res = await fetch('/api/aam/infer', {{ method: 'POST' }});
                 if (!res.ok) {{
                     var d = await res.json().catch(function() {{ return {{}}; }});
@@ -2002,7 +2002,7 @@ async def ui_topology():
                 logStep('2', 'Infer: ' + (inferData.pipes_created || 0) + ' pipes created', true);
 
                 // Step 3: Export to DCL (structure)
-                setStep('3/4 Exporting');
+                setStep('3/5 Exporting');
                 res = await fetch('/api/export/dcl/push', {{ method: 'POST', headers: {{'Content-Type': 'application/json'}}, body: '{{}}' }});
                 if (!res.ok) {{
                     var d = await res.json().catch(function() {{ return {{}}; }});
@@ -2014,7 +2014,7 @@ async def ui_topology():
                 logStep('3', 'Export: ' + expCount + ' pipes to DCL' + (dclOkExport ? ' (accepted)' : ' (failed)'), dclOkExport);
 
                 // Step 4: Dispatch to DCL (creates dispatch row)
-                setStep('4/4 Dispatching');
+                setStep('4/5 Dispatching');
                 var dispatchBody = {{}};
                 if (exportData.export) {{
                     dispatchBody.aod_run_id = exportData.export.aod_run_id || null;
@@ -2036,6 +2036,27 @@ async def ui_topology():
                 var dStatus = dBody.status || (dispatchOk ? 'ok' : 'failed');
                 var dId = dBody.dispatch_id || '';
                 logStep('4', 'Dispatch: ' + dStatus + (dId ? ' (' + dId + ')' : ''), dispatchOk);
+
+                // Step 5: Dispatch Farm runners for all pipes
+                setStep('5/5 Runners');
+                var runnerDispatched = 0;
+                try {{
+                    var pipesRes = await fetch('/api/pipes');
+                    var pipesJson = await pipesRes.json();
+                    var pipeIds = (pipesJson.pipes || []).map(function(p) {{ return p.pipe_id; }}).filter(Boolean);
+                    if (pipeIds.length > 0) {{
+                        var batchRes = await fetch('/api/runners/dispatch-batch', {{
+                            method: 'POST',
+                            headers: {{ 'Content-Type': 'application/json' }},
+                            body: JSON.stringify({{ pipe_ids: pipeIds, trigger: 'pipeline' }})
+                        }});
+                        if (batchRes.ok) {{
+                            var batchData = await batchRes.json();
+                            runnerDispatched = batchData.dispatched || 0;
+                        }}
+                    }}
+                }} catch (re) {{}}
+                logStep('5', 'Runners: ' + runnerDispatched + ' manifests dispatched to Farm', runnerDispatched > 0);
 
                 clearInterval(timer);
                 var elapsed = Math.floor((Date.now() - start) / 1000);
@@ -2063,7 +2084,10 @@ async def ui_topology():
                 showToast(msg, (dclOk && dispatchOk) ? 'success' : 'warning');
                 btn.textContent = 'Done (' + elapsed + 's)';
                 btn.disabled = false;
-                setTimeout(() => location.reload(), 3000);
+                if (runnerDispatched > 0) {{
+                    openDispatchPanel();
+                    startDispatchPolling();
+                }}
             }} catch (e) {{
                 clearInterval(timer);
                 var elapsed = Math.floor((Date.now() - start) / 1000);
