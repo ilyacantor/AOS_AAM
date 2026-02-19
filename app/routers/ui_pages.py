@@ -1834,10 +1834,10 @@ async def ui_topology():
     <div class="topo-page">
     <div class="topo-layout">
         <aside class="topo-sidebar">
-            <div class="sb-section">
+            <div class="sb-section" id="sb-run-section">
                 <div class="sb-title">Run</div>
-                {_run_html}
-                {_recon_html}
+                <div id="sb-run-info">{_run_html}</div>
+                <div id="sb-recon-link">{_recon_html}</div>
             </div>
             <div class="sb-section">
                 <div class="sb-title">Topology</div>
@@ -1957,6 +1957,30 @@ async def ui_topology():
                 btn.disabled = false;
                 _fetchRunning = false;
             }}
+        }}
+
+        async function refreshSidebarRun() {{
+            try {{
+                var res = await fetch('/api/handoff/aod/latest');
+                if (!res.ok) return;
+                var run = await res.json();
+                var el = document.getElementById('sb-run-info');
+                if (el && run && run.snapshot_name) {{
+                    var snap = run.snapshot_name || 'Unnamed';
+                    var pipes = run.candidates_accepted || 0;
+                    var ts = (run.handoff_timestamp || '').substring(0, 10);
+                    el.innerHTML = '<div class="sb-val" style="color:#f0abfc;">' + snap + '</div>' +
+                        '<div class="sb-kpi"><span>' + pipes + '</span> pipes</div>' +
+                        '<div class="sb-dim">' + ts + '</div>';
+                }}
+                var reconEl = document.getElementById('sb-recon-link');
+                if (reconEl && run && run.aod_run_id) {{
+                    reconEl.innerHTML = '<a href="/ui/reconcile/' + run.aod_run_id + '" class="sb-link">Reconcile</a>';
+                }}
+            }} catch(e) {{}}
+            try {{
+                await loadTopology();
+            }} catch(e) {{}}
         }}
 
         async function runFullPipeline() {{
@@ -2084,16 +2108,19 @@ async def ui_topology():
                 showToast(msg, (dclOk && dispatchOk) ? 'success' : 'warning');
                 btn.textContent = 'Done (' + elapsed + 's)';
                 btn.disabled = false;
+                refreshSidebarRun();
                 if (runnerDispatched > 0) {{
                     openDispatchPanel();
                     startDispatchPolling();
                 }}
+                setTimeout(function() {{ btn.textContent = 'Full Pipeline'; }}, 3000);
             }} catch (e) {{
                 clearInterval(timer);
                 var elapsed = Math.floor((Date.now() - start) / 1000);
                 showToast('Pipeline failed: ' + e.message, 'error');
                 btn.textContent = 'Failed (' + elapsed + 's)';
                 btn.disabled = false;
+                setTimeout(function() {{ btn.textContent = 'Full Pipeline'; }}, 3000);
             }}
         }}
 

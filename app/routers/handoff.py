@@ -185,6 +185,16 @@ async def get_aod_policy_history(limit: int = Query(20)):
     return {"policies": policies, "count": len(policies)}
 
 
+@router.get("/latest")
+async def get_latest_run():
+    """Get the latest AOD run info for sidebar display."""
+    from ..db import get_latest_aod_run
+    run = get_latest_aod_run()
+    if not run:
+        return {}
+    return run
+
+
 @router.get("/logs")
 async def get_handoff_logs_list(
     aod_run_id: Optional[str] = Query(None),
