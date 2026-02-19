@@ -13,15 +13,14 @@ BRIDGE NOTE (dual-post):
 from fastapi import APIRouter, HTTPException, Query, Request
 from typing import Optional
 from datetime import datetime
-import logging
-
 import httpx
 
 from ..db import get_pipe_stats, list_candidates, record_dcl_push, list_dcl_pushes, get_dcl_push
 from ..dcl_export import build_dcl_export
 from ..config import settings
+from ..logger import get_logger
 
-_log = logging.getLogger(__name__)
+_log = get_logger("routers.export")
 
 router = APIRouter(tags=["Export"])
 
