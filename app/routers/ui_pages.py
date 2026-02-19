@@ -1853,7 +1853,7 @@ async def ui_topology():
                 <button class="sb-btn sb-btn-accent" onclick="fetchAodData()" id="fetch-aod-btn">Fetch AOD Data</button>
                 <button class="sb-btn" id="btn-run-inference">Run Inference</button>
                 <button class="sb-btn" id="btn-export-dcl">Export to DCL</button>
-                <button class="sb-btn" onclick="runFullPipeline()" id="btn-full-pipeline" data-testid="btn-full-pipeline" style="background:var(--green-700,#15803d);color:#fff;margin-top:4px;">Fetch → Infer → Export</button>
+                <button class="sb-btn" onclick="runFullPipeline()" id="btn-full-pipeline" data-testid="btn-full-pipeline" style="background:var(--green-700,#15803d);color:#fff;margin-top:4px;">Fetch → Infer → Export → Dispatch</button>
                 <button class="sb-btn sb-btn-runner" onclick="dispatchAllRunners()" id="btn-dispatch-all" data-testid="btn-dispatch-all">Dispatch Runner</button>
                 <button class="sb-btn sb-btn-stop" onclick="cancelAllJobs()" id="btn-stop-all" data-testid="btn-stop-all" style="display:none;">Stop All</button>
                 <button class="sb-btn" onclick="openDispatchPanel()" id="btn-view-dispatch" data-testid="btn-view-dispatch" style="font-size:0.72rem;">View Dispatch</button>
