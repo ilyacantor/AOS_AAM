@@ -265,6 +265,15 @@ def dispatch_pipe(
     if not pipe:
         raise ValueError(f"Pipe {pipe_id} not found")
 
+    if not snapshot_name:
+        try:
+            from ..db.handoff import list_handoff_logs
+            handoffs = list_handoff_logs(limit=1)
+            if handoffs:
+                snapshot_name = handoffs[0].get("snapshot_name")
+        except Exception:
+            pass
+
     manifest = build_manifest(
         pipe,
         trigger,
@@ -292,6 +301,8 @@ def dispatch_batch(
     Bulk-fetches all pipes in one query, builds manifests, then bulk-inserts.
     Returns list of job summaries with _manifest for Farm dispatch.
     """
+    from ..db.handoff import list_handoff_logs
+
     all_pipes = list_pipes()
     pipe_map = {p["pipe_id"]: p for p in all_pipes}
 
@@ -302,6 +313,14 @@ def dispatch_batch(
         raw_cat = p.get("category") or (cand.get("category") if cand else None)
         vendor = p.get("source_system") or (cand.get("vendor_name") if cand else None)
         p["category"] = normalize_category(raw_cat, vendor)
+
+    current_snapshot: Optional[str] = None
+    try:
+        handoffs = list_handoff_logs(limit=1)
+        if handoffs:
+            current_snapshot = handoffs[0].get("snapshot_name")
+    except Exception as exc:
+        _log.warning("Failed to resolve snapshot_name for dispatch: %s", exc)
 
     manifests_data = []
     manifest_objects = []
@@ -317,7 +336,7 @@ def dispatch_batch(
             if not pipe.get("category"):
                 errors.append({"pipe_id": pid, "status": "skipped", "error": "Unclassified category — incomplete inference, not dispatchable"})
                 continue
-            manifest = build_manifest(pipe, trigger)
+            manifest = build_manifest(pipe, trigger, snapshot_name=current_snapshot)
             manifests_data.append(manifest.model_dump())
             manifest_objects.append(manifest)
             results.append({
