@@ -181,6 +181,7 @@ def build_manifest(
     trigger: str = "manual",
     *,
     snapshot_name: Optional[str] = None,
+    aod_run_id: Optional[str] = None,
     farm_verification: bool = False,
 ) -> JobManifest:
     """Build an immutable Job Manifest from a pipe definition.
@@ -231,6 +232,8 @@ def build_manifest(
             snapshot_name=snapshot_name,
         ),
         provenance={
+            "aod_run_id": aod_run_id,
+            "snapshot_name": snapshot_name,
             "run_timestamp": datetime.utcnow().isoformat(),
             "triggered_by": trigger,
         },
@@ -270,14 +273,18 @@ def dispatch_pipe(
             from ..db.handoff import list_handoff_logs
             handoffs = list_handoff_logs(limit=1)
             if handoffs:
-                snapshot_name = handoffs[0].get("snapshot_name")
+                snapshot_name = snapshot_name or handoffs[0].get("snapshot_name")
+                aod_run_id = handoffs[0].get("aod_run_id")
         except Exception:
             pass
+    else:
+        aod_run_id = None
 
     manifest = build_manifest(
         pipe,
         trigger,
         snapshot_name=snapshot_name,
+        aod_run_id=aod_run_id,
         farm_verification=farm_verification,
     )
     job_id = dispatch_job(manifest)
@@ -315,10 +322,12 @@ def dispatch_batch(
         p["category"] = normalize_category(raw_cat, vendor)
 
     current_snapshot: Optional[str] = None
+    current_aod_run_id: Optional[str] = None
     try:
         handoffs = list_handoff_logs(limit=1)
         if handoffs:
             current_snapshot = handoffs[0].get("snapshot_name")
+            current_aod_run_id = handoffs[0].get("aod_run_id")
     except Exception as exc:
         _log.warning("Failed to resolve snapshot_name for dispatch: %s", exc)
 
@@ -336,7 +345,7 @@ def dispatch_batch(
             if not pipe.get("category"):
                 errors.append({"pipe_id": pid, "status": "skipped", "error": "Unclassified category — incomplete inference, not dispatchable"})
                 continue
-            manifest = build_manifest(pipe, trigger, snapshot_name=current_snapshot)
+            manifest = build_manifest(pipe, trigger, snapshot_name=current_snapshot, aod_run_id=current_aod_run_id)
             manifests_data.append(manifest.model_dump())
             manifest_objects.append(manifest)
             results.append({
