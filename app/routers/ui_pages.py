@@ -3285,6 +3285,121 @@ async def ui_reconcile(aod_run_id: str):
     dd = deep.get("duplicates", {})
     dd_groups = dd.get("duplicate_groups", [])
     dd_total = dd.get("total_duplicate_rows", 0)
+
+    # --- Deep Check 7: DCL Export Reconciliation ---
+    from ..dcl_export import build_dcl_export
+    try:
+        dcl_export = build_dcl_export(aod_run_id)
+        dcl_exported = dcl_export.total_connections
+        dcl_skipped = dcl_export.skipped_connections
+        dcl_skipped_count = dcl_export.skipped_count
+        dcl_snapshot = dcl_export.snapshot_name
+        dcl_aod_run = dcl_export.aod_run_id
+    except Exception:
+        dcl_exported = 0
+        dcl_skipped = []
+        dcl_skipped_count = 0
+        dcl_snapshot = None
+        dcl_aod_run = None
+
+    total_candidates_for_export = aam["candidates"]
+    dcl_pending_inference = len([s for s in dcl_skipped if s.reason == "pending_inference"])
+    dcl_duplicates = len([s for s in dcl_skipped if s.reason == "duplicate_pipe_id"])
+    dcl_total_accounted = dcl_exported + dcl_skipped_count
+    dcl_all_ok = dcl_exported > 0 and dcl_pending_inference == 0
+
+    dcl_content = ""
+    # Summary bar
+    if total_candidates_for_export > 0:
+        export_pct = int((dcl_exported / total_candidates_for_export) * 100)
+    else:
+        export_pct = 0
+    export_bar_color = "var(--green-400)" if export_pct >= 80 else ("var(--orange-400)" if export_pct >= 50 else "var(--red-400)")
+
+    dcl_content += f"""
+    <div style="margin-bottom: 16px; padding: 12px; background: {'rgba(34,197,94,0.06)' if dcl_all_ok else 'rgba(251,191,36,0.06)'}; border: 1px solid {'rgba(34,197,94,0.2)' if dcl_all_ok else 'rgba(251,191,36,0.2)'}; border-radius: 8px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;">
+            <div>
+                <span style="color: {'var(--green-400)' if dcl_all_ok else 'var(--orange-400)'}; font-size: 1.1rem; margin-right: 6px;">{'&#10003;' if dcl_all_ok else '&#9888;'}</span>
+                <span style="font-weight: 600; color: {'var(--green-400)' if dcl_all_ok else 'var(--orange-400)'};">
+                    {'All candidates exported' if dcl_all_ok else f'{dcl_exported} of {total_candidates_for_export} candidates exported to DCL'}
+                </span>
+            </div>
+            <div style="display: flex; gap: 16px; font-size: 0.8rem;">
+                <span style="color: var(--green-400);">{dcl_exported} exported</span>
+                {'<span style="color: var(--orange-400);">' + str(dcl_duplicates) + ' deduplicated</span>' if dcl_duplicates > 0 else ''}
+                {'<span style="color: var(--red-400);">' + str(dcl_pending_inference) + ' pending inference</span>' if dcl_pending_inference > 0 else ''}
+            </div>
+        </div>
+        <div style="margin-top: 8px;">
+            <div style="height: 6px; background: var(--slate-800); border-radius: 3px; overflow: hidden;">
+                <div style="height: 100%; width: {export_pct}%; background: {export_bar_color}; border-radius: 3px;"></div>
+            </div>
+            <div style="font-size: 0.75rem; color: var(--slate-400); margin-top: 4px;">Export coverage: {export_pct}% &mdash; {dcl_total_accounted} accounted for</div>
+        </div>
+    </div>
+    """
+
+    # Provenance
+    if dcl_snapshot or dcl_aod_run:
+        dcl_content += f"""
+        <div style="display: flex; gap: 16px; flex-wrap: wrap; font-size: 0.8rem; color: var(--slate-400); margin-bottom: 16px;">
+            {'<div><strong style="color: #cbd5e1;">Snapshot:</strong> <span style="color: #f0abfc;">' + (dcl_snapshot or '-') + '</span></div>' if dcl_snapshot else ''}
+            {'<div><strong style="color: #cbd5e1;">AOD Run:</strong> <span style="font-family: monospace;">' + (dcl_aod_run or '-') + '</span></div>' if dcl_aod_run else ''}
+        </div>
+        """
+
+    # Waterfall: Candidates → Exported + Skipped
+    dcl_content += f"""
+    <div style="margin-bottom: 16px;">
+        <div style="font-size: 0.8rem; font-weight: 500; color: #cbd5e1; margin-bottom: 8px;">Pipeline Waterfall</div>
+        <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+            <thead>
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.1);">
+                    <th style="text-align: left; padding: 8px; color: var(--slate-400); font-weight: 500;">Stage</th>
+                    <th style="text-align: right; padding: 8px; color: var(--slate-400); font-weight: 500;">Count</th>
+                    <th style="text-align: left; padding: 8px; color: var(--slate-400); font-weight: 500;">Description</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                    <td style="padding: 8px; font-weight: 500; color: #e2e8f0;">AOD Candidates Stored</td>
+                    <td style="padding: 8px; text-align: right; font-weight: 600; color: var(--cyan-400);">{total_candidates_for_export}</td>
+                    <td style="padding: 8px; color: var(--slate-400);">Total candidates from AOD handoff</td>
+                </tr>
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.05); background: rgba(34,197,94,0.03);">
+                    <td style="padding: 8px; font-weight: 500; color: #86efac;">Exported to DCL</td>
+                    <td style="padding: 8px; text-align: right; font-weight: 600; color: var(--green-400);">{dcl_exported}</td>
+                    <td style="padding: 8px; color: var(--slate-400);">Unique pipes with matched_pipe_id sent to DCL</td>
+                </tr>
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.05); background: rgba(251,191,36,0.03);">
+                    <td style="padding: 8px; font-weight: 500; color: #fcd34d;">Deduplicated</td>
+                    <td style="padding: 8px; text-align: right; font-weight: 600; color: var(--orange-400);">{dcl_duplicates}</td>
+                    <td style="padding: 8px; color: var(--slate-400);">Multiple candidates mapped to same pipe_id (kept most recent)</td>
+                </tr>
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.05); background: rgba(248,113,113,0.03);">
+                    <td style="padding: 8px; font-weight: 500; color: #fca5a5;">Pending Inference</td>
+                    <td style="padding: 8px; text-align: right; font-weight: 600; color: var(--red-400);">{dcl_pending_inference}</td>
+                    <td style="padding: 8px; color: var(--slate-400);">Candidates without matched_pipe_id (inference not yet run or no match)</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    """
+
+    # Skipped details (show first few if many)
+    if dcl_skipped and dcl_duplicates > 0:
+        dup_items = [s for s in dcl_skipped if s.reason == "duplicate_pipe_id"]
+        dcl_content += f"""
+        <div style="margin-top: 12px;">
+            <div style="font-size: 0.8rem; font-weight: 500; color: var(--orange-400); margin-bottom: 8px;">Deduplicated Candidates ({dcl_duplicates})</div>
+            <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+        """
+        for s in dup_items[:20]:
+            dcl_content += f'<span style="display: inline-block; background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.2); padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; color: #fcd34d;">{s.vendor}</span>'
+        if dcl_duplicates > 20:
+            dcl_content += f'<span style="font-size: 0.75rem; color: var(--slate-500);">+{dcl_duplicates - 20} more</span>'
+        dcl_content += "</div></div>"
     
     dd_content = ""
     if dd_groups:
@@ -3445,7 +3560,7 @@ async def ui_reconcile(aod_run_id: str):
 
         <!-- Deep Checks Section -->
         <h2 style="margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--slate-700);">Deep Reconciliation Checks</h2>
-        <p class="page-subtitle" style="margin-top: -8px;">Detailed data quality analysis across 6 dimensions</p>
+        <p class="page-subtitle" style="margin-top: -8px;">Detailed data quality analysis across 7 dimensions</p>
 
         <!-- Check 1: Vendor Matching -->
         <div class="deep-check">
@@ -3492,6 +3607,14 @@ async def ui_reconcile(aod_run_id: str):
             <div class="panel" data-testid="check-duplicates">
                 {check_header("Duplicate Detection", dd.get("has_issues", False), dd.get("total_groups", 0), "Finds candidates with identical vendor + display name combinations")}
                 {dd_content}
+            </div>
+        </div>
+
+        <!-- Check 7: DCL Export Reconciliation -->
+        <div class="deep-check">
+            <div class="panel" data-testid="check-dcl-export">
+                {check_header("DCL Export Reconciliation", dcl_pending_inference > 0, dcl_pending_inference, "Traces candidates through export pipeline: stored → inferred → exported to DCL")}
+                {dcl_content}
             </div>
         </div>
 
