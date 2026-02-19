@@ -1971,7 +1971,7 @@ async def ui_topology():
 
             try {{
                 // Step 1: Fetch AOD data
-                setStep('1/3 Fetching');
+                setStep('1/4 Fetching');
                 var res = await fetch('/api/handoff/aod/fetch', {{ method: 'POST' }});
                 if (!res.ok) {{
                     var d = await res.json().catch(function() {{ return {{}}; }});
@@ -1980,7 +1980,7 @@ async def ui_topology():
                 var fetchData = await res.json();
 
                 // Step 2: Run inference
-                setStep('2/3 Inferring');
+                setStep('2/4 Inferring');
                 res = await fetch('/api/aam/infer', {{ method: 'POST' }});
                 if (!res.ok) {{
                     var d = await res.json().catch(function() {{ return {{}}; }});
@@ -1988,14 +1988,34 @@ async def ui_topology():
                 }}
                 var inferData = await res.json();
 
-                // Step 3: Export to DCL (push)
-                setStep('3/3 Exporting');
+                // Step 3: Export to DCL (structure)
+                setStep('3/4 Exporting');
                 res = await fetch('/api/export/dcl/push', {{ method: 'POST', headers: {{'Content-Type': 'application/json'}}, body: '{{}}' }});
                 if (!res.ok) {{
                     var d = await res.json().catch(function() {{ return {{}}; }});
                     throw new Error('Export failed: ' + (d.detail || res.status));
                 }}
                 var exportData = await res.json();
+
+                // Step 4: Dispatch to DCL (creates dispatch row)
+                setStep('4/4 Dispatching');
+                var dispatchBody = {{}};
+                if (exportData.export) {{
+                    dispatchBody.aod_run_id = exportData.export.aod_run_id || null;
+                    dispatchBody.snapshot_name = exportData.export.snapshot_name || null;
+                    dispatchBody.pipe_count = exportData.export.total_connections || 0;
+                }}
+                res = await fetch('/api/export/dcl/dispatch', {{
+                    method: 'POST',
+                    headers: {{'Content-Type': 'application/json'}},
+                    body: JSON.stringify(dispatchBody)
+                }});
+                var dispatchOk = false;
+                var dispatchData = {{}};
+                if (res.ok) {{
+                    dispatchData = await res.json();
+                    dispatchOk = dispatchData.dispatch && dispatchData.dispatch.ok;
+                }}
 
                 clearInterval(timer);
                 var elapsed = Math.floor((Date.now() - start) / 1000);
@@ -2004,13 +2024,15 @@ async def ui_topology():
                 var pipeCount = exportData.export ? exportData.export.total_connections : 0;
                 var dclOk = exportData.delivery && exportData.delivery.export_pipes && exportData.delivery.export_pipes.ok;
 
-                var msg = 'Pipeline complete (' + elapsed + 's): ' + pipesCreated + ' pipes inferred, ' + pipeCount + ' exported to DCL';
-                if (dclOk) {{
-                    msg += ' (DCL accepted)';
+                var msg = 'Pipeline complete (' + elapsed + 's): ' + pipesCreated + ' pipes inferred, ' + pipeCount + ' exported';
+                if (dclOk && dispatchOk) {{
+                    msg += ' — DCL accepted + dispatched';
+                }} else if (dclOk) {{
+                    msg += ' — DCL accepted (dispatch skipped)';
                 }} else if (exportData.delivery && exportData.delivery.export_pipes && exportData.delivery.export_pipes.error) {{
                     msg += ' (DCL unreachable)';
                 }}
-                showToast(msg, dclOk ? 'success' : 'warning');
+                showToast(msg, (dclOk && dispatchOk) ? 'success' : 'warning');
                 btn.textContent = 'Done (' + elapsed + 's)';
                 btn.disabled = false;
                 setTimeout(() => location.reload(), 1500);

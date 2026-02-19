@@ -78,26 +78,50 @@ async def _deliver_to_dcl(export_payload: dict) -> dict:
     return report
 
 
-async def _dispatch_to_dcl() -> dict:
+async def _dispatch_to_dcl(aod_run_id: Optional[str] = None,
+                           snapshot_name: Optional[str] = None,
+                           pipe_count: Optional[int] = None) -> dict:
     """POST to DCL's dispatch endpoint to create the dispatch row.
 
     Must be called AFTER _deliver_to_dcl (export-pipes) so DCL has an
     export receipt.  Must be called BEFORE dispatching the Runner so
     the dispatch row is visible in DCL's Ingest tab immediately.
 
+    Sends aod_run_id, snapshot_name, and pipe_count so DCL can create
+    the dispatch row with full context.
+
     The endpoint is idempotent — calling twice for the same dispatch_id
     is harmless.  Returns the dispatch_id from DCL for AAM to log.
     """
     report: dict = {"dispatch": None}
 
+    if not aod_run_id:
+        from ..db.handoff import list_handoff_logs
+        handoffs = list_handoff_logs(limit=1)
+        if handoffs:
+            aod_run_id = handoffs[0].get("aod_run_id")
+            snapshot_name = snapshot_name or handoffs[0].get("snapshot_name")
+
+    dispatch_body = {
+        "aod_run_id": aod_run_id,
+        "snapshot_name": snapshot_name,
+        "source": "aam",
+    }
+    if pipe_count is not None:
+        dispatch_body["pipe_count"] = pipe_count
+
     async with httpx.AsyncClient(timeout=_DCL_TIMEOUT) as client:
         if settings.DCL_DISPATCH_URL:
             try:
+                _log.info("DCL dispatch POST %s body=%s",
+                          settings.DCL_DISPATCH_URL, dispatch_body)
                 resp = await client.post(
                     settings.DCL_DISPATCH_URL,
+                    json=dispatch_body,
                     headers={
                         "x-api-key": settings.DCL_API_KEY,
                         "x-source": "aam",
+                        "Content-Type": "application/json",
                     },
                 )
                 report["dispatch"] = {
@@ -106,8 +130,9 @@ async def _dispatch_to_dcl() -> dict:
                     "ok": resp.is_success,
                     "body": resp.json() if resp.is_success else resp.text[:500],
                 }
-                _log.info("DCL dispatch POST %s → %d",
-                          settings.DCL_DISPATCH_URL, resp.status_code)
+                _log.info("DCL dispatch POST %s → %d  body=%s",
+                          settings.DCL_DISPATCH_URL, resp.status_code,
+                          resp.text[:300])
             except Exception as exc:
                 report["dispatch"] = {
                     "url": settings.DCL_DISPATCH_URL,
@@ -154,9 +179,6 @@ async def push_to_dcl(request: Request):
     export_payload = export_data.model_dump()
 
     delivery_report = await _deliver_to_dcl(export_payload)
-
-    dispatch_report = await _dispatch_to_dcl()
-    delivery_report.update(dispatch_report)
 
     push_record = record_dcl_push(
         pipe_count=export_data.total_connections,
@@ -205,16 +227,27 @@ async def download_push_payload(push_id: str):
 
 
 @router.post("/api/export/dcl/dispatch")
-async def dispatch_dcl():
+async def dispatch_dcl(request: Request):
     """Notify DCL to create the dispatch row from the latest export receipt.
 
     Call this AFTER /api/export/dcl/push and BEFORE launching the Runner.
-    The push endpoint already calls this automatically, but this standalone
-    endpoint lets operators trigger dispatch separately if needed.
+
+    Optional body: {"aod_run_id": "...", "snapshot_name": "...", "pipe_count": N}
+    If omitted, resolves from the latest handoff log.
 
     Idempotent — calling twice for the same dispatch is harmless.
     """
-    report = await _dispatch_to_dcl()
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+
+    report = await _dispatch_to_dcl(
+        aod_run_id=body.get("aod_run_id"),
+        snapshot_name=body.get("snapshot_name"),
+        pipe_count=body.get("pipe_count"),
+    )
     dispatch = report.get("dispatch", {})
     if dispatch.get("error"):
         raise HTTPException(status_code=502, detail=f"DCL dispatch failed: {dispatch['error']}")
