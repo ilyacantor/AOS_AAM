@@ -12,6 +12,9 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 
 from .base import FabricAdapter, AdapterStatus, PlaneHealth, PlaneDrift
+from ..parsers.warehouse_schema import parse_information_schema
+from ..parsers.dbt_manifest import parse_dbt_manifest
+from ..db.semantic_edges import store_semantic_edges_batch, delete_semantic_edges_by_source
 
 _log = logging.getLogger("aam.adapter.warehouse")
 
@@ -103,6 +106,70 @@ class WarehouseAdapter(FabricAdapter):
         - query_timeout: Increase timeout, retry with smaller batch
         """
         return False
+
+    def extract_semantic_edges(
+        self,
+        columns: List[Dict[str, Any]],
+        dbt_manifest: Optional[Dict[str, Any]] = None,
+        database_name: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Extract field-level semantic edges from warehouse metadata.
+
+        Two layers:
+        A. information_schema columns → INFERRED edges (0.70 confidence)
+        B. dbt manifest.json → DIRECT_MAP edges (0.95 confidence)
+
+        dbt edges supersede information_schema edges for the same field
+        (higher confidence wins at query time in DCL).
+
+        Args:
+            columns: Rows from information_schema.columns
+            dbt_manifest: Optional parsed dbt manifest.json
+            database_name: Optional database name for provenance
+
+        Returns:
+            All extracted SemanticEdge dicts (already persisted)
+        """
+        all_edges: List[Dict[str, Any]] = []
+
+        # Layer A: information_schema
+        if columns:
+            extraction_source = f"warehouse_{self._vendor}"
+            if database_name:
+                extraction_source += f"_{database_name}"
+            delete_semantic_edges_by_source(extraction_source)
+
+            schema_edges = parse_information_schema(
+                columns,
+                warehouse_vendor=self._vendor,
+                database_name=database_name,
+            )
+            if schema_edges:
+                stored = store_semantic_edges_batch(schema_edges)
+                all_edges.extend(stored)
+                _log.info("Stored %d information_schema edges for %s", len(stored), self._vendor)
+
+        # Layer B: dbt manifest
+        if dbt_manifest:
+            dbt_edges = parse_dbt_manifest(
+                dbt_manifest,
+                warehouse_vendor=self._vendor,
+            )
+            if dbt_edges:
+                # Collect unique extraction sources and clear previous runs
+                dbt_sources = {e["extraction_source"] for e in dbt_edges}
+                for src in dbt_sources:
+                    delete_semantic_edges_by_source(src)
+                stored = store_semantic_edges_batch(dbt_edges)
+                all_edges.extend(stored)
+                _log.info("Stored %d dbt lineage edges for %s", len(stored), self._vendor)
+
+        _log.info(
+            "Warehouse semantic edge extraction complete: %d total edges (vendor=%s)",
+            len(all_edges), self._vendor,
+        )
+        return all_edges
 
     def apply_governance_policy(self, policy: Dict[str, Any]) -> bool:
         """
