@@ -12,6 +12,8 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 
 from .base import FabricAdapter, AdapterStatus, PlaneHealth, PlaneDrift
+from ..parsers.eventbus_schema import parse_schema_registry_subjects
+from ..db.semantic_edges import store_semantic_edges_batch, delete_semantic_edges_by_source
 
 _log = logging.getLogger("aam.adapter.eventbus")
 
@@ -92,6 +94,49 @@ class EventBusAdapter(FabricAdapter):
         - partition_rebalance: Wait and rejoin consumer group
         """
         return False
+
+    def extract_semantic_edges(
+        self, subjects: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        Extract field-level semantic edges from schema registry subjects.
+
+        For each subject:
+        1. Parse the schema (Avro/JSON/Protobuf) to extract field definitions
+        2. Delete any previously-stored edges for this subject (idempotent)
+        3. Batch-insert new edges
+
+        Args:
+            subjects: List of schema registry subject dicts
+
+        Returns:
+            All extracted SemanticEdge dicts (already persisted)
+        """
+        all_edges: List[Dict[str, Any]] = []
+
+        edges = parse_schema_registry_subjects(
+            subjects, bus_vendor=self._vendor,
+        )
+
+        if not edges:
+            _log.info("No schema registry edges extracted for %s", self._vendor)
+            return all_edges
+
+        # Group by extraction_source for idempotent upsert
+        sources_seen: set[str] = set()
+        for e in edges:
+            src = e["extraction_source"]
+            if src not in sources_seen:
+                delete_semantic_edges_by_source(src)
+                sources_seen.add(src)
+
+        stored = store_semantic_edges_batch(edges)
+        all_edges.extend(stored)
+        _log.info(
+            "Stored %d schema registry edges for %s (%d subjects)",
+            len(stored), self._vendor, len(subjects),
+        )
+        return all_edges
 
     def apply_governance_policy(self, policy: Dict[str, Any]) -> bool:
         """
