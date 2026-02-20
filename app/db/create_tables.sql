@@ -222,6 +222,24 @@ CREATE TABLE IF NOT EXISTS runner_jobs (
     dcl_response TEXT
 );
 
+CREATE TABLE IF NOT EXISTS semantic_edges (
+    id TEXT PRIMARY KEY,
+    source_system TEXT NOT NULL,
+    source_object TEXT NOT NULL,
+    source_field TEXT NOT NULL,
+    target_system TEXT NOT NULL,
+    target_object TEXT NOT NULL,
+    target_field TEXT NOT NULL,
+    edge_type TEXT NOT NULL,
+    confidence REAL NOT NULL,
+    fabric_plane TEXT NOT NULL,
+    extraction_source TEXT NOT NULL,
+    transformation TEXT,
+    condition TEXT,
+    discovered_at TEXT NOT NULL,
+    last_verified TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS dcl_ingested (
     ingest_id TEXT PRIMARY KEY,
     run_id TEXT NOT NULL,

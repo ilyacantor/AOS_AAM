@@ -14,6 +14,7 @@ from ..db import (
     get_canonical_stats,
 )
 from ..db.sor_declarations import get_sor_declarations
+from ..db.semantic_edges import list_semantic_edges, count_semantic_edges
 from ..services.topology_service import build_topology_summary
 
 router = APIRouter(prefix="/api/topology", tags=["Topology"])
@@ -69,6 +70,59 @@ async def get_topology_summary():
     Optimized for large datasets (600+ assets).
     """
     return build_topology_summary()
+
+
+@router.get("/semantic-edges")
+async def get_semantic_edges(
+    source_system: Optional[str] = Query(None),
+    target_system: Optional[str] = Query(None),
+    fabric_plane: Optional[str] = Query(None),
+    confidence_min: Optional[float] = Query(None, ge=0.0, le=1.0),
+    extraction_source: Optional[str] = Query(None),
+):
+    """
+    Get field-level semantic edges between systems.
+
+    These are explicit cross-system field mappings extracted from
+    integration infrastructure (iPaaS recipes, warehouse lineage,
+    event schemas).  DCL consumes these as high-confidence inputs
+    that override LLM inference.
+    """
+    edges = list_semantic_edges(
+        source_system=source_system,
+        target_system=target_system,
+        fabric_plane=fabric_plane,
+        confidence_min=confidence_min,
+        extraction_source=extraction_source,
+    )
+    return {
+        "edges": edges,
+        "total": len(edges),
+        "generated_at": datetime.utcnow().isoformat(),
+    }
+
+
+@router.get("/semantic-edges/stats")
+async def get_semantic_edge_stats():
+    """Summary statistics for semantic edges."""
+    edges = list_semantic_edges()
+    by_plane: dict[str, int] = {}
+    by_type: dict[str, int] = {}
+    by_source_system: dict[str, int] = {}
+    for e in edges:
+        plane = e.get("fabric_plane", "unknown")
+        by_plane[plane] = by_plane.get(plane, 0) + 1
+        etype = e.get("edge_type", "unknown")
+        by_type[etype] = by_type.get(etype, 0) + 1
+        src = e.get("source_system", "unknown")
+        by_source_system[src] = by_source_system.get(src, 0) + 1
+    return {
+        "total": len(edges),
+        "by_fabric_plane": by_plane,
+        "by_edge_type": by_type,
+        "by_source_system": by_source_system,
+        "generated_at": datetime.utcnow().isoformat(),
+    }
 
 
 @router.get("/pipe/{pipe_id}")

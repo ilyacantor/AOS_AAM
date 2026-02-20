@@ -423,6 +423,45 @@ class ExportResponse(BaseModel):
 # TOPOLOGY / GRAPH MODELS
 # ============================================================================
 
+class SemanticEdgeType(str, Enum):
+    """Type of field-level mapping between systems"""
+    DIRECT_MAP = "DIRECT_MAP"
+    TRANSFORMED = "TRANSFORMED"
+    CONDITIONAL = "CONDITIONAL"
+    INFERRED = "INFERRED"
+
+
+class SemanticEdge(BaseModel):
+    """
+    Field-level semantic edge between two systems.
+
+    Represents an explicit data mapping discovered from integration
+    infrastructure (iPaaS recipes, warehouse lineage, event schemas).
+    DCL consumes these as high-confidence inputs for cross-system
+    semantic mapping — they override LLM inference.
+    """
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    source_system: str = Field(..., description="Source system (e.g., salesforce)")
+    source_object: str = Field(..., description="Source object (e.g., Opportunity)")
+    source_field: str = Field(..., description="Source field (e.g., Amount)")
+    target_system: str = Field(..., description="Target system (e.g., netsuite)")
+    target_object: str = Field(..., description="Target object (e.g., SalesOrder)")
+    target_field: str = Field(..., description="Target field (e.g., total)")
+    edge_type: SemanticEdgeType = Field(..., description="DIRECT_MAP | TRANSFORMED | CONDITIONAL | INFERRED")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="0.95 direct, 0.85 transformed, 0.70 inferred")
+    fabric_plane: str = Field(..., description="iPaaS | event_bus | warehouse | api_gateway")
+    extraction_source: str = Field(..., description="e.g., workato_recipe_4782 or dbt_model_fct_orders")
+    transformation: Optional[str] = Field(None, description="Formula if transformed, null if direct")
+    condition: Optional[str] = Field(None, description="Condition expression if conditional mapping")
+    discovered_at: datetime = Field(default_factory=datetime.utcnow)
+    last_verified: datetime = Field(default_factory=datetime.utcnow)
+
+
+class SemanticEdgeResponse(SemanticEdge):
+    """Response model — identical for now, but allows future DB-only fields."""
+    pass
+
+
 class NodeType(str, Enum):
     """Types of nodes in the topology graph"""
     FABRIC_PLANE = "fabric_plane"
