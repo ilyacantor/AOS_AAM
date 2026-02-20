@@ -12,6 +12,8 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 
 from .base import FabricAdapter, AdapterStatus, PlaneHealth, PlaneDrift
+from ..parsers.ipaas_recipe import parse_workato_recipe, parse_tray_workflow
+from ..db.semantic_edges import store_semantic_edges_batch, delete_semantic_edges_by_source
 
 _log = logging.getLogger("aam.adapter.ipaas")
 
@@ -88,6 +90,61 @@ class IPaaSAdapter(FabricAdapter):
         - flow_stalled: Trigger flow restart via API
         """
         return False
+
+    def extract_semantic_edges(self, recipes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Extract field-level semantic edges from iPaaS recipes/workflows.
+
+        For each recipe:
+        1. Parse the recipe JSON using the vendor-appropriate parser
+        2. Delete any previously-stored edges from this extraction source
+           (idempotent re-scan)
+        3. Batch-insert the new edges into semantic_edges table
+
+        Args:
+            recipes: List of recipe/workflow JSON objects from the iPaaS API
+
+        Returns:
+            All extracted SemanticEdge dicts (already persisted)
+        """
+        all_edges: List[Dict[str, Any]] = []
+
+        for recipe in recipes:
+            recipe_id = recipe.get("id", "unknown")
+
+            if self._vendor in ("workato", "mulesoft", "boomi"):
+                edges = parse_workato_recipe(recipe)
+            elif self._vendor == "tray.io":
+                edges = parse_tray_workflow(recipe)
+            elif self._vendor == "zapier":
+                _log.warning(
+                    "Zapier recipe %s — field-level extraction not available "
+                    "(API limitation in free/pro tiers)",
+                    recipe_id,
+                )
+                continue
+            else:
+                _log.warning("Unsupported iPaaS vendor %s for recipe %s", self._vendor, recipe_id)
+                continue
+
+            if not edges:
+                continue
+
+            # Idempotent: clear previous edges from this recipe before re-insert
+            extraction_source = edges[0]["extraction_source"]
+            delete_semantic_edges_by_source(extraction_source)
+            stored = store_semantic_edges_batch(edges)
+            all_edges.extend(stored)
+            _log.info(
+                "Stored %d semantic edges from %s recipe %s",
+                len(stored), self._vendor, recipe_id,
+            )
+
+        _log.info(
+            "iPaaS semantic edge extraction complete: %d edges from %d recipes",
+            len(all_edges), len(recipes),
+        )
+        return all_edges
 
     def apply_governance_policy(self, policy: Dict[str, Any]) -> bool:
         """
