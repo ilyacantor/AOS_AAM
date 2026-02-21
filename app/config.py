@@ -10,7 +10,6 @@ class Settings:
     """Application settings from environment variables."""
 
     def __init__(self):
-        self.DATABASE_URL: str = os.environ.get("AAM_DATABASE_URL", "aam.db")
         self.AOD_PAYLOAD_FILE: str = os.environ.get("AAM_AOD_PAYLOAD_FILE", "aod_last_payload.json")
         self.LOG_LEVEL: str = os.environ.get("AAM_LOG_LEVEL", "INFO")
         self.DRIFT_LATENCY_THRESHOLD_MS: float = float(
@@ -46,12 +45,15 @@ class Settings:
         # Farm intake URL — where AAM dispatches JobManifests (Path 2).
         # Farm executes extraction and pushes data to DCL (Path 3).
         _farm_base = os.environ.get("FARM_INTAKE_URL", "").rstrip("/")
-        if _farm_base and not _farm_base.endswith("/api/farm/manifest-intake"):
+        if not _farm_base:
+            raise RuntimeError(
+                "FATAL: FARM_INTAKE_URL must be set. "
+                "AAM cannot dispatch to Farm without a configured intake URL."
+            )
+        if not _farm_base.endswith("/api/farm/manifest-intake"):
             self.FARM_INTAKE_URL: str = _farm_base + "/api/farm/manifest-intake"
-        elif _farm_base:
-            self.FARM_INTAKE_URL: str = _farm_base
         else:
-            self.FARM_INTAKE_URL: str = "http://127.0.0.1:5001/api/farm/manifest-intake"
+            self.FARM_INTAKE_URL: str = _farm_base
 
 
 settings = Settings()

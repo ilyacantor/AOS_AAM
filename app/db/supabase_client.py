@@ -20,8 +20,15 @@ from ..logger import get_logger
 _log = get_logger("db.supabase")
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
-_PROJECT_REF = SUPABASE_URL.replace("https://", "").split(".")[0] if SUPABASE_URL else ""
 _DB_PASSWORD = os.environ.get("SUPABASE_DB_PASSWORD", "").strip()
+
+if not SUPABASE_URL or not _DB_PASSWORD:
+    raise RuntimeError(
+        "FATAL: SUPABASE_URL and SUPABASE_DB_PASSWORD must be set. "
+        "AAM requires PostgreSQL — there is no SQLite fallback."
+    )
+
+_PROJECT_REF = SUPABASE_URL.replace("https://", "").split(".")[0]
 
 _DSN = (
     f"host=aws-0-us-west-2.pooler.supabase.com "

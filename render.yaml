@@ -10,8 +10,6 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: "3.11"
-      - key: AAM_DATABASE_URL
-        value: "aam.db"
       - key: AAM_LOG_LEVEL
         value: "INFO"
       - key: AAM_AOD_PAYLOAD_FILE
