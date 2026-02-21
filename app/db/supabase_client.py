@@ -30,8 +30,14 @@ if not SUPABASE_URL or not _DB_PASSWORD:
 
 _PROJECT_REF = SUPABASE_URL.replace("https://", "").split(".")[0]
 
+# SUPABASE_DB_HOST lets ops override the pooler hostname without touching code.
+# Supabase pooler hosts are region-specific (e.g. aws-1-us-east-2.pooler.supabase.com)
+# and cannot be derived from SUPABASE_URL alone. Set this env var in Render / local .env
+# to match the actual pooler region for the project.
+_POOLER_HOST = os.environ.get("SUPABASE_DB_HOST", "aws-0-us-west-2.pooler.supabase.com")
+
 _DSN = (
-    f"host=aws-0-us-west-2.pooler.supabase.com "
+    f"host={_POOLER_HOST} "
     f"port=5432 "
     f"dbname=postgres "
     f"user=postgres.{_PROJECT_REF} "
