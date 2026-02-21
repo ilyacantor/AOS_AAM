@@ -1,0 +1,38 @@
+services:
+  - type: web
+    name: aos-aam
+    runtime: python
+    plan: free
+    region: oregon
+    branch: dev
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: AAM_DATABASE_URL
+        value: "aam.db"
+      - key: AAM_LOG_LEVEL
+        value: "INFO"
+      - key: AAM_AOD_PAYLOAD_FILE
+        value: "aod_last_payload.json"
+      - key: AAM_DRIFT_LATENCY_THRESHOLD_MS
+        value: "1000"
+      - key: AAM_DRIFT_CONSUMER_LAG_THRESHOLD
+        value: "10000"
+      - key: AAM_DRIFT_CONNECTION_TIMEOUT_S
+        value: "30"
+      - key: AAM_RUNNER_JOB_TIMEOUT_S
+        value: "300"
+      - key: DCL_URL
+        sync: false
+      - key: AAM_BASE_URL
+        sync: false
+      - key: AAM_DCL_API_KEY
+        sync: false
+      - key: FARM_INTAKE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_DB_PASSWORD
+        sync: false
