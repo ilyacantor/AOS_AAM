@@ -38,11 +38,11 @@ class Settings:
         self.BASE_URL: str = os.environ.get(
             "AAM_BASE_URL", "http://127.0.0.1:5000"
         )
-        # API key the Runner sends in x-api-key header to DCL
-        # In production: resolved from vault. In v1: env var.
-        self.DCL_API_KEY: str = os.environ.get(
-            "AAM_DCL_API_KEY", "aam-runner-v1-key"
-        )
+        # API key the Runner sends in x-api-key header to DCL.
+        # Must be set via AAM_DCL_API_KEY env var. Empty string means
+        # requests to DCL will fail authentication, which is the correct
+        # behavior when no key is configured.
+        self.DCL_API_KEY: str = os.environ.get("AAM_DCL_API_KEY", "")
         # Farm intake URL — where AAM dispatches JobManifests (Path 2).
         # Farm executes extraction and pushes data to DCL (Path 3).
         _farm_base = os.environ.get("FARM_INTAKE_URL", "").rstrip("/")
