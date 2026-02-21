@@ -25,7 +25,7 @@ services:
       - key: AAM_RUNNER_JOB_TIMEOUT_S
         value: "300"
       - key: DCL_URL
-        sync: false
+        value: "https://aos-dclv2.onrender.com"
       - key: AAM_BASE_URL
         sync: false
       - key: AAM_DCL_API_KEY
