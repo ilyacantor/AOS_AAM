@@ -47,8 +47,12 @@ async def dispatch_single(req: RunnerDispatchRequest):
         manifest = result.pop("_manifest")
         farm_result = await dispatch_to_farm(manifest)
         result["status"] = farm_result.get("status", "dispatched")
+        if farm_result.get("error_class"):
+            result["error_class"] = farm_result["error_class"]
         if farm_result.get("error"):
             result["farm_error"] = farm_result["error"]
+            # dispatch_to_farm already wrote "failed" to the DB for non-2xx responses.
+            # farm_unreachable is the only case where the job stays queued for retry.
         if farm_result.get("farm_response"):
             result["farm_response"] = farm_result["farm_response"]
         return result

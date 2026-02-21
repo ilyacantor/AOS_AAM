@@ -130,14 +130,20 @@ async def _dispatch_job_to_farm(job_id: str, active_jobs: set):
         if result.get("status") == "dispatched":
             _log.info("Worker: job %s dispatched to Farm successfully", job_id)
         elif result.get("status") == "farm_unreachable":
-            # Return to queued for later retry
-            _log.warning("Worker: Farm unreachable for job %s, returning to queued", job_id)
-            await asyncio.to_thread(update_runner_status, job_id, "queued")
+            # Return to queued for later retry, but record what was tried so
+            # the Dispatch Status modal shows actionable context rather than silence.
+            unreachable_msg = result.get("error", "Farm unreachable — no detail captured")
+            _log.warning("Worker: Farm unreachable for job %s, returning to queued. %s", job_id, unreachable_msg)
+            await asyncio.to_thread(
+                update_runner_status, job_id, "queued",
+                error_message=f"[REQUEUED] {unreachable_msg}",
+            )
         else:
-            _log.warning("Worker: Farm rejected job %s: %s", job_id, result.get("error"))
+            err = result.get("error", "Farm dispatch failed")
+            _log.warning("Worker: Farm rejected job %s [%s]: %s", job_id, result.get("error_class", "?"), err)
             await asyncio.to_thread(
                 update_runner_status, job_id, "failed",
-                error_message=result.get("error", "Farm dispatch failed"),
+                error_message=err,
             )
 
     except Exception as exc:

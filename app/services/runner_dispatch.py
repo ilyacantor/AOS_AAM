@@ -376,6 +376,43 @@ def dispatch_batch(
     return results + errors
 
 
+def _classify_farm_error(status_code: int, body: str, content_type: str) -> tuple[str, str]:
+    """Return (error_class, human_readable_detail) from a non-2xx Farm response.
+
+    Distinguishes:
+      SLEEPING_APP   — Replit / platform "app not running" HTML page
+      GATEWAY_ERROR  — reverse-proxy 502/503 (Render, nginx) returned HTML
+      AUTH_FAILURE   — 401/403
+      FARM_APP_ERROR — Farm returned a structured JSON error
+      UNKNOWN_ERROR  — anything else
+    """
+    is_html = "text/html" in content_type or body.lstrip().startswith("<!DOCTYPE") or body.lstrip().startswith("<html")
+
+    if is_html:
+        # Extract <title> for a one-line summary
+        import re
+        title_match = re.search(r"<title[^>]*>([^<]{1,120})</title>", body, re.IGNORECASE)
+        title = title_match.group(1).strip() if title_match else "(no title)"
+        # Replit sleeping-app page has a distinctive title/phrase
+        if "not running" in body.lower() or "deploy this app" in body.lower():
+            return "SLEEPING_APP", f"Platform reported app is not running (title: {title!r}). Check FARM_INTAKE_URL — likely points to a dormant Replit instance."
+        return "GATEWAY_ERROR", f"Reverse-proxy or gateway returned HTML {status_code} (title: {title!r}). Farm process may have crashed or OOM-restarted."
+
+    if status_code in (401, 403):
+        return "AUTH_FAILURE", f"HTTP {status_code} — Farm rejected the request as unauthorized. Check shared secret / API key configuration."
+
+    # Try to extract a JSON error message
+    try:
+        import json as _json
+        err_body = _json.loads(body)
+        detail = err_body.get("detail") or err_body.get("error") or err_body.get("message") or str(err_body)
+        return "FARM_APP_ERROR", f"Farm returned HTTP {status_code}: {str(detail)[:300]}"
+    except Exception:
+        pass
+
+    return "UNKNOWN_ERROR", f"HTTP {status_code}: {body[:300]}"
+
+
 async def dispatch_to_farm(manifest: JobManifest) -> dict:
     """POST a JobManifest to Farm's intake endpoint (Path 2).
 
@@ -385,6 +422,7 @@ async def dispatch_to_farm(manifest: JobManifest) -> dict:
     """
     farm_url = settings.FARM_INTAKE_URL
     payload = manifest.model_dump()
+    attempt_at = datetime.utcnow().isoformat() + "Z"
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -393,21 +431,35 @@ async def dispatch_to_farm(manifest: JobManifest) -> dict:
         if resp.status_code in (200, 201, 202):
             body = resp.json()
             _log.info(
-                "Manifest dispatched to Farm: run_id=%s pipe_id=%s status=%d",
-                manifest.run_id, manifest.source.pipe_id, resp.status_code,
+                "Manifest dispatched to Farm: run_id=%s pipe_id=%s status=%d url=%s",
+                manifest.run_id, manifest.source.pipe_id, resp.status_code, farm_url,
             )
             update_runner_status(manifest.run_id, "dispatched")
             return {"status": "dispatched", "farm_response": body}
 
-        _log.warning(
-            "Farm rejected manifest: run_id=%s status=%d body=%s",
-            manifest.run_id, resp.status_code, resp.text[:500],
+        content_type = resp.headers.get("content-type", "")
+        error_class, detail = _classify_farm_error(resp.status_code, resp.text, content_type)
+        error_msg = (
+            f"[{error_class}] Farm at {farm_url!r} returned HTTP {resp.status_code} "
+            f"at {attempt_at}. {detail}"
         )
+        _log.warning(
+            "Farm dispatch failed: run_id=%s pipe_id=%s url=%s status=%d "
+            "error_class=%s content_type=%r detail=%s",
+            manifest.run_id, manifest.source.pipe_id, farm_url, resp.status_code,
+            error_class, content_type, detail,
+        )
+        update_runner_status(manifest.run_id, "failed", error_message=error_msg)
         return {
             "status": "farm_error",
-            "error": f"Farm returned {resp.status_code}: {resp.text[:500]}",
+            "error_class": error_class,
+            "error": error_msg,
         }
 
     except httpx.ConnectError as exc:
-        _log.warning("Farm unreachable at %s: %s", farm_url, exc)
-        return {"status": "farm_unreachable", "error": f"Farm unreachable: {exc}"}
+        error_msg = (
+            f"[CONNECT_ERROR] Farm at {farm_url!r} was unreachable at {attempt_at}: {exc}. "
+            f"Verify FARM_INTAKE_URL points to the live Render service, not a dormant instance."
+        )
+        _log.warning("Farm unreachable: run_id=%s url=%s error=%s", manifest.run_id, farm_url, exc)
+        return {"status": "farm_unreachable", "error": error_msg}
