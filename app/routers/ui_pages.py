@@ -2662,6 +2662,7 @@ async def ui_topology():
 
         function openDispatchPanel() {{
             document.getElementById('dispatch-overlay').classList.add('visible');
+            document.body.style.overflow = 'hidden';
             loadDispatchData();
             loadDclDispatchStatus();
         }}
@@ -2701,6 +2702,7 @@ async def ui_topology():
 
         function closeDispatchPanel() {{
             document.getElementById('dispatch-overlay').classList.remove('visible');
+            document.body.style.overflow = '';
             stopDispatchPolling();
         }}
 
@@ -2745,6 +2747,10 @@ async def ui_topology():
             document.getElementById('btn-stop-all').style.display = hasActive ? 'block' : 'none';
         }}
 
+        function _escHtml(s) {{
+            return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }}
+
         function renderDispatchJobs(jobs) {{
             const body = document.getElementById('dp-body');
             let filtered = jobs;
@@ -2763,7 +2769,8 @@ async def ui_topology():
             body.innerHTML = filtered.map(j => {{
                 const s = j.status || 'queued';
                 const rows = j.rows_transferred || 0;
-                const err = j.error_message ? '<div class="dp-error" title="' + (j.error_message||'').replace(/"/g,'&quot;') + '">' + (j.error_message||'').substring(0,80) + '</div>' : '';
+                const rawErr = (j.error_message||'').replace(/<!DOCTYPE[\s\S]*$/i, '').trim() || (j.error_message||'').substring(0,80);
+                const err = j.error_message ? '<div class="dp-error" title="' + _escHtml(j.error_message).substring(0,200) + '">' + _escHtml(rawErr).substring(0,80) + '</div>' : '';
                 const jobId = j.job_id || '';
                 const pipeId = j.pipe_id || '';
                 const src = j.source_system || jobId.replace(/^run_\d+_/, '').replace(/_\d+$/, '') || pipeId;
