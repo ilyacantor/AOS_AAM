@@ -1047,7 +1047,7 @@ AutonomOS does NOT connect to every application. Instead:
 |---------|------|
 | Frontend dev | 5000 |
 | Backend API | 8000 |
-| Farm API | https://autonomos.farm/ |
+| Farm API | https://farmv2.onrender.com/ |
 
 ### 10.2 Common Environment Variables
 
@@ -1068,7 +1068,7 @@ SALESFORCE_USERNAME=
 SALESFORCE_PASSWORD=
 SALESFORCE_SECURITY_TOKEN=
 SLACK_WEBHOOK_URL=
-FARM_API_URL=https://autonomos.farm
+FARM_API_URL=https://farmv2.onrender.com
 
 # Redis (Platform)
 UPSTASH_REDIS_URL=
