@@ -31,6 +31,9 @@ def validate_tee_transition(tee_id: str, new_status: str, verification_method=No
                 f"Cannot approve: TEE request is in '{current_status}' status. "
                 "Only 'requested' status can be approved."
             )
+        pipe = get_pipe(tee_req["pipe_id"])
+        if not pipe:
+            raise ValueError("Cannot approve: Associated pipe no longer exists")
 
     elif new_status == "verified":
         if current_status != "approved":

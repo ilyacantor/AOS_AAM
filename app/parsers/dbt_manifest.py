@@ -86,6 +86,11 @@ def parse_dbt_manifest(
         for source_id in source_deps:
             source_info = source_lookup.get(source_id)
             if not source_info:
+                _log.warning(
+                    "dbt model '%s' depends on source '%s' which is not in the manifest — "
+                    "lineage edges for this dependency will be missing.",
+                    model_name, source_id,
+                )
                 continue
 
             source_system = source_info["source_name"].lower()

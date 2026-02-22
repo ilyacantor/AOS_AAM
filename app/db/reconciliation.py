@@ -10,6 +10,9 @@ from typing import Optional
 
 from . import supabase_client as sb
 from ..constants import SOR_CATEGORIES
+from ..logger import get_logger
+
+_log = get_logger("db.reconciliation")
 
 
 def _get_handoff_summary(aod_run_id: str) -> Optional[dict]:
@@ -132,8 +135,12 @@ def _compare_fabric_planes(aod_run_id: str) -> dict:
         if raw_val:
             try:
                 aod_fabric_planes_raw = json.loads(raw_val) if isinstance(raw_val, str) else raw_val
-            except (json.JSONDecodeError, TypeError):
-                pass
+            except (json.JSONDecodeError, TypeError) as exc:
+                _log.error(
+                    "Corrupt aod_fabric_planes JSON for run %s — fabric plane "
+                    "reconciliation will report all planes as AAM-only: %s",
+                    aod_run_id, exc,
+                )
 
     aod_vendor_map = {}
     for p in aod_fabric_planes_raw:
@@ -296,8 +303,12 @@ def _compare_sor_line_items(aod_run_id: str) -> dict:
         if raw_val:
             try:
                 aod_sor_vendors_raw = json.loads(raw_val) if isinstance(raw_val, str) else raw_val
-            except (json.JSONDecodeError, TypeError):
-                pass
+            except (json.JSONDecodeError, TypeError) as exc:
+                _log.error(
+                    "Corrupt aod_sor_vendors JSON for run %s — SOR reconciliation "
+                    "will report all vendors as AAM-only: %s",
+                    aod_run_id, exc,
+                )
 
     aod_sor_all = {}
     for s in aod_sor_vendors_raw:

@@ -53,6 +53,13 @@ async def run_adapter_collector(
     for plane_type, adapter in adapter_registry.items():
         health = await adapter.check_health()
         if health.status != AdapterStatus.CONNECTED:
+            _log.warning(
+                "Adapter %s (%s) skipped — status=%s, not CONNECTED. "
+                "No observations will be collected from this plane.",
+                plane_type,
+                getattr(adapter, "plane_vendor", "?"),
+                health.status,
+            )
             continue
 
         observations = await adapter.discover_pipes()
