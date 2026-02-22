@@ -100,6 +100,14 @@ def build_topology_summary() -> dict:
             if c.get("matched_pipe_id"):
                 counts["connected"] += 1
 
+    unmapped_count = vendor_plane_counts.get("UNMAPPED", {}).get("total", 0)
+    if unmapped_count:
+        _log.warning(
+            "%d candidate(s) could not be linked to any fabric plane (UNMAPPED). "
+            "Run AOD handoff with fabric plane data to resolve these.",
+            unmapped_count,
+        )
+
     # Load authoritative SOR declarations from Farm (if any)
     auth_sors = get_sor_declarations()
     auth_sor_vendors: dict[str, dict] = {}

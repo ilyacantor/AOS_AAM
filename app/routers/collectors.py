@@ -62,7 +62,7 @@ async def infer_pipes():
     if observations:
         redacted_observations = []
         for obs in observations:
-            redacted_observations.append(redact_pii_from_observation(obs, policy="optional"))
+            redacted_observations.append(redact_pii_from_observation(obs))
 
         inferred_pipes = infer_pipes_from_observations(redacted_observations)
         for pipe in inferred_pipes:

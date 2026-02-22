@@ -78,7 +78,7 @@ async def run_adapter_collector(
                     "vendor": adapter.plane_vendor,
                 },
             }
-            obs_data = redact_pii_from_observation(obs_data, policy="optional")
+            obs_data = redact_pii_from_observation(obs_data)
             create_observation(obs_data)
             all_observations.append(obs_data)
 

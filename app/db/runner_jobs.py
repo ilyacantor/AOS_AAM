@@ -31,6 +31,18 @@ def create_runner_jobs_batch(manifests: list[dict]) -> list[str]:
     """Bulk-insert runner jobs from a list of manifest dicts. Returns list of job_ids."""
     if not manifests:
         return []
+    job_ids = [m["run_id"] for m in manifests]
+    from psycopg2 import sql as psql
+    conflict_rows = sb._execute_composed(
+        psql.SQL("SELECT job_id FROM {} WHERE job_id = ANY(%s)").format(sb._ident("runner_jobs")),
+        (job_ids,),
+    )
+    if conflict_rows:
+        existing = {r["job_id"] for r in conflict_rows}
+        raise ValueError(
+            f"Runner jobs already exist for run_id(s): {sorted(existing)}. "
+            "Use distinct run_ids — AAM does not overwrite existing jobs."
+        )
     now = datetime.utcnow().isoformat()
     rows = []
     for m in manifests:
@@ -43,7 +55,7 @@ def create_runner_jobs_batch(manifests: list[dict]) -> list[str]:
             "rows_transferred": 0,
         })
     sb.insert_many("runner_jobs", rows)
-    return [m["run_id"] for m in manifests]
+    return job_ids
 
 
 def update_runner_status(

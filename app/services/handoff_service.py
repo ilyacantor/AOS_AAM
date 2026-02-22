@@ -76,6 +76,8 @@ def normalize_candidates(raw_candidates: list[dict]) -> list[dict]:
                              cvp, c.get("asset_key", "?"))
                 c["connected_via_plane"] = None
         elif cvp is not None:
+            _log.warning("Non-string connected_via_plane %r (type=%s) for %s, stripping to null",
+                         cvp, type(cvp).__name__, c.get("asset_key", "?"))
             c["connected_via_plane"] = None
         # Also handle preferred_modality if it's lowercase
         pm = c.get("preferred_modality")
