@@ -49,14 +49,11 @@ class EventBusAdapter(FabricAdapter):
         return self._vendor
 
     async def connect(self) -> bool:
-        """
-        Connect to Event Bus cluster.
-
-        In production: Would connect as consumer to Kafka/EventBridge.
-        Currently: Stub — no real connection.
-        """
-        _log.warning("Not implemented — no real connection")
-        return False
+        """Connect to Event Bus cluster."""
+        raise NotImplementedError(
+            f"EventBusAdapter.connect() not implemented for vendor '{self._vendor}'. "
+            "Implement consumer connection before calling connect()."
+        )
 
     async def disconnect(self) -> bool:
         """Disconnect from Event Bus (graceful consumer shutdown)"""
@@ -64,36 +61,23 @@ class EventBusAdapter(FabricAdapter):
         return True
 
     async def check_health(self) -> PlaneHealth:
-        """
-        Check Event Bus health.
-
-        Key metric: Consumer lag - if too high, triggers drift detection.
-        """
-        _log.warning("Not implemented — no real connection")
-        return PlaneHealth(
-            status=AdapterStatus.DISCONNECTED,
-            last_check=datetime.utcnow(),
+        """Check Event Bus health."""
+        raise NotImplementedError(
+            f"EventBusAdapter.check_health() not implemented for vendor '{self._vendor}'."
         )
 
     async def discover_pipes(self) -> List[Dict[str, Any]]:
-        """
-        Discover topics and streams from Event Bus.
-
-        Returns observations for inference engine to process.
-        """
-        _log.warning("Not implemented — no real connection")
-        return []
+        """Discover topics and streams from Event Bus."""
+        raise NotImplementedError(
+            f"EventBusAdapter.discover_pipes() not implemented for vendor '{self._vendor}'."
+        )
 
     async def self_heal(self, drift: PlaneDrift) -> bool:
-        """
-        Self-heal Event Bus connection issues.
-
-        Healing strategies:
-        - consumer_lag: Restart consumer, increase parallelism
-        - connection_lost: Reconnect to cluster
-        - partition_rebalance: Wait and rejoin consumer group
-        """
-        return False
+        """Self-heal Event Bus connection issues."""
+        raise NotImplementedError(
+            f"EventBusAdapter.self_heal() not implemented for vendor '{self._vendor}'. "
+            f"Drift type: {drift.drift_type}"
+        )
 
     def extract_semantic_edges(
         self, subjects: List[Dict[str, Any]]
@@ -139,12 +123,7 @@ class EventBusAdapter(FabricAdapter):
         return all_edges
 
     def apply_governance_policy(self, policy: Dict[str, Any]) -> bool:
-        """
-        Apply governance at Event Bus level.
-
-        Examples:
-        - Filter sensitive topics
-        - Enforce schema validation
-        - Set retention policies
-        """
-        return False
+        """Apply governance at Event Bus level."""
+        raise NotImplementedError(
+            f"EventBusAdapter.apply_governance_policy() not implemented for vendor '{self._vendor}'."
+        )

@@ -22,14 +22,17 @@ class Settings:
             os.environ.get("AAM_DRIFT_CONNECTION_TIMEOUT_S", "30")
         )
         # Runner / DCL ingestion
-        # DCL_URL is the base URL of the DCL service (set as env var).
-        # DCL_INGEST_URL is the full ingest endpoint derived from it.
+        # DCL_URL is required — no fallback. A missing DCL_URL means every job
+        # would silently route to localhost and appear to succeed before failing.
         dcl_base = os.environ.get("DCL_URL", "").rstrip("/")
-        self.DCL_INGEST_URL: str = f"{dcl_base}/api/dcl/ingest" if dcl_base else os.environ.get(
-            "AAM_DCL_INGEST_URL", "/api/dcl/ingest"
-        )
-        self.DCL_EXPORT_PIPES_URL: str = f"{dcl_base}/api/dcl/export-pipes" if dcl_base else ""
-        self.DCL_DISPATCH_URL: str = f"{dcl_base}/api/dcl/export-pipes/dispatch" if dcl_base else ""
+        if not dcl_base:
+            raise RuntimeError(
+                "FATAL: DCL_URL must be set. "
+                "AAM cannot ingest data or dispatch pipes without a configured DCL endpoint."
+            )
+        self.DCL_INGEST_URL: str = f"{dcl_base}/api/dcl/ingest"
+        self.DCL_EXPORT_PIPES_URL: str = f"{dcl_base}/api/dcl/export-pipes"
+        self.DCL_DISPATCH_URL: str = f"{dcl_base}/api/dcl/export-pipes/dispatch"
         self.RUNNER_JOB_TIMEOUT_S: int = int(
             os.environ.get("AAM_RUNNER_JOB_TIMEOUT_S", "300")
         )

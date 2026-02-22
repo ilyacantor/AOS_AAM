@@ -48,14 +48,11 @@ class IPaaSAdapter(FabricAdapter):
         return self._vendor
 
     async def connect(self) -> bool:
-        """
-        Connect to iPaaS control plane.
-
-        In production: Would authenticate via OAuth and register webhooks.
-        Currently: Stub — no real connection.
-        """
-        _log.warning("Not implemented — no real connection")
-        return False
+        """Connect to iPaaS control plane."""
+        raise NotImplementedError(
+            f"IPaaSAdapter.connect() not implemented for vendor '{self._vendor}'. "
+            "Implement OAuth authentication and webhook registration before calling connect()."
+        )
 
     async def disconnect(self) -> bool:
         """Disconnect from iPaaS control plane"""
@@ -64,32 +61,23 @@ class IPaaSAdapter(FabricAdapter):
         return True
 
     async def check_health(self) -> PlaneHealth:
-        """Check iPaaS control plane health"""
-        _log.warning("Not implemented — no real connection")
-        return PlaneHealth(
-            status=AdapterStatus.DISCONNECTED,
-            last_check=datetime.utcnow(),
+        """Check iPaaS control plane health."""
+        raise NotImplementedError(
+            f"IPaaSAdapter.check_health() not implemented for vendor '{self._vendor}'."
         )
 
     async def discover_pipes(self) -> List[Dict[str, Any]]:
-        """
-        Discover integration flows from iPaaS control plane.
-
-        Returns observations for inference engine to process.
-        """
-        _log.warning("Not implemented — no real connection")
-        return []
+        """Discover integration flows from iPaaS control plane."""
+        raise NotImplementedError(
+            f"IPaaSAdapter.discover_pipes() not implemented for vendor '{self._vendor}'."
+        )
 
     async def self_heal(self, drift: PlaneDrift) -> bool:
-        """
-        Self-heal iPaaS connection issues.
-
-        Healing strategies:
-        - connection_lost: Reconnect and re-register webhooks
-        - webhook_failed: Re-register webhook endpoint
-        - flow_stalled: Trigger flow restart via API
-        """
-        return False
+        """Self-heal iPaaS connection issues."""
+        raise NotImplementedError(
+            f"IPaaSAdapter.self_heal() not implemented for vendor '{self._vendor}'. "
+            f"Drift type: {drift.drift_type}"
+        )
 
     def extract_semantic_edges(self, recipes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
@@ -147,12 +135,7 @@ class IPaaSAdapter(FabricAdapter):
         return all_edges
 
     def apply_governance_policy(self, policy: Dict[str, Any]) -> bool:
-        """
-        Apply governance at iPaaS level.
-
-        Examples:
-        - Enforce data masking in flows
-        - Require approval for new integrations
-        - Rate limit flow executions
-        """
-        return False
+        """Apply governance at iPaaS level."""
+        raise NotImplementedError(
+            f"IPaaSAdapter.apply_governance_policy() not implemented for vendor '{self._vendor}'."
+        )

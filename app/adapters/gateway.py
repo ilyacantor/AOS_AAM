@@ -46,14 +46,11 @@ class GatewayAdapter(FabricAdapter):
         return self._vendor
 
     async def connect(self) -> bool:
-        """
-        Connect to API Gateway management plane.
-
-        In production: Would authenticate to gateway admin API.
-        Currently: Stub — no real connection.
-        """
-        _log.warning("Not implemented — no real connection")
-        return False
+        """Connect to API Gateway management plane."""
+        raise NotImplementedError(
+            f"GatewayAdapter.connect() not implemented for vendor '{self._vendor}'. "
+            "Implement real gateway authentication before calling connect()."
+        )
 
     async def disconnect(self) -> bool:
         """Disconnect from API Gateway"""
@@ -61,21 +58,16 @@ class GatewayAdapter(FabricAdapter):
         return True
 
     async def check_health(self) -> PlaneHealth:
-        """Check API Gateway health"""
-        _log.warning("Not implemented — no real connection")
-        return PlaneHealth(
-            status=AdapterStatus.DISCONNECTED,
-            last_check=datetime.utcnow(),
+        """Check API Gateway health."""
+        raise NotImplementedError(
+            f"GatewayAdapter.check_health() not implemented for vendor '{self._vendor}'."
         )
 
     async def discover_pipes(self) -> List[Dict[str, Any]]:
-        """
-        Discover API endpoints from Gateway.
-
-        Returns observations for inference engine to process.
-        """
-        _log.warning("Not implemented — no real connection")
-        return []
+        """Discover API endpoints from Gateway."""
+        raise NotImplementedError(
+            f"GatewayAdapter.discover_pipes() not implemented for vendor '{self._vendor}'."
+        )
 
     def _extract_entities_from_endpoints(self, api: Dict) -> List[str]:
         """Extract entity hints from API endpoint paths"""
@@ -89,23 +81,14 @@ class GatewayAdapter(FabricAdapter):
         return entities
 
     async def self_heal(self, drift: PlaneDrift) -> bool:
-        """
-        Self-heal API Gateway connection issues.
-
-        Healing strategies:
-        - connection_lost: Reconnect to gateway admin API
-        - upstream_down: Mark upstream unhealthy, trigger failover
-        - rate_limit_exhausted: Request limit increase or queue requests
-        """
-        return False
+        """Self-heal API Gateway connection issues."""
+        raise NotImplementedError(
+            f"GatewayAdapter.self_heal() not implemented for vendor '{self._vendor}'. "
+            f"Drift type: {drift.drift_type}"
+        )
 
     def apply_governance_policy(self, policy: Dict[str, Any]) -> bool:
-        """
-        Apply governance at Gateway level.
-
-        Examples:
-        - Inject "Redact-PII" header
-        - Enforce rate limits
-        - Require authentication
-        """
-        return False
+        """Apply governance at Gateway level."""
+        raise NotImplementedError(
+            f"GatewayAdapter.apply_governance_policy() not implemented for vendor '{self._vendor}'."
+        )

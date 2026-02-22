@@ -52,14 +52,11 @@ class WarehouseAdapter(FabricAdapter):
         return self._vendor
 
     async def connect(self) -> bool:
-        """
-        Connect to Data Warehouse.
-
-        In production: Would establish JDBC/ODBC connection.
-        Currently: Stub — no real connection.
-        """
-        _log.warning("Not implemented — no real connection")
-        return False
+        """Connect to Data Warehouse."""
+        raise NotImplementedError(
+            f"WarehouseAdapter.connect() not implemented for vendor '{self._vendor}'. "
+            "Implement JDBC/ODBC connection before calling connect()."
+        )
 
     async def disconnect(self) -> bool:
         """Disconnect from Data Warehouse"""
@@ -67,45 +64,30 @@ class WarehouseAdapter(FabricAdapter):
         return True
 
     async def _wake_warehouse(self) -> bool:
-        """
-        Wake a suspended warehouse.
-
-        AAM owns this self-healing - does NOT delegate to Farm.
-        """
-        self._warehouse_suspended = False
-        return True
+        """Wake a suspended warehouse via the vendor API."""
+        raise NotImplementedError(
+            f"WarehouseAdapter._wake_warehouse() not implemented for vendor '{self._vendor}'. "
+            "Implement real warehouse resume API call (e.g. ALTER WAREHOUSE RESUME for Snowflake)."
+        )
 
     async def check_health(self) -> PlaneHealth:
-        """
-        Check Data Warehouse health.
-
-        Key checks: Warehouse status (running/suspended), query latency
-        """
-        _log.warning("Not implemented — no real connection")
-        return PlaneHealth(
-            status=AdapterStatus.DISCONNECTED,
-            last_check=datetime.utcnow(),
+        """Check Data Warehouse health."""
+        raise NotImplementedError(
+            f"WarehouseAdapter.check_health() not implemented for vendor '{self._vendor}'."
         )
 
     async def discover_pipes(self) -> List[Dict[str, Any]]:
-        """
-        Discover tables and views from Data Warehouse.
-
-        Returns observations for inference engine to process.
-        """
-        _log.warning("Not implemented — no real connection")
-        return []
+        """Discover tables and views from Data Warehouse."""
+        raise NotImplementedError(
+            f"WarehouseAdapter.discover_pipes() not implemented for vendor '{self._vendor}'."
+        )
 
     async def self_heal(self, drift: PlaneDrift) -> bool:
-        """
-        Self-heal Data Warehouse connection issues.
-
-        Healing strategies:
-        - warehouse_suspended: Wake the warehouse
-        - connection_lost: Reconnect
-        - query_timeout: Increase timeout, retry with smaller batch
-        """
-        return False
+        """Self-heal Data Warehouse connection issues."""
+        raise NotImplementedError(
+            f"WarehouseAdapter.self_heal() not implemented for vendor '{self._vendor}'. "
+            f"Drift type: {drift.drift_type}"
+        )
 
     def extract_semantic_edges(
         self,
@@ -172,12 +154,7 @@ class WarehouseAdapter(FabricAdapter):
         return all_edges
 
     def apply_governance_policy(self, policy: Dict[str, Any]) -> bool:
-        """
-        Apply governance at Warehouse level.
-
-        Examples:
-        - Row-level security
-        - Column masking for PII
-        - Query result caching policies
-        """
-        return False
+        """Apply governance at Warehouse level."""
+        raise NotImplementedError(
+            f"WarehouseAdapter.apply_governance_policy() not implemented for vendor '{self._vendor}'."
+        )
