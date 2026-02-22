@@ -21,7 +21,7 @@ def create_pipe(pipe_data: dict) -> dict:
     sb.insert("declared_pipes", {
         "pipe_id": pipe_id,
         "display_name": pipe_data["display_name"],
-        "fabric_plane": pipe_data.get("fabric_plane", "API_GATEWAY"),
+        "fabric_plane": pipe_data.get("fabric_plane"),
         "modality": pipe_data["modality"],
         "source_system": pipe_data["source_system"],
         "transport_kind": pipe_data["transport_kind"],

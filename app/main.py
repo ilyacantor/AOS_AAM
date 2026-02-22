@@ -91,8 +91,6 @@ from .pii_redaction import redact_pii_from_observation
 @asynccontextmanager
 async def lifespan(app):
     init_db()
-    from .db import init_dcl_pushes_table
-    init_dcl_pushes_table()
     from .services.runner_worker import start_worker, stop_worker
     await start_worker()
     yield

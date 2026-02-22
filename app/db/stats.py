@@ -62,6 +62,4 @@ def get_canonical_stats(aod_run_id: Optional[str] = None) -> dict:
         "total_candidates": total_candidates,
         "pipes_with_drift": pipes_with_drift,
         "fabrics_by_type": dict(fabrics_by_type),
-        "total_pipes": total_candidates,
-        "pipes": total_candidates,
     }

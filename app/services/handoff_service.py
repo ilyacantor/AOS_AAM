@@ -446,10 +446,7 @@ def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
     }
     for plane in request.fabric_planes or []:
         vendor_lower = plane.vendor.lower().replace("_", " ")
-        already_covered = any(
-            vendor_lower in v or v in vendor_lower
-            for v in accepted_vendors_norm
-        )
+        already_covered = vendor_lower in accepted_vendors_norm
         if already_covered:
             continue
 

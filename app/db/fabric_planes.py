@@ -16,9 +16,7 @@ def store_fabric_plane(plane_data: dict, aod_run_id: str) -> dict:
     plane_id = f"{plane_data['plane_type']}:{plane_data['vendor']}"
     now = datetime.utcnow().isoformat()
 
-    is_healthy = plane_data.get("is_healthy")
-    if is_healthy is not None:
-        is_healthy = bool(is_healthy)
+    is_healthy = bool(plane_data.get("is_healthy", True))
 
     sb.delete("fabric_planes", filters={"plane_id": plane_id})
 

@@ -8,8 +8,13 @@ from . import supabase_client as sb
 from .drift import _row_to_drift_event
 
 
+_DRIFT_STATUSES = frozenset({"open", "acknowledged", "suppressed", "resolved"})
+
+
 def update_drift_status(drift_id: str, status: str, by: Optional[str] = None, notes: Optional[str] = None) -> Optional[dict]:
     """Update drift event status (open, acknowledged, suppressed, resolved)"""
+    if status not in _DRIFT_STATUSES:
+        raise ValueError(f"Invalid drift status {status!r}. Must be one of: {sorted(_DRIFT_STATUSES)}")
     now = datetime.utcnow().isoformat()
 
     update_data = {"status": status}

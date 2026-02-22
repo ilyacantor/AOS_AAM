@@ -9,9 +9,14 @@ from typing import Optional
 from . import supabase_client as sb
 
 
+_SOR_DISPOSITION_STATUSES = frozenset({"acknowledged", "expected", "follow_up", "resolved", "open"})
+
+
 def set_sor_disposition(vendor: str, aod_run_id: str, status: str,
                         reason: Optional[str] = None,
                         operator_notes: Optional[str] = None) -> dict:
+    if status not in _SOR_DISPOSITION_STATUSES:
+        raise ValueError(f"Invalid SOR disposition status {status!r}. Must be one of: {sorted(_SOR_DISPOSITION_STATUSES)}")
     now = datetime.utcnow().isoformat()
     vendor_lower = vendor.lower().strip()
 

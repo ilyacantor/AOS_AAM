@@ -70,7 +70,7 @@ def _get_pool() -> psycopg2.pool.ThreadedConnectionPool:
             maxconn=30,
             dsn=_DSN,
         )
-        _log.info("PostgreSQL connection pool created (pooler: us-west-2)")
+        _log.info("PostgreSQL connection pool created (pooler: %s)", _POOLER_HOST)
     return _pool
 
 

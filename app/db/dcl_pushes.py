@@ -10,11 +10,6 @@ from typing import Optional
 from . import supabase_client as sb
 
 
-def init_dcl_pushes_table():
-    """No-op — tables are created in Supabase SQL Editor."""
-    pass
-
-
 def record_dcl_push(
     pipe_count: int,
     payload: dict,

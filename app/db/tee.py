@@ -106,8 +106,13 @@ def create_tee_request(tee_data: dict) -> dict:
     }
 
 
+_TEE_STATUSES = frozenset({"requested", "approved", "verified"})
+
+
 def update_tee_request_status(tee_id: str, status: str) -> Optional[dict]:
     """Update tee request status (requested, approved, verified)"""
+    if status not in _TEE_STATUSES:
+        raise ValueError(f"Invalid TEE request status {status!r}. Must be one of: {sorted(_TEE_STATUSES)}")
     now = datetime.utcnow().isoformat()
 
     update_data = {"status": status}

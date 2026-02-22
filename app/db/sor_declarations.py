@@ -57,8 +57,6 @@ def get_sor_declarations(aod_run_id: Optional[str] = None) -> list[dict]:
     } for row in rows]
 
 
-def clear_sor_declarations(aod_run_id: Optional[str] = None):
-    if aod_run_id:
-        sb.delete("sor_declarations", filters={"aod_run_id": aod_run_id})
-    else:
-        sb.delete("sor_declarations", raw_params={"sor_id": "not.is.null"})
+def clear_sor_declarations(aod_run_id: str) -> None:
+    """Delete all SOR declarations for a specific AOD run."""
+    sb.delete("sor_declarations", filters={"aod_run_id": aod_run_id})
