@@ -274,25 +274,37 @@ def _build_reconciliation_data(request: AODHandoffRequest) -> tuple[list, list]:
     return aod_fabric_planes_data, list(aod_sor_data.values())
 
 
-def _check_idempotency(run_id: str) -> Optional[AODHandoffResponse]:
+def _check_idempotency(run_id: str, candidate_count: int) -> Optional[AODHandoffResponse]:
     """
     Check if this run_id was already processed.
-    Returns the cached response if so, None otherwise.
+
+    Returns the cached response for an identical re-submission.
+    Raises ValueError if the same run_id arrives with a different candidate count —
+    that means either an AOD bug (use a new run_id for corrections) or data corruption.
     """
     existing_logs = list_handoff_logs(aod_run_id=run_id, limit=1)
-    if existing_logs:
-        log = existing_logs[0]
-        _log.info("Idempotent replay: run_id=%s already processed (handoff_id=%s)", run_id, log["handoff_id"])
-        return AODHandoffResponse(
-            run_id=run_id,
-            candidates_received=log["candidates_received"],
-            candidates_accepted=log["candidates_accepted"],
-            candidates_rejected=log["candidates_rejected"],
-            rejected_reasons=json.loads(log.get("rejected_reasons", "[]")) if isinstance(log.get("rejected_reasons"), str) else log.get("rejected_reasons", []),
-            handoff_id=log["handoff_id"],
-            processed_at=datetime.fromisoformat(log["processed_at"]) if log.get("processed_at") else datetime.utcnow(),
+    if not existing_logs:
+        return None
+
+    log = existing_logs[0]
+    stored_count = log.get("candidates_received", 0)
+    if stored_count != candidate_count:
+        raise ValueError(
+            f"run_id={run_id} was already processed with {stored_count} candidates, "
+            f"but this submission has {candidate_count}. "
+            "Use a new run_id for corrections — AAM does not overwrite prior handoffs."
         )
-    return None
+
+    _log.info("Idempotent replay: run_id=%s already processed (handoff_id=%s)", run_id, log["handoff_id"])
+    return AODHandoffResponse(
+        run_id=run_id,
+        candidates_received=log["candidates_received"],
+        candidates_accepted=log["candidates_accepted"],
+        candidates_rejected=log["candidates_rejected"],
+        rejected_reasons=json.loads(log.get("rejected_reasons", "[]")) if isinstance(log.get("rejected_reasons"), str) else log.get("rejected_reasons", []),
+        handoff_id=log["handoff_id"],
+        processed_at=datetime.fromisoformat(log["processed_at"]) if log.get("processed_at") else datetime.utcnow(),
+    )
 
 
 def _serialize_candidate(candidate) -> dict:
@@ -323,7 +335,7 @@ def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
       - Structured logging at every stage
     """
     # 0. Idempotency check
-    cached = _check_idempotency(request.run_id)
+    cached = _check_idempotency(request.run_id, len(request.candidates))
     if cached:
         return cached
 
@@ -340,7 +352,6 @@ def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
 
     # 1a. Store authoritative SOR declarations (batch insert — table already cleared)
     sors_stored = 0
-    sor_store_errors: list[str] = []
     if request.sors:
         from ..db import supabase_client as sb
         from datetime import datetime as _dt
@@ -364,15 +375,15 @@ def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
             sb.insert_many("sor_declarations", sor_rows)
             sors_stored = len(sor_rows)
         except Exception as e:
-            msg = f"Failed to batch-store SOR declarations: {e}"
-            _log.error(msg)
-            sor_store_errors.append(msg)
+            raise RuntimeError(
+                f"Failed to store SOR declarations for run_id={request.run_id}: {e}. "
+                "Handoff aborted — cannot accept candidates against unrecorded SOR context."
+            ) from e
         _log.info("SOR declarations stored: %d", sors_stored)
 
     # 1b. Resolve fabric planes (batch insert — table already cleared)
     fabric_plane_map: dict[str, str] = {}
     fabric_planes_stored = 0
-    plane_store_errors: list[str] = []
     if request.fabric_planes:
         from ..db import supabase_client as sb
         from datetime import datetime as _dt
@@ -401,9 +412,10 @@ def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
             sb.insert_many("fabric_planes", plane_rows)
             fabric_planes_stored = len(plane_rows)
         except Exception as e:
-            msg = f"Failed to batch-store fabric planes: {e}"
-            _log.error(msg)
-            plane_store_errors.append(msg)
+            raise RuntimeError(
+                f"Failed to store fabric planes for run_id={request.run_id}: {e}. "
+                "Handoff aborted — cannot accept candidates linked to unrecorded planes."
+            ) from e
     _log.info("Fabric planes resolved: %d stored", fabric_planes_stored)
 
     # Pre-build plane lookup structures once (not per candidate)
@@ -541,6 +553,4 @@ def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
         rejected_reasons=rejected_dicts,
         handoff_id=handoff_log["handoff_id"],
         processed_at=datetime.utcnow(),
-        plane_store_errors=plane_store_errors,
-        sor_store_errors=sor_store_errors,
     )

@@ -106,7 +106,12 @@ async def receive_aod_handoff(raw_request: Request):
         "Receive endpoint: run_id=%s, candidates=%d, fabric_planes=%d, sors=%d",
         request.run_id, len(request.candidates), len(request.fabric_planes), len(request.sors),
     )
-    return process_handoff(request)
+    try:
+        return process_handoff(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
 
 
 @router.post("/fetch")
@@ -118,7 +123,12 @@ async def fetch_aod_data():
 
     request = AODHandoffRequest(**payload)
     reset_aod_state()
-    return process_handoff(request)
+    try:
+        return process_handoff(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
 
 
 @router.get("/debug/last-receive")
