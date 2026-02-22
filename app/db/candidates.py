@@ -7,6 +7,21 @@ from datetime import datetime
 from typing import Optional
 
 from . import supabase_client as sb
+from ..logger import get_logger
+
+_log = get_logger("db.candidates")
+
+
+def _safe_json(raw, default):
+    """Parse JSON, returning default and logging if the stored value is corrupt."""
+    if not raw:
+        return default
+    try:
+        result = json.loads(raw)
+        return result if result is not None else default
+    except (json.JSONDecodeError, TypeError) as exc:
+        _log.error("Corrupt JSON in candidate row (returning default): %s — raw=%r", exc, raw[:100])
+        return default
 
 # ============================================================================
 # CANDIDATE OPERATIONS
@@ -24,7 +39,13 @@ def create_candidate(candidate_data: dict) -> dict:
         execution_allowed = bool(execution_allowed)
 
     asset_key = candidate_data["asset_key"]
-    sb.delete("connection_candidates", filters={"asset_key": asset_key})
+    replaced = sb.delete("connection_candidates", filters={"asset_key": asset_key})
+    if replaced:
+        _log.warning(
+            "Replacing existing candidate for asset_key=%r (old id=%s)",
+            asset_key,
+            replaced[0].get("candidate_id", "?"),
+        )
 
     row = {
         "candidate_id": candidate_id,
@@ -56,7 +77,7 @@ def create_candidate(candidate_data: dict) -> dict:
 
     return {
         "candidate_id": candidate_id,
-        "status": "connected",
+        "status": row["status"],
         "execution_allowed": execution_allowed,
         "action_type": candidate_data.get("action_type"),
         "created_at": now,
@@ -119,7 +140,7 @@ def create_candidates_batch(candidates: list[dict]) -> list[dict]:
         rows.append(row)
         results.append({
             "candidate_id": candidate_id,
-            "status": "connected",
+            "status": row["status"],
             "execution_allowed": cd.get("execution_allowed"),
             "action_type": cd.get("action_type"),
             "created_at": now,
@@ -177,11 +198,11 @@ def _row_to_candidate(row) -> dict:
         "display_name": row["display_name"],
         "category": row["category"],
         "governance_status": row["governance_status"],
-        "findings": json.loads(row["findings"]) if row["findings"] else [],
+        "findings": _safe_json(row.get("findings"), []),
         "sor_tagging": row["sor_tagging"],
-        "evidence_refs": json.loads(row["evidence_refs"]) if row["evidence_refs"] else [],
+        "evidence_refs": _safe_json(row.get("evidence_refs"), []),
         "signals_summary": row["signals_summary"],
-        "known_endpoints": json.loads(row["known_endpoints"]) if row["known_endpoints"] else [],
+        "known_endpoints": _safe_json(row.get("known_endpoints"), []),
         "preferred_modality": row["preferred_modality"],
         "priority_score": row["priority_score"],
         "status": row["status"],
@@ -196,7 +217,7 @@ def _row_to_candidate(row) -> dict:
 
     result["execution_allowed"] = row.get("execution_allowed")
     result["action_type"] = row.get("action_type")
-    result["blocking_findings"] = json.loads(row["blocking_findings"]) if row.get("blocking_findings") else []
+    result["blocking_findings"] = _safe_json(row.get("blocking_findings"), [])
     result["connected_via_plane"] = row.get("connected_via_plane")
     result["aod_run_id"] = row.get("aod_run_id")
     result["aod_asset_id"] = row.get("aod_asset_id")

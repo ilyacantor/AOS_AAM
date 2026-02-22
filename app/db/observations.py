@@ -7,6 +7,21 @@ from datetime import datetime
 from typing import Optional
 
 from . import supabase_client as sb
+from ..logger import get_logger
+
+_log = get_logger("db.observations")
+
+
+def _safe_json(raw, default):
+    """Parse JSON, returning default and logging if the stored value is corrupt."""
+    if not raw:
+        return default
+    try:
+        result = json.loads(raw)
+        return result if result is not None else default
+    except (json.JSONDecodeError, TypeError) as exc:
+        _log.error("Corrupt JSON in observation row (returning default): %s — raw=%r", exc, raw[:100])
+        return default
 
 
 def create_observation(observation_data: dict) -> str:
@@ -63,7 +78,7 @@ def get_all_schema_samples() -> list[dict]:
         schema_raw = row.get("schema_sample")
         if not schema_raw:
             continue
-        schema = json.loads(schema_raw) if isinstance(schema_raw, str) else schema_raw
+        schema = _safe_json(schema_raw, None) if isinstance(schema_raw, str) else schema_raw
         if not isinstance(schema, dict) or not schema:
             continue
         results.append({
@@ -82,9 +97,9 @@ def _row_to_observation(row) -> dict:
         "candidate_id": row.get("candidate_id"),
         "observed_at": row.get("observed_at"),
         "source_system": row.get("source_system"),
-        "endpoint_info": json.loads(row["endpoint_info"]) if row.get("endpoint_info") else {},
-        "entity_hints": json.loads(row["entity_hints"]) if row.get("entity_hints") else [],
-        "schema_sample": json.loads(row["schema_sample"]) if row.get("schema_sample") else None,
-        "metadata": json.loads(row["metadata"]) if row.get("metadata") else {},
+        "endpoint_info": _safe_json(row.get("endpoint_info"), {}),
+        "entity_hints": _safe_json(row.get("entity_hints"), []),
+        "schema_sample": _safe_json(row.get("schema_sample"), None),
+        "metadata": _safe_json(row.get("metadata"), {}),
         "processed": row.get("processed", False),
     }

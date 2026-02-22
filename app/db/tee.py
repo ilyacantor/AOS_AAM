@@ -8,6 +8,21 @@ from typing import Optional
 
 from . import supabase_client as sb
 from .drift import _row_to_drift_event
+from ..logger import get_logger
+
+_log = get_logger("db.tee")
+
+
+def _safe_json(raw, default):
+    """Parse JSON, returning default and logging if the stored value is corrupt."""
+    if not raw:
+        return default
+    try:
+        result = json.loads(raw)
+        return result if result is not None else default
+    except (json.JSONDecodeError, TypeError) as exc:
+        _log.error("Corrupt JSON in tee row (returning default): %s — raw=%r", exc, raw[:100])
+        return default
 
 
 def list_tee_requests(status: Optional[str] = None) -> list[dict]:
@@ -27,7 +42,7 @@ def list_tee_requests(status: Optional[str] = None) -> list[dict]:
         "pipe_id": row["pipe_id"],
         "target_system": row["target_system"],
         "tee_type": row["tee_type"],
-        "configuration": json.loads(row["configuration"]) if row["configuration"] else {},
+        "configuration": _safe_json(row["configuration"], {}),
         "status": row["status"],
         "requested_at": row["requested_at"],
         "approved_at": row["approved_at"],
@@ -54,7 +69,7 @@ def get_tee_request(tee_id: str) -> Optional[dict]:
             "pipe_id": row["pipe_id"],
             "target_system": row["target_system"],
             "tee_type": row["tee_type"],
-            "configuration": json.loads(row["configuration"]) if row["configuration"] else {},
+            "configuration": _safe_json(row["configuration"], {}),
             "status": row["status"],
             "requested_at": row["requested_at"],
             "approved_at": row["approved_at"],
@@ -110,7 +125,7 @@ def update_tee_request_status(tee_id: str, status: str) -> Optional[dict]:
             "pipe_id": row["pipe_id"],
             "target_system": row["target_system"],
             "tee_type": row["tee_type"],
-            "configuration": json.loads(row["configuration"]) if row["configuration"] else {},
+            "configuration": _safe_json(row["configuration"], {}),
             "status": row["status"],
             "requested_at": row["requested_at"],
             "approved_at": row["approved_at"],

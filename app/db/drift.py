@@ -7,6 +7,21 @@ from datetime import datetime
 from typing import Optional
 
 from . import supabase_client as sb
+from ..logger import get_logger
+
+_log = get_logger("db.drift")
+
+
+def _safe_json(raw, default):
+    """Parse JSON, returning default and logging if the stored value is corrupt."""
+    if not raw:
+        return default
+    try:
+        result = json.loads(raw)
+        return result if result is not None else default
+    except (json.JSONDecodeError, TypeError) as exc:
+        _log.error("Corrupt JSON in drift row (returning default): %s — raw=%r", exc, raw[:100])
+        return default
 
 
 def create_drift_event(pipe_id: str, drift_type: str, old_value: str, new_value: str, details: Optional[dict] = None) -> str:
@@ -37,7 +52,7 @@ def _row_to_drift_event(row) -> dict:
         "drift_type": row.get("drift_type"),
         "old_value": row.get("old_value"),
         "new_value": row.get("new_value"),
-        "details": json.loads(row["details"]) if row.get("details") else None,
+        "details": _safe_json(row.get("details"), None),
         "detected_at": row.get("detected_at"),
         "severity": row.get("severity", "medium"),
         "status": row.get("status", "open"),
