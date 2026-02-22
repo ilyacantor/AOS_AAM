@@ -153,14 +153,15 @@ def find_matching_pipe(candidate: dict) -> tuple[Optional[str], float, str]:
         return existing_pipes[0]["pipe_id"], 0.9, "Auto-matched by vendor name"
 
     # Scenario B: Create new pipe
-    # Even if no plane could be inferred, we still create a pipe and flag it
-    if not inferred_plane:
-        # needs_operator_review: create pipe but flag it
-        _log.info("Candidate %s (%s) needs operator review — no plane inferred",
-                   candidate_id[:8], vendor)
-        inferred_plane = "API_GATEWAY"  # Default to most common plane
-        confidence = 0.0
-        routing_source = "needs_operator_review"
+    # Block auto-creation if confidence is 0.0 — no real signal, operator must assign
+    if confidence == 0.0:
+        return (
+            None,
+            0.0,
+            f"Candidate {candidate_id[:8]} ({vendor}) needs operator review — "
+            f"no fabric plane could be inferred with sufficient confidence. "
+            f"Provide an explicit pipe_id for manual matching.",
+        )
 
     lineage_hints = [f"candidate:{candidate_id}", f"routed_via:{inferred_plane}"]
     if candidate.get("aod_run_id"):

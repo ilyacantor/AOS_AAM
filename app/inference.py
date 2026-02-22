@@ -84,29 +84,6 @@ def infer_single_pipe(observation: dict) -> Optional[dict]:
     # Infer identity keys from schema
     identity_keys = infer_identity_keys(schema_sample, entity_scope)
 
-    # Fallback: if observation-based inference produced empty fields,
-    # use PLANE_STANDARD_FIELDS / CATEGORY_STANDARD_FIELDS as defaults.
-    # This closes the gap where adapter observations lack entity_hints
-    # but the vendor identity tells us what fields to expect.
-    if not entity_scope or identity_keys == ["id"]:
-        from .constants import INFRA_VENDOR_PLANE, PLANE_STANDARD_FIELDS, CATEGORY_STANDARD_FIELDS
-        vendor_lower = (metadata.get("vendor") or source_system or "").lower().strip()
-        plane_for_vendor = INFRA_VENDOR_PLANE.get(vendor_lower)
-        fallback_fields: list[str] = []
-        if plane_for_vendor:
-            fallback_fields = list(PLANE_STANDARD_FIELDS.get(plane_for_vendor, []))
-        if not fallback_fields:
-            cat = (metadata.get("category") or "").lower().strip()
-            if cat:
-                fallback_fields = list(CATEGORY_STANDARD_FIELDS.get(cat, []))
-        if fallback_fields:
-            if not entity_scope:
-                entity_scope = [f for f in fallback_fields if not f.endswith("_id")]
-            if identity_keys == ["id"]:
-                ik_from_fallback = [f for f in fallback_fields if f.endswith("_id")]
-                if ik_from_fallback:
-                    identity_keys = ik_from_fallback
-    
     # Infer change semantics
     change_semantics = infer_change_semantics(endpoint_info, schema_sample)
     
@@ -298,8 +275,8 @@ def infer_identity_keys(schema: Optional[dict], entity_scope: list[str]) -> list
     _log.debug("infer_identity_keys: schema_fields=%s entity_scope=%s", list(schema.keys()) if schema else None, entity_scope)
 
     if not schema:
-        _log.debug("infer_identity_keys: no schema, defaulting to ['id']")
-        return ["id"]
+        _log.debug("infer_identity_keys: no schema, returning empty list")
+        return []
 
     keys = []
     key_scores = {}  # Track confidence scores for each potential key
