@@ -14,7 +14,7 @@ from ..models import JobManifest
 
 _log = get_logger("services.runner_worker")
 
-WORKER_CONCURRENCY = 5
+WORKER_CONCURRENCY = 2
 POLL_INTERVAL_S = 2.0
 
 _worker_task: Optional[asyncio.Task] = None

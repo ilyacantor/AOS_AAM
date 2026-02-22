@@ -110,13 +110,48 @@ async def execute_job_inline(job_id: str, http_client: httpx.AsyncClient | None 
     try:
         owns_client = http_client is None
         client = http_client or httpx.AsyncClient(timeout=float(settings.RUNNER_JOB_TIMEOUT_S))
-        try:
-            resp = await client.post(dcl_url, json=prep["payload"], headers=prep["headers"])
-        finally:
-            if owns_client:
-                await client.aclose()
 
-        if resp.status_code == 200:
+        # Retry DCL POST up to 3 times with 2s delay on 503 or timeout
+        max_attempts = 3
+        retry_delay = 2.0
+        resp = None
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                resp = await client.post(dcl_url, json=prep["payload"], headers=prep["headers"])
+
+                # Success or non-retryable error - break retry loop
+                if resp.status_code != 503:
+                    break
+
+                # 503 Service Unavailable - retry if attempts remain
+                if attempt < max_attempts:
+                    _log.warning(
+                        "DCL returned 503 for job %s (attempt %d/%d), retrying in %ds",
+                        job_id, attempt, max_attempts, retry_delay
+                    )
+                    await asyncio.sleep(retry_delay)
+                else:
+                    _log.error(
+                        "DCL returned 503 for job %s after %d attempts, giving up",
+                        job_id, max_attempts
+                    )
+
+            except httpx.TimeoutException as exc:
+                if attempt < max_attempts:
+                    _log.warning(
+                        "DCL timeout for job %s (attempt %d/%d): %s, retrying in %ds",
+                        job_id, attempt, max_attempts, exc, retry_delay
+                    )
+                    await asyncio.sleep(retry_delay)
+                else:
+                    _log.error("DCL timeout for job %s after %d attempts: %s", job_id, max_attempts, exc)
+                    raise
+
+        if owns_client:
+            await client.aclose()
+
+        if resp and resp.status_code == 200:
             dcl_body = resp.json()
             dcl_status = dcl_body.get("status", "")
             if dcl_status == "ingested":
@@ -140,12 +175,13 @@ async def execute_job_inline(job_id: str, http_client: httpx.AsyncClient | None 
                 )
                 return {"job_id": job_id, "status": "failed", "error": f"DCL unexpected: {dcl_status}"}
         else:
-            error_detail = resp.text[:500]
+            error_detail = resp.text[:500] if resp else "No response"
+            status_code = resp.status_code if resp else "unknown"
             await asyncio.to_thread(
                 _finalize_job, job_id, "failed",
-                error_message=f"DCL returned {resp.status_code}: {error_detail}",
+                error_message=f"DCL returned {status_code}: {error_detail}",
             )
-            return {"job_id": job_id, "status": "failed", "error": f"DCL {resp.status_code}: {error_detail}"}
+            return {"job_id": job_id, "status": "failed", "error": f"DCL {status_code}: {error_detail}"}
 
     except httpx.ConnectError as exc:
         _log.error("DCL unreachable for job %s — job failed, no fallback: %s", job_id, exc)

@@ -25,7 +25,7 @@ _log = get_logger("routers.export")
 
 router = APIRouter(tags=["Export"])
 
-_DCL_TIMEOUT = 15.0
+_DCL_TIMEOUT = 45.0
 
 _last_dcl_dispatch: dict | None = None
 
