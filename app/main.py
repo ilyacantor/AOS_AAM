@@ -6,8 +6,11 @@ AOD emits intent → AAM declares pipes → DCL unifies meaning.
 """
 from contextlib import asynccontextmanager
 
+from pathlib import Path
+
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
@@ -106,6 +109,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Serve static assets (favicon, etc.)
+_static_dir = Path(__file__).parent / "static"
+app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
+
 # Global component instances (accessed by routers via `from ..main import ...`)
 drift_detector = FabricDriftDetector()
 adapter_registry: dict = {}  # plane_type -> adapter instance
@@ -162,7 +169,7 @@ async def custom_swagger_ui():
 <!DOCTYPE html>
 <html>
 <head>
-    <title>API Docs - AAM</title>
+    <title>AAM</title>
     {NAV_STYLE}
     <link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
     <style>
@@ -196,7 +203,7 @@ async def custom_redoc():
 <!DOCTYPE html>
 <html>
 <head>
-    <title>ReDoc - AAM</title>
+    <title>AAM</title>
     {NAV_STYLE}
     <link href="https://fonts.googleapis.com/css?family=Montserrat:300,400,700|Roboto:300,400,700" rel="stylesheet">
     <style>

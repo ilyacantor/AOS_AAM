@@ -146,7 +146,7 @@ async def ui_pipes_list(
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Pipes - AAM</title>
+    <title>AAM</title>
     {NAV_STYLE}
     {UI_STYLE}
     <style>
@@ -471,7 +471,7 @@ async def ui_pipe_detail(pipe_id: str):
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Pipe Not Found - AAM</title>
+    <title>AAM</title>
     {NAV_STYLE}
     {UI_STYLE}
 </head>
@@ -525,7 +525,7 @@ async def ui_pipe_detail(pipe_id: str):
 <!DOCTYPE html>
 <html>
 <head>
-    <title>{pipe.get('display_name', 'Pipe')} - AAM</title>
+    <title>AAM</title>
     {NAV_STYLE}
     {UI_STYLE}
 </head>
@@ -842,7 +842,7 @@ async def ui_candidates_list(
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Candidates - AAM</title>
+    <title>AAM</title>
     {NAV_STYLE}
     {UI_STYLE}
 </head>
@@ -1221,7 +1221,7 @@ async def ui_guide():
 <!DOCTYPE html>
 <html>
 <head>
-    <title>User Guide - AAM</title>
+    <title>AAM</title>
     {NAV_STYLE}
     {UI_STYLE}
     {guide_style}
@@ -1557,7 +1557,7 @@ async def ui_drift_list(status: Optional[str] = Query(None)):
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Drift & Health - AAM</title>
+    <title>AAM</title>
     {NAV_STYLE}
     {UI_STYLE}
 </head>
@@ -1670,7 +1670,7 @@ async def ui_topology():
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Topology - AAM</title>
+    <title>AAM</title>
     {NAV_STYLE}
     {UI_STYLE}
     <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
@@ -2860,7 +2860,7 @@ async def ui_reconcile_latest():
     if not logs:
         return HTMLResponse(content=f"""
 <!DOCTYPE html>
-<html><head><title>Reconcile - AAM</title>{NAV_STYLE}</head>
+<html><head><title>AAM</title>{NAV_STYLE}</head>
 <body>{ui_nav('reconcile')}
 <div style="max-width:800px;margin:40px auto;padding:24px;text-align:center;color:#94a3b8;">
 <h2>No Handoff Runs Found</h2>
@@ -2881,7 +2881,7 @@ async def ui_reconcile(aod_run_id: str):
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Reconciliation - AAM</title>
+    <title>AAM</title>
     {NAV_STYLE}
     {UI_STYLE}
 </head>
@@ -3615,7 +3615,7 @@ async def ui_reconcile(aod_run_id: str):
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Reconcile: {snapshot or aod_run_id} - AAM</title>
+    <title>AAM</title>
     {NAV_STYLE}
     {UI_STYLE}
     <style>
