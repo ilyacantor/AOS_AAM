@@ -80,6 +80,7 @@ PLANE_TYPE_ALIASES: dict[str, str] = {
     "api_gateway": "API_GATEWAY", "api gateway": "API_GATEWAY", "apigateway": "API_GATEWAY",
     "event_bus": "EVENT_BUS", "event bus": "EVENT_BUS", "eventbus": "EVENT_BUS",
     "data_warehouse": "DATA_WAREHOUSE", "data warehouse": "DATA_WAREHOUSE", "datawarehouse": "DATA_WAREHOUSE",
+    "warehouse": "DATA_WAREHOUSE",
 }
 
 # Well-known infrastructure vendors whose identity alone signals a plane type.

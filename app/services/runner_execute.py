@@ -148,54 +148,17 @@ async def execute_job_inline(job_id: str, http_client: httpx.AsyncClient | None 
             return {"job_id": job_id, "status": "failed", "error": f"DCL {resp.status_code}: {error_detail}"}
 
     except httpx.ConnectError as exc:
-        _log.warning("DCL unreachable (%s), fallback for job %s", exc, job_id)
-        return await _fallback_direct_store(job_id, prep["manifest"], extracted_data, schema_hash)
+        _log.error("DCL unreachable for job %s — job failed, no fallback: %s", job_id, exc)
+        await asyncio.to_thread(
+            _finalize_job, job_id, "failed",
+            error_message=f"DCL unreachable: {exc}",
+        )
+        return {"job_id": job_id, "status": "failed", "error": f"DCL unreachable: {exc}"}
 
     except Exception as exc:
         _log.error("Runner failed job %s: %s", job_id, exc)
         await asyncio.to_thread(_finalize_job, job_id, "failed", error_message=str(exc))
         return {"job_id": job_id, "status": "failed", "error": str(exc)}
-
-
-async def _fallback_direct_store(
-    job_id: str,
-    manifest: dict,
-    data: list[dict],
-    schema_hash: str,
-) -> dict:
-    """Fallback when DCL HTTP endpoint is unreachable (dev/test only).
-
-    Stores directly via store_ingest, bypassing HTTP.
-    """
-    from ..db.dcl_ingest import store_ingest
-
-    source = manifest.get("source", {})
-    pipe_id = source.get("pipe_id", "unknown")
-    system = source.get("system", "unknown")
-
-    record = store_ingest(
-        run_id=job_id,
-        pipe_id=pipe_id,
-        source_system=system,
-        data=data,
-        schema_hash=schema_hash,
-    )
-    update_runner_status(
-        job_id,
-        "completed",
-        rows_transferred=record["row_count"],
-        dcl_response={**record, "fallback": True},
-    )
-    _log.info("Fallback store completed for job %s: %d rows", job_id, record["row_count"])
-    return {
-        "job_id": job_id,
-        "status": "completed",
-        "rows_transferred": record["row_count"],
-        "ingest_id": record["ingest_id"],
-        "schema_hash": schema_hash,
-        "schema_drift_detected": False,
-        "fallback": True,
-    }
 
 
 def _generate_simulated_data(source: dict) -> list[dict]:
