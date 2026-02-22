@@ -151,38 +151,13 @@ def load_aod_payload() -> Optional[dict]:
     try:
         with open(AOD_PAYLOAD_FILE, "r") as f:
             return json.load(f)
-    except Exception:
+    except FileNotFoundError:
+        return None
+    except Exception as e:
+        _log.error("Failed to load AOD payload from %s: %s", AOD_PAYLOAD_FILE, e)
         return None
 
 
-def resolve_fabric_planes(request: AODHandoffRequest) -> tuple[dict, int, list]:
-    """
-    Store explicit fabric planes that AOD sent.
-
-    If AOD didn't send fabric_planes, there are no planes — AAM does NOT
-    infer infrastructure from candidate metadata.  AOD owns fabric-plane
-    detection; AAM only allocates assets to planes AOD discovered.
-
-    Returns (fabric_plane_map, planes_stored, errors) where fabric_plane_map
-    maps vendor-lowercase → plane_id and errors is a list of error strings.
-    """
-    fabric_plane_map: dict[str, str] = {}
-    fabric_planes_stored = 0
-    errors: list[str] = []
-
-    for plane in request.fabric_planes or []:
-        try:
-            plane_dict = plane.model_dump()
-            result = store_fabric_plane(plane_dict, request.run_id)
-            plane_id = result["plane_id"]
-            fabric_plane_map[plane.vendor.lower()] = plane_id
-            fabric_planes_stored += 1
-        except Exception as e:
-            msg = f"Failed to store fabric plane {plane.vendor}: {e}"
-            _log.error(msg)
-            errors.append(msg)
-
-    return fabric_plane_map, fabric_planes_stored, errors
 
 
 def build_plane_lookups(fabric_plane_map: dict[str, str]) -> tuple[dict, list]:

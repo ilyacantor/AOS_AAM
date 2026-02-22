@@ -153,7 +153,7 @@ async def _dispatch_job_to_farm(job_id: str, active_jobs: set):
                 update_runner_status, job_id, "failed",
                 error_message=str(exc),
             )
-        except Exception:
-            pass
+        except Exception as _status_exc:
+            _log.error("Failed to mark job %s as failed in DB after dispatch error: %s", job_id, _status_exc)
     finally:
         active_jobs.discard(job_id)

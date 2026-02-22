@@ -90,8 +90,8 @@ def _get_conn():
             if _pool:
                 try:
                     _pool.closeall()
-                except Exception:
-                    pass
+                except Exception as _e:
+                    _log.warning("Pool closeall failed during reconnect (ignored): %s", _e)
             _pool = None
             continue
     pool = _get_pool()
@@ -107,8 +107,8 @@ def _put_conn(conn, *, broken: bool = False):
             pool.putconn(conn, close=True)
         else:
             pool.putconn(conn)
-    except Exception:
-        pass
+    except Exception as e:
+        _log.error("Failed to return connection to pool (pool may be broken): %s", e)
 
 
 def _execute_composed(query: sql.Composed, params: tuple = (), *, fetch: bool = True) -> list[dict]:
@@ -426,5 +426,6 @@ def table_exists(table_name: str) -> bool:
         )
         rows = _execute_composed(query, (table_name,))
         return rows[0].get("exists", False) if rows else False
-    except Exception:
-        return False
+    except Exception as exc:
+        _log.error("table_exists(%r) failed — DB may be unreachable: %s", table_name, exc)
+        raise

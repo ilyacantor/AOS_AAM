@@ -64,7 +64,8 @@ async def ui_pipes_list(
     # Fetch latest runner job status per pipe
     try:
         all_jobs = list_runner_jobs(limit=200)
-    except Exception:
+    except Exception as exc:
+        _log.error("Failed to fetch runner jobs for dashboard: %s", exc)
         all_jobs = []
     latest_job_by_pipe = {}
     for j in all_jobs:
@@ -3461,7 +3462,8 @@ async def ui_reconcile(aod_run_id: str):
         dcl_skipped_count = dcl_export.skipped_count
         dcl_snapshot = dcl_export.snapshot_name
         dcl_aod_run = dcl_export.aod_run_id
-    except Exception:
+    except Exception as exc:
+        _log.error("Failed to build DCL export for deep check: %s", exc)
         dcl_exported = 0
         dcl_skipped = []
         dcl_skipped_count = 0

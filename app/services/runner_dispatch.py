@@ -160,8 +160,11 @@ def _init_seq_counter() -> int:
         rows = sb._execute_composed(query)
         if rows and rows[0].get("mx") is not None:
             return int(rows[0]["mx"])
-    except Exception:
-        pass
+    except Exception as exc:
+        raise RuntimeError(
+            f"Failed to initialize job sequence counter from DB: {exc}. "
+            "Cannot dispatch safely — a counter reset to 0 would create job ID collisions."
+        ) from exc
     return 0
 
 
@@ -278,8 +281,12 @@ def dispatch_pipe(
             if handoffs:
                 snapshot_name = snapshot_name or handoffs[0].get("snapshot_name")
                 aod_run_id = handoffs[0].get("aod_run_id")
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.error(
+                "Failed to fetch latest handoff log for dispatch lineage (pipe=%s): %s. "
+                "Manifest will have no AOD run_id — end-to-end reconciliation will be broken for this dispatch.",
+                pipe_id, exc,
+            )
     else:
         aod_run_id = None
 
@@ -407,8 +414,8 @@ def _classify_farm_error(status_code: int, body: str, content_type: str) -> tupl
         err_body = _json.loads(body)
         detail = err_body.get("detail") or err_body.get("error") or err_body.get("message") or str(err_body)
         return "FARM_APP_ERROR", f"Farm returned HTTP {status_code}: {str(detail)[:300]}"
-    except Exception:
-        pass
+    except Exception as _e:
+        _log.debug("Could not parse Farm error response body as JSON: %s", _e)
 
     return "UNKNOWN_ERROR", f"HTTP {status_code}: {body[:300]}"
 

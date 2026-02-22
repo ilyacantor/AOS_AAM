@@ -157,9 +157,7 @@ def cancel_queued_jobs() -> int:
         rows = sb2._execute_composed(query)
         return len(rows)
     except Exception as exc:
-        import logging
-        logging.getLogger("aam.db.runner_jobs").error("Failed to cancel queued jobs: %s", exc)
-        return 0
+        raise RuntimeError(f"Failed to cancel queued jobs: {exc}") from exc
 
 
 def list_runner_jobs(

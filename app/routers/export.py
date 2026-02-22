@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from typing import Optional
 from datetime import datetime
 import httpx
+import json
 
 from ..db import get_pipe_stats, list_candidates, record_dcl_push, list_dcl_pushes, get_dcl_push
 from ..dcl_export import build_dcl_export
@@ -180,10 +181,12 @@ async def push_to_dcl(request: Request):
     Optional body: {"aod_run_id": "...", "notes": "..."}
     """
     body = {}
-    try:
-        body = await request.json()
-    except Exception:
-        pass
+    raw = await request.body()
+    if raw:
+        try:
+            body = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail=f"Request body is not valid JSON: {exc}")
 
     aod_run_id = body.get("aod_run_id")
     notes = body.get("notes")
@@ -251,10 +254,12 @@ async def dispatch_dcl(request: Request):
     Idempotent — calling twice for the same dispatch is harmless.
     """
     body = {}
-    try:
-        body = await request.json()
-    except Exception:
-        pass
+    raw = await request.body()
+    if raw:
+        try:
+            body = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail=f"Request body is not valid JSON: {exc}")
 
     report = await _dispatch_to_dcl(
         aod_run_id=body.get("aod_run_id"),
