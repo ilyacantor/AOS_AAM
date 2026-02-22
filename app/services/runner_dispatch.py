@@ -203,7 +203,14 @@ def build_manifest(
     # Resolve adapter type: prefer transport_kind, fall back to fabric_plane
     adapter = _TRANSPORT_ADAPTER.get(transport_kind, "")
     if not adapter:
-        adapter = _ADAPTER_MAP.get(fabric_plane, "rest_api")
+        adapter = _ADAPTER_MAP.get(fabric_plane, "")
+    if not adapter:
+        _log.warning(
+            "No adapter mapping for pipe=%s (transport_kind=%r, fabric_plane=%r) — "
+            "Farm will receive adapter='' and may reject the manifest.",
+            pipe_id, transport_kind, fabric_plane,
+        )
+        adapter = ""
 
     # Credentials reference (vault URI) — from pipe's access info
     access = pipe.get("access") or {}
@@ -432,7 +439,7 @@ async def dispatch_to_farm(manifest: JobManifest) -> dict:
     attempt_at = datetime.utcnow().isoformat() + "Z"
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=float(settings.RUNNER_JOB_TIMEOUT_S)) as client:
             resp = await client.post(farm_url, json=payload)
 
         if resp.status_code in (200, 201, 202):

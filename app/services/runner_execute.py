@@ -109,7 +109,7 @@ async def execute_job_inline(job_id: str, http_client: httpx.AsyncClient | None 
 
     try:
         owns_client = http_client is None
-        client = http_client or httpx.AsyncClient(timeout=30.0)
+        client = http_client or httpx.AsyncClient(timeout=float(settings.RUNNER_JOB_TIMEOUT_S))
         try:
             resp = await client.post(dcl_url, json=prep["payload"], headers=prep["headers"])
         finally:

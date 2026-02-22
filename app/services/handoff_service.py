@@ -283,18 +283,15 @@ def _check_idempotency(run_id: str, candidate_count: int) -> Optional[AODHandoff
 
 
 def _serialize_candidate(candidate) -> dict:
-    """Convert a model candidate to a DB-ready dict, handling enums."""
-    candidate_dict = candidate.model_dump()
+    """Convert a model candidate to a DB-ready dict, handling enums.
 
-    if candidate.preferred_modality:
-        candidate_dict["preferred_modality"] = candidate.preferred_modality.value
-    if candidate.action_type:
-        candidate_dict["action_type"] = candidate.action_type.value
-    if candidate.connected_via_plane:
-        candidate_dict["connected_via_plane"] = candidate.connected_via_plane.value
+    mode="json" serializes all enum fields to their string values automatically,
+    eliminating per-field manual handling and the risk of missed fields.
+    """
+    candidate_dict = candidate.model_dump(mode="json")
+    # findings are Pydantic models — serialize explicitly for clarity
     if candidate.findings:
-        candidate_dict["findings"] = [f.model_dump() for f in candidate.findings]
-
+        candidate_dict["findings"] = [f.model_dump(mode="json") for f in candidate.findings]
     return candidate_dict
 
 
@@ -480,7 +477,7 @@ def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
             "aod_run_id": request.run_id,
             "aod_asset_id": f"infra-{plane.vendor.lower()}",
             "fabric_plane_id": plane_id,
-            "status": CandidateStatus.NEW,
+            "status": CandidateStatus.NEW.value,
         }
         batch.append(infra_candidate)
         accepted.append({
