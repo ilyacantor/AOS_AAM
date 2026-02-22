@@ -60,23 +60,37 @@ async def _deliver_to_dcl(export_payload: dict) -> dict:
                     },
                 )
                 report["export_pipes"] = {
-                    "url": settings.DCL_EXPORT_PIPES_URL,
-                    "status": resp.status_code,
-                    "ok": resp.is_success,
-                    "body": resp.json() if resp.is_success else resp.text[:500],
                     "bridge": True,
+                    "url": settings.DCL_EXPORT_PIPES_URL,
+                    "ok": resp.is_success,
+                    "status": resp.status_code,
+                    "body": resp.json() if resp.is_success else resp.text[:500],
+                    "error": None,
+                    "skipped": False,
                 }
                 _log.info("DCL export-pipes POST (bridge) %s → %d",
                           settings.DCL_EXPORT_PIPES_URL, resp.status_code)
             except Exception as exc:
                 report["export_pipes"] = {
-                    "url": settings.DCL_EXPORT_PIPES_URL,
-                    "error": str(exc),
                     "bridge": True,
+                    "url": settings.DCL_EXPORT_PIPES_URL,
+                    "ok": False,
+                    "status": None,
+                    "body": None,
+                    "error": str(exc),
+                    "skipped": False,
                 }
                 _log.warning("DCL export-pipes POST (bridge) failed: %s", exc)
         else:
-            report["export_pipes"] = {"skipped": True, "reason": "DCL_URL not configured", "bridge": True}
+            report["export_pipes"] = {
+                "bridge": True,
+                "url": None,
+                "ok": False,
+                "status": None,
+                "body": None,
+                "error": None,
+                "skipped": True,
+            }
 
     return report
 
