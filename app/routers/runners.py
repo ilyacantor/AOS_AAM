@@ -72,15 +72,22 @@ async def dispatch_multiple(req: RunnerBatchDispatchRequest):
     if not req.pipe_ids:
         raise HTTPException(status_code=400, detail="pipe_ids is required")
 
-    # Wake Farm if it's sleeping (free-tier cold start)
+    # Wake Farm if it's sleeping (free-tier cold start can take 30-60s)
     import httpx
     farm_base = settings.FARM_INTAKE_URL.replace("/api/farm/manifest-intake", "")
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            await client.get(f"{farm_base}/api/health")
-        _log.info("Farm health ping OK — proceeding with batch dispatch")
-    except Exception as exc:
-        _log.warning("Farm health ping failed (%s) — dispatching anyway", exc)
+    farm_awake = False
+    for attempt in range(4):
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                resp = await client.get(f"{farm_base}/api/health")
+            if resp.status_code == 200:
+                farm_awake = True
+                _log.info("Farm health ping OK (attempt %d) — proceeding with batch dispatch", attempt + 1)
+                break
+        except Exception as exc:
+            _log.info("Farm health ping attempt %d failed: %s", attempt + 1, exc)
+    if not farm_awake:
+        _log.warning("Farm did not respond after 4 attempts — dispatching anyway (expect failures)")
 
     results = dispatch_batch(req.pipe_ids, req.trigger)
 
