@@ -7,6 +7,7 @@ and pushes data to DCL (Path 3).  AAM never executes data extraction.
 RACI: AAM is A/R for Collector Run Execution (Row 43) and Track Collector Runs (Row 48).
 """
 import asyncio
+import re
 from fastapi import APIRouter, HTTPException, Header, Query
 from typing import Optional
 
@@ -25,6 +26,7 @@ from ..db.runner_jobs import (
     update_heartbeat,
     cancel_queued_jobs,
 )
+from ..config import settings
 from ..logger import get_logger
 
 _log = get_logger("routers.runners")
@@ -65,10 +67,20 @@ async def dispatch_multiple(req: RunnerBatchDispatchRequest):
     """Dispatch runner jobs for multiple pipes to Farm.
 
     Builds manifests, stores them, and POSTs each to Farm's intake
-    endpoint in parallel.
+    endpoint in parallel.  Pings Farm health first to wake cold instances.
     """
     if not req.pipe_ids:
         raise HTTPException(status_code=400, detail="pipe_ids is required")
+
+    # Wake Farm if it's sleeping (free-tier cold start)
+    import httpx
+    farm_base = settings.FARM_INTAKE_URL.replace("/api/farm/manifest-intake", "")
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            await client.get(f"{farm_base}/api/health")
+        _log.info("Farm health ping OK — proceeding with batch dispatch")
+    except Exception as exc:
+        _log.warning("Farm health ping failed (%s) — dispatching anyway", exc)
 
     results = dispatch_batch(req.pipe_ids, req.trigger)
 
@@ -110,6 +122,9 @@ async def list_jobs(
 ):
     """List runner jobs with optional filters."""
     jobs = list_runner_jobs(pipe_id=pipe_id, status=status, limit=limit)
+    for j in jobs:
+        if j.get("error_message") and "<!DOCTYPE" in j["error_message"]:
+            j["error_message"] = re.sub(r"<!DOCTYPE[\s\S]*", "", j["error_message"]).strip()
     return {"jobs": jobs, "count": len(jobs)}
 
 
