@@ -29,7 +29,7 @@ services:
       - key: AAM_DCL_API_KEY
         sync: false
       - key: FARM_INTAKE_URL
-        sync: false
+        value: "https://farmv2.onrender.com"
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_DB_PASSWORD
