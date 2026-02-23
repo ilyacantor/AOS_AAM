@@ -34,12 +34,37 @@ def _ensure_tables():
                 _log.warning("DDL skipped: %s", str(e)[:100])
 
 
+def _run_migrations():
+    """Run pending migrations that are idempotent (safe to run multiple times)."""
+    from ..logger import get_logger
+    from . import supabase_client as sb
+    from psycopg2 import sql as psql
+    _log = get_logger("db.migrations")
+
+    migrations = [
+        # Migration 2026-02-23: Add run_id column for batch grouping
+        ("ALTER TABLE runner_jobs ADD COLUMN IF NOT EXISTS run_id VARCHAR", "add_run_id_column"),
+        ("CREATE INDEX IF NOT EXISTS idx_runner_jobs_run_id ON runner_jobs(run_id)", "add_run_id_index"),
+    ]
+
+    for sql_stmt, migration_name in migrations:
+        try:
+            sb._execute_composed(psql.SQL(sql_stmt), fetch=False)
+            _log.info("Migration applied: %s", migration_name)
+        except Exception as e:
+            if "already exists" in str(e).lower() or "duplicate" in str(e).lower():
+                _log.debug("Migration already applied: %s", migration_name)
+            else:
+                _log.warning("Migration failed (%s): %s", migration_name, str(e)[:200])
+
+
 def init_db():
-    """Initialize database schema"""
+    """Initialize database schema and run migrations"""
     from ..logger import get_logger
     _log = get_logger("db")
     try:
         _ensure_tables()
+        _run_migrations()
         from . import supabase_client as sb
         sb.insert("collectors", {
             "collector_id": "mock-collector-001",
