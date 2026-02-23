@@ -11,11 +11,29 @@ from typing import Optional
 from . import supabase_client as sb
 
 
+def delete_runner_jobs_for_pipes(pipe_ids: list[str]) -> int:
+    """Delete existing runner jobs for given pipe_ids before re-dispatch."""
+    if not pipe_ids:
+        return 0
+    from psycopg2 import sql as psql
+    query = psql.SQL(
+        "DELETE FROM {} WHERE job_id = ANY(%s) RETURNING job_id"
+    ).format(sb._ident("runner_jobs"))
+    rows = sb._execute_composed(query, (pipe_ids,))
+    return len(rows)
+
+
 def create_runner_job(manifest_dict: dict) -> str:
-    """Create a new runner job from a manifest dict. Returns job_id (= pipe_id)."""
+    """Create a new runner job from a manifest dict. Returns job_id (= pipe_id).
+
+    Auto-cleans any existing job for the same pipe_id before inserting.
+    """
     job_id = manifest_dict["source"]["pipe_id"]
     run_id = manifest_dict["run_id"]
     now = datetime.utcnow().isoformat()
+
+    # Auto-clean stale job for this pipe_id (re-dispatch case)
+    delete_runner_jobs_for_pipes([job_id])
 
     sb.insert("runner_jobs", {
         "job_id": job_id,
@@ -38,16 +56,13 @@ def create_runner_jobs_batch(manifests: list[dict]) -> list[str]:
     if not manifests:
         return []
     job_ids = [m["source"]["pipe_id"] for m in manifests]
-    from psycopg2 import sql as psql
-    conflict_rows = sb._execute_composed(
-        psql.SQL("SELECT job_id FROM {} WHERE job_id = ANY(%s)").format(sb._ident("runner_jobs")),
-        (job_ids,),
-    )
-    if conflict_rows:
-        existing = {r["job_id"] for r in conflict_rows}
-        raise ValueError(
-            f"Runner jobs already exist for pipe_id(s): {sorted(existing)}. "
-            "Use distinct pipe_ids or clear existing jobs first."
+
+    # Auto-clean stale jobs for these pipe_ids (re-dispatch case)
+    cleaned = delete_runner_jobs_for_pipes(job_ids)
+    if cleaned:
+        from ..logger import get_logger
+        get_logger("db.runner_jobs").info(
+            "Auto-cleaned %d stale runner jobs before re-dispatch", cleaned
         )
     now = datetime.utcnow().isoformat()
     rows = []
@@ -211,7 +226,7 @@ def list_runner_jobs(
 
     rows = sb.select(
         "runner_jobs",
-        columns="job_id,pipe_id,status,dispatched_at,started_at,completed_at,rows_transferred,error_message,last_heartbeat",
+        columns="job_id,pipe_id,run_id,status,dispatched_at,started_at,completed_at,rows_transferred,error_message,last_heartbeat",
         **kwargs,
     )
     return rows

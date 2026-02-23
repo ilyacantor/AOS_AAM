@@ -4,6 +4,10 @@ Shared test fixtures for AAM unit tests.
 import os
 import tempfile
 import pytest
+from dotenv import load_dotenv
+
+# Load .env BEFORE any app imports so module-level Settings() and supabase_client work
+load_dotenv(override=False)
 
 
 @pytest.fixture(autouse=True)

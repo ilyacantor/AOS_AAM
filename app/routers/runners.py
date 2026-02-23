@@ -91,19 +91,39 @@ async def dispatch_multiple(req: RunnerBatchDispatchRequest):
 
     results = dispatch_batch(req.pipe_ids, req.trigger)
 
+    # Extract manifests and dispatch to Farm inline (not just queued for background worker)
+    farm_tasks = []
     for result in results:
-        result.pop("_manifest", None)
+        manifest = result.pop("_manifest", None)
+        if manifest and result.get("status") == "queued":
+            farm_tasks.append((result, manifest))
 
-    queued = [r for r in results if r.get("status") == "queued"]
-    errors = [r for r in results if r.get("status") in ("error", "skipped")]
+    async def _dispatch_one(result_dict: dict, manifest_obj):
+        try:
+            farm_result = await dispatch_to_farm(manifest_obj)
+            result_dict["status"] = farm_result.get("status", "dispatched")
+            if farm_result.get("error_class"):
+                result_dict["error_class"] = farm_result["error_class"]
+            if farm_result.get("error"):
+                result_dict["farm_error"] = farm_result["error"]
+            if farm_result.get("farm_response"):
+                result_dict["farm_response"] = farm_result["farm_response"]
+        except Exception as exc:
+            result_dict["farm_error"] = str(exc)
 
-    _log.info("Batch dispatch: %d queued for Farm, %d skipped/errors", len(queued), len(errors))
+    if farm_tasks:
+        await asyncio.gather(*[_dispatch_one(r, m) for r, m in farm_tasks])
+
+    dispatched = [r for r in results if r.get("status") == "dispatched"]
+    errors = [r for r in results if r.get("status") in ("error", "skipped", "farm_error", "farm_unreachable", "failed")]
+
+    _log.info("Batch dispatch: %d dispatched to Farm, %d errors/skipped", len(dispatched), len(errors))
 
     return {
-        "dispatched": len(queued),
+        "dispatched": len(dispatched),
         "errors": len(errors),
         "jobs": results,
-        "message": f"{len(queued)} manifests queued for Farm worker",
+        "message": f"{len(dispatched)} manifests dispatched to Farm",
     }
 
 
@@ -153,14 +173,15 @@ async def get_job_manifest(job_id: str):
     return job.get("manifest", {})
 
 
-@router.put("/callback/{run_id}")
-async def runner_callback(run_id: str, req: RunnerCallbackRequest):
+@router.put("/callback/{pipe_id}")
+async def runner_callback(pipe_id: str, req: RunnerCallbackRequest):
     """Runner reports status back to AAM (heartbeat / terminal status).
 
     RACI Row 48: AAM must track collector run status.
     Refinement A: Runners MUST call this on success or failure.
+    Farm sends pipe_id (= job_id) as the path parameter.
     """
-    job = get_runner_job(run_id)
+    job = get_runner_job(pipe_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
@@ -174,7 +195,7 @@ async def runner_callback(run_id: str, req: RunnerCallbackRequest):
         )
 
     updated = update_runner_status(
-        run_id,
+        pipe_id,
         req.status.value,
         rows_transferred=req.rows_transferred,
         error_message=req.error_message,
@@ -182,15 +203,15 @@ async def runner_callback(run_id: str, req: RunnerCallbackRequest):
     if not updated:
         raise HTTPException(status_code=500, detail="Failed to update job")
 
-    return {"job_id": run_id, "status": req.status.value, "message": "Status updated"}
+    return {"job_id": pipe_id, "status": req.status.value, "message": "Status updated"}
 
 
-@router.put("/heartbeat/{run_id}")
-async def runner_heartbeat(run_id: str):
+@router.put("/heartbeat/{pipe_id}")
+async def runner_heartbeat(pipe_id: str):
     """Runner sends periodic heartbeat to prevent stale-job reaping."""
-    job = get_runner_job(run_id)
+    job = get_runner_job(pipe_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    update_heartbeat(run_id)
-    return {"job_id": run_id, "heartbeat": "ok"}
+    update_heartbeat(pipe_id)
+    return {"job_id": pipe_id, "heartbeat": "ok"}

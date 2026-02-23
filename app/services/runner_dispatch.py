@@ -30,6 +30,13 @@ from ..models import (
 
 _log = get_logger("services.runner_dispatch")
 
+
+def _generate_dispatch_id(aod_run_id: str) -> str:
+    """Unique per dispatch cycle. Farm groups all pipes by this shared ID."""
+    ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    return f"aam_{aod_run_id}_{ts}"
+
+
 # Map fabric plane + transport kind to adapter type string
 _ADAPTER_MAP = {
     FabricPlane.API_GATEWAY: "rest_api",
@@ -283,7 +290,7 @@ def dispatch_pipe(
         snapshot_name=snapshot_name,
         aod_run_id=aod_run_id,
         farm_verification=farm_verification,
-        run_id=aod_run_id,  # Use aod_run_id as manifest run_id
+        run_id=_generate_dispatch_id(aod_run_id),
     )
     job_id = dispatch_job(manifest)
 
@@ -339,6 +346,9 @@ def dispatch_batch(
         _log.error("Failed to fetch aod_run_id for batch dispatch: %s", exc)
         raise
 
+    # Generate one dispatch-cycle ID shared by all manifests in this batch
+    batch_run_id = _generate_dispatch_id(current_aod_run_id)
+
     manifests_data = []
     manifest_objects = []
     results = []
@@ -354,8 +364,7 @@ def dispatch_batch(
                 errors.append({"pipe_id": pid, "status": "skipped", "error": "Unclassified category — incomplete inference, not dispatchable"})
                 continue
 
-            # Use aod_run_id as the manifest run_id so Farm can group all pipes in this batch
-            manifest = build_manifest(pipe, trigger, snapshot_name=current_snapshot, aod_run_id=current_aod_run_id, run_id=current_aod_run_id)
+            manifest = build_manifest(pipe, trigger, snapshot_name=current_snapshot, aod_run_id=current_aod_run_id, run_id=batch_run_id)
 
             manifests_data.append(manifest.model_dump())
             manifest_objects.append(manifest)
