@@ -30,27 +30,27 @@ router = APIRouter(prefix="/api/dcl", tags=["DCL Ingestion"])
 async def ingest_data(
     body: DCLIngestRequest,
     x_run_id: str = Header(..., alias="x-run-id"),
-    x_pipe_id: Optional[str] = Header(None, alias="x-pipe-id"),
+    x_pipe_id: str = Header(..., alias="x-pipe-id"),
     x_schema_hash: Optional[str] = Header(None, alias="x-schema-hash"),
     x_api_key: Optional[str] = Header(None, alias="x-api-key"),
 ):
     """Accept a data payload from a Runner.
 
     Headers (provenance):
-        x-run-id: The run_id from the Job Manifest (required).
-        x-pipe-id: The pipe_id from the Job Manifest (cross-validated).
+        x-run-id: The run_id from the Job Manifest (for correlation).
+        x-pipe-id: The pipe_id from the Job Manifest (required, used for job lookup).
         x-schema-hash: SHA-256 of the data structure (drift detection).
         x-api-key: Runner auth token (validated if present).
 
     Body (flat, per DCL contract):
         source_system, tenant_id, snapshot_name, run_timestamp, rows[]
     """
-    # --- Validate authorized run ---
-    job = get_runner_job(x_run_id)
+    # --- Validate authorized job by pipe_id (job_id = pipe_id) ---
+    job = get_runner_job(x_pipe_id)
     if not job:
         raise HTTPException(
             status_code=403,
-            detail=f"Unknown run_id: {x_run_id}. Only authorized runner jobs may push data.",
+            detail=f"Unknown pipe_id: {x_pipe_id}. Only authorized runner jobs may push data.",
         )
 
     # Cross-validate x-pipe-id header against manifest
@@ -89,7 +89,7 @@ async def ingest_data(
             _log.warning("Failed to create drift event: %s", exc)
 
     # --- Store the payload ---
-    update_runner_status(x_run_id, "pushing")
+    update_runner_status(x_pipe_id, "pushing")
 
     record = store_ingest(
         run_id=x_run_id,
@@ -101,7 +101,7 @@ async def ingest_data(
 
     # --- Update runner job status ---
     update_runner_status(
-        x_run_id,
+        x_pipe_id,
         "completed",
         rows_transferred=record["row_count"],
         dcl_response=record,

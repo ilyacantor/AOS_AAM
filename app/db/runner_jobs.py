@@ -12,13 +12,15 @@ from . import supabase_client as sb
 
 
 def create_runner_job(manifest_dict: dict) -> str:
-    """Create a new runner job from a manifest dict. Returns job_id (= run_id)."""
-    job_id = manifest_dict["run_id"]
+    """Create a new runner job from a manifest dict. Returns job_id (= pipe_id)."""
+    job_id = manifest_dict["source"]["pipe_id"]
+    run_id = manifest_dict["run_id"]
     now = datetime.utcnow().isoformat()
 
     sb.insert("runner_jobs", {
         "job_id": job_id,
         "pipe_id": manifest_dict["source"]["pipe_id"],
+        "run_id": run_id,
         "status": "queued",
         "manifest": json.dumps(manifest_dict, default=str),
         "dispatched_at": now,
@@ -53,6 +55,7 @@ def create_runner_jobs_batch(manifests: list[dict]) -> list[str]:
         rows.append({
             "job_id": m["source"]["pipe_id"],
             "pipe_id": m["source"]["pipe_id"],
+            "run_id": m["run_id"],
             "status": "queued",
             "manifest": json.dumps(m, default=str),
             "dispatched_at": now,
@@ -70,7 +73,11 @@ def update_runner_status(
     error_message: Optional[str] = None,
     dcl_response: Optional[dict] = None,
 ) -> bool:
-    """Update runner job status and optional fields."""
+    """Update runner job status and optional fields.
+
+    Returns True if a row was updated, False if no matching job found.
+    Logs a warning when no job is found to help diagnose mismatches.
+    """
     data: dict = {"status": status}
     now = datetime.utcnow().isoformat()
 
@@ -88,6 +95,16 @@ def update_runner_status(
         data["dcl_response"] = json.dumps(dcl_response, default=str)
 
     result = sb.update("runner_jobs", data, filters={"job_id": job_id})
+
+    if not result:
+        from ..logger import get_logger
+        _log = get_logger("db.runner_jobs")
+        _log.warning(
+            "No runner job found for job_id=%s when updating to status=%s. "
+            "This may indicate a job_id mismatch between create and update calls.",
+            job_id, status
+        )
+
     return len(result) > 0
 
 

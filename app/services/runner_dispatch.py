@@ -146,39 +146,6 @@ def normalize_category(raw_category: Optional[str], vendor: Optional[str] = None
     return None
 
 
-_seq_counter: Optional[int] = None
-
-
-def _init_seq_counter() -> int:
-    """Initialize sequence counter from the max existing job number in the DB."""
-    try:
-        from ..db import supabase_client as sb
-        from psycopg2 import sql as psql
-        query = psql.SQL(
-            "SELECT MAX(CAST(SUBSTRING(job_id FROM '([0-9]+)$') AS INTEGER)) as mx FROM {}"
-        ).format(sb._ident("runner_jobs"))
-        rows = sb._execute_composed(query)
-        if rows and rows[0].get("mx") is not None:
-            return int(rows[0]["mx"])
-    except Exception as exc:
-        raise RuntimeError(
-            f"Failed to initialize job sequence counter from DB: {exc}. "
-            "Cannot dispatch safely — a counter reset to 0 would create job ID collisions."
-        ) from exc
-    return 0
-
-
-def _next_run_id(source_system: str) -> str:
-    """Generate a unique run_id: run_{YYYYMMDD}_{system}_{seq:03d}"""
-    global _seq_counter
-    if _seq_counter is None:
-        _seq_counter = _init_seq_counter()
-    _seq_counter += 1
-    date_str = datetime.utcnow().strftime("%Y%m%d")
-    safe_system = source_system.lower().replace(" ", "_")[:20]
-    return f"run_{date_str}_{safe_system}_{_seq_counter:03d}"
-
-
 def build_manifest(
     pipe: dict,
     trigger: str = "manual",
@@ -218,7 +185,10 @@ def build_manifest(
     credentials_ref = access.get("auth_ref")
 
     if run_id is None:
-        run_id = _next_run_id(source_system)
+        raise ValueError(
+            f"run_id is required for manifest building (pipe={pipe_id}). "
+            "Pass aod_run_id from AOD handoff or use a stable per-dispatch identifier."
+        )
 
     raw_category = pipe.get("category") or pipe.get("app_category") or None
     vendor = pipe.get("source_system") or pipe.get("vendor_name") or None
@@ -283,21 +253,29 @@ def dispatch_pipe(
     if not pipe:
         raise ValueError(f"Pipe {pipe_id} not found")
 
-    if not snapshot_name:
-        try:
-            from ..db.handoff import list_handoff_logs
-            handoffs = list_handoff_logs(limit=1)
-            if handoffs:
-                snapshot_name = snapshot_name or handoffs[0].get("snapshot_name")
-                aod_run_id = handoffs[0].get("aod_run_id")
-        except Exception as exc:
-            _log.error(
-                "Failed to fetch latest handoff log for dispatch lineage (pipe=%s): %s. "
-                "Manifest will have no AOD run_id — end-to-end reconciliation will be broken for this dispatch.",
-                pipe_id, exc,
+    # Always fetch aod_run_id from the latest handoff
+    try:
+        from ..db.handoff import list_handoff_logs
+        handoffs = list_handoff_logs(limit=1)
+        if not handoffs:
+            raise ValueError(
+                "No AOD handoff found. Run AOD handoff first before dispatching pipes."
             )
-    else:
-        aod_run_id = None
+
+        aod_run_id = handoffs[0].get("aod_run_id")
+        snapshot_name = snapshot_name or handoffs[0].get("snapshot_name")
+
+        if not aod_run_id:
+            raise ValueError(
+                "Latest handoff has no aod_run_id. Cannot dispatch without a run identifier."
+            )
+
+    except Exception as exc:
+        _log.error(
+            "Failed to fetch aod_run_id for dispatch (pipe=%s): %s",
+            pipe_id, exc,
+        )
+        raise
 
     manifest = build_manifest(
         pipe,
@@ -305,6 +283,7 @@ def dispatch_pipe(
         snapshot_name=snapshot_name,
         aod_run_id=aod_run_id,
         farm_verification=farm_verification,
+        run_id=aod_run_id,  # Use aod_run_id as manifest run_id
     )
     job_id = dispatch_job(manifest)
 
@@ -340,15 +319,25 @@ def dispatch_batch(
         vendor = p.get("source_system") or (cand.get("vendor_name") if cand else None)
         p["category"] = normalize_category(raw_cat, vendor)
 
-    current_snapshot: Optional[str] = None
-    current_aod_run_id: Optional[str] = None
+    # Always fetch aod_run_id from the latest handoff for batch grouping
     try:
         handoffs = list_handoff_logs(limit=1)
-        if handoffs:
-            current_snapshot = handoffs[0].get("snapshot_name")
-            current_aod_run_id = handoffs[0].get("aod_run_id")
+        if not handoffs:
+            raise ValueError(
+                "No AOD handoff found. Run AOD handoff first before dispatching pipes."
+            )
+
+        current_aod_run_id = handoffs[0].get("aod_run_id")
+        current_snapshot = handoffs[0].get("snapshot_name")
+
+        if not current_aod_run_id:
+            raise ValueError(
+                "Latest handoff has no aod_run_id. Cannot dispatch without a run identifier."
+            )
+
     except Exception as exc:
-        _log.warning("Failed to resolve snapshot_name for dispatch: %s", exc)
+        _log.error("Failed to fetch aod_run_id for batch dispatch: %s", exc)
+        raise
 
     manifests_data = []
     manifest_objects = []
@@ -453,7 +442,7 @@ async def dispatch_to_farm(manifest: JobManifest) -> dict:
                 "Manifest dispatched to Farm: run_id=%s pipe_id=%s status=%d url=%s",
                 manifest.run_id, manifest.source.pipe_id, resp.status_code, farm_url,
             )
-            update_runner_status(manifest.run_id, "dispatched")
+            update_runner_status(manifest.source.pipe_id, "dispatched")
             return {"status": "dispatched", "farm_response": body}
 
         content_type = resp.headers.get("content-type", "")
@@ -468,7 +457,7 @@ async def dispatch_to_farm(manifest: JobManifest) -> dict:
             manifest.run_id, manifest.source.pipe_id, farm_url, resp.status_code,
             error_class, content_type, detail,
         )
-        update_runner_status(manifest.run_id, "failed", error_message=error_msg)
+        update_runner_status(manifest.source.pipe_id, "failed", error_message=error_msg)
         return {
             "status": "farm_error",
             "error_class": error_class,
