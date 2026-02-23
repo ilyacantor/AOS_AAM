@@ -18,7 +18,7 @@ from ..db import (
     list_candidates,
     list_pipes,
 )
-from ..db.runner_jobs import create_runner_job, create_runner_jobs_batch, update_runner_status, list_runner_jobs
+from ..db.runner_jobs import create_runner_job, create_runner_jobs_batch, update_runner_status, list_runner_jobs, get_runner_job
 from ..models import (
     JobManifest,
     SourceSpec,
@@ -481,7 +481,17 @@ async def dispatch_to_farm(manifest: JobManifest) -> dict:
                 "Manifest dispatched to Farm: run_id=%s pipe_id=%s status=%d url=%s",
                 manifest.run_id, manifest.source.pipe_id, resp.status_code, farm_url,
             )
-            update_runner_status(manifest.source.pipe_id, "dispatched")
+            # Guard: Farm processes synchronously and may fire the callback
+            # before returning this response — don't regress a terminal status.
+            current_job = get_runner_job(manifest.source.pipe_id)
+            current_status = current_job.get("status") if current_job else None
+            if current_status not in ("completed", "failed", "timed_out"):
+                update_runner_status(manifest.source.pipe_id, "dispatched")
+            else:
+                _log.info(
+                    "Skipping 'dispatched' write — job %s already %s (callback arrived first)",
+                    manifest.source.pipe_id, current_status,
+                )
             return {"status": "dispatched", "farm_response": body}
 
         content_type = resp.headers.get("content-type", "")
