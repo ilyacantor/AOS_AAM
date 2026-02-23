@@ -57,6 +57,26 @@ def clear_all_data():
     return reset_aod_state()
 
 
+def clear_runner_jobs() -> dict:
+    """Clear all runner jobs from the database.
+
+    Use this to resolve 'already exist' conflicts when re-dispatching pipes.
+    Deletes all rows from runner_jobs table regardless of status.
+    """
+    from psycopg2 import sql as psql
+
+    query = psql.SQL("DELETE FROM {} RETURNING job_id").format(
+        sb._ident("runner_jobs")
+    )
+
+    try:
+        rows = sb._execute_composed(query)
+        count = len(rows)
+        return {"cleared": True, "jobs_deleted": count}
+    except Exception as exc:
+        return {"cleared": False, "error": str(exc)}
+
+
 def get_pipe_stats() -> dict:
     """Get statistics about pipes by fabric_plane and modality.
 

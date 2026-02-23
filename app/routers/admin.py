@@ -3,7 +3,7 @@ Admin Router — clear data, debug, and diagnostic endpoints.
 """
 from fastapi import APIRouter
 
-from ..db import clear_all_data, get_canonical_stats
+from ..db import clear_all_data, clear_runner_jobs, get_canonical_stats
 from ..db import supabase_client as sb
 from ..constants import SOR_CATEGORIES
 
@@ -15,6 +15,23 @@ async def clear_data():
     """Clear all data (use with caution)."""
     result = clear_all_data()
     return {"message": "All data cleared", **result}
+
+
+@router.delete("/api/runner-jobs")
+async def clear_jobs():
+    """Clear all runner jobs to resolve 'already exist' conflicts.
+
+    Use this before re-dispatching pipes when you see 'Runner jobs already exist' errors.
+    Deletes all rows from runner_jobs table regardless of status.
+    """
+    result = clear_runner_jobs()
+    if result.get("cleared"):
+        return {
+            "message": f"Cleared {result['jobs_deleted']} runner jobs",
+            **result
+        }
+    else:
+        return {"message": "Failed to clear runner jobs", **result}
 
 
 @router.get("/api/debug/handoff-state", tags=["Debug"])

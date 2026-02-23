@@ -10,7 +10,7 @@ from .collectors import list_collectors, update_collector_last_run, create_colle
 from .drift_status import update_drift_status  # noqa: F401
 from .candidate_match import update_candidate_match, update_candidate_deferred  # noqa: F401
 from .tee import list_tee_requests, get_drift_event, get_tee_request, create_tee_request, update_tee_request_status  # noqa: F401
-from .admin import reset_aod_state, clear_all_data, get_pipe_stats  # noqa: F401
+from .admin import reset_aod_state, clear_all_data, clear_runner_jobs, get_pipe_stats  # noqa: F401
 from .topology import get_topology_data, get_topology_for_pipe, get_topology_for_fabric_plane  # noqa: F401
 from .handoff import create_handoff_log, get_handoff_log, list_handoff_logs  # noqa: F401
 from .policy import save_policy_manifest, get_active_policy_manifest, list_policy_manifests, get_candidates_by_aod_run  # noqa: F401
