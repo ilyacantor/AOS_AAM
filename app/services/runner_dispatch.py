@@ -228,6 +228,7 @@ def build_manifest(
         ),
         target=TargetSpec(
             dcl_url=settings.DCL_INGEST_URL,
+            auth_token_ref=settings.DCL_API_KEY or None,
             snapshot_name=snapshot_name,
             tenant_id=tenant_id,
         ),
