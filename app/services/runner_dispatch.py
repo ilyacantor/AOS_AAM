@@ -206,14 +206,13 @@ def build_manifest(
             "Pass aod_run_id from AOD handoff or use a stable per-dispatch identifier."
         )
 
-    raw_category = pipe.get("category") or pipe.get("app_category") or None
-    vendor = pipe.get("source_system") or pipe.get("vendor_name") or None
-    if not raw_category:
+    # Use AOD's category directly — AOD owns classification per RACI.
+    # Fall back to candidate lookup only if pipe dict has no category.
+    category = pipe.get("category") or pipe.get("app_category") or None
+    if not category:
         candidate = get_candidate(pipe.get("pipe_id", ""))
         if candidate:
-            raw_category = candidate.get("category") or None
-            vendor = vendor or candidate.get("vendor_name")
-    category = normalize_category(raw_category, vendor)
+            category = candidate.get("category") or None
 
     tenant_id = snapshot_name or aod_run_id or "default"
 
@@ -331,9 +330,10 @@ def dispatch_batch(
     candidate_map = {c["candidate_id"]: c for c in all_candidates}
     for p in all_pipes:
         cand = candidate_map.get(p["pipe_id"])
+        # Use AOD's category directly — AOD owns classification per RACI.
+        # No normalization to a closed vocabulary; pass through as-is.
         raw_cat = p.get("category") or (cand.get("category") if cand else None)
-        vendor = p.get("source_system") or (cand.get("vendor_name") if cand else None)
-        p["category"] = normalize_category(raw_cat, vendor)
+        p["category"] = (raw_cat.strip() if raw_cat else None) or None
 
     # Always fetch aod_run_id from the latest handoff for batch grouping
     try:
@@ -371,7 +371,17 @@ def dispatch_batch(
                 errors.append({"pipe_id": pid, "status": "error", "error": f"Pipe {pid} not found"})
                 continue
             if not pipe.get("category"):
-                errors.append({"pipe_id": pid, "status": "skipped", "error": "Unclassified category — incomplete inference, not dispatchable"})
+                vendor = pipe.get("source_system", "?")
+                _log.warning(
+                    "Pipe %s skipped: null/empty category from AOD (vendor=%s). "
+                    "AOD did not classify this candidate.",
+                    pid, vendor,
+                )
+                errors.append({
+                    "pipe_id": pid,
+                    "status": "skipped",
+                    "error": f"Null/empty category from AOD (vendor={vendor}) — not dispatchable",
+                })
                 continue
 
             manifest = build_manifest(pipe, trigger, snapshot_name=current_snapshot, aod_run_id=current_aod_run_id, run_id=batch_run_id)
