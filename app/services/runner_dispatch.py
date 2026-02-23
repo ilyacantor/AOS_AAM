@@ -231,6 +231,7 @@ def build_manifest(
             auth_token_ref=settings.DCL_API_KEY or None,
             snapshot_name=snapshot_name,
             tenant_id=tenant_id,
+            callback_url=f"{settings.BASE_URL}/api/runners/callback",
         ),
         provenance={
             "aod_run_id": aod_run_id,

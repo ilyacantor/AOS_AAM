@@ -207,6 +207,7 @@ async def runner_callback(pipe_id: str, req: RunnerCallbackRequest):
         req.status.value,
         rows_transferred=req.rows_transferred,
         error_message=req.error_message,
+        dcl_response=req.dcl_response,
     )
     if not updated:
         raise HTTPException(status_code=500, detail="Failed to update job")

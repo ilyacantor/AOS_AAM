@@ -556,6 +556,7 @@ class TargetSpec(BaseModel):
     auth_token_ref: Optional[str] = None                # vault reference — NEVER plaintext
     tenant_id: Optional[str] = None
     snapshot_name: Optional[str] = None
+    callback_url: Optional[str] = None                  # AAM callback base — Runner appends /{run_id}
 
 
 class RunLimits(BaseModel):
@@ -625,3 +626,4 @@ class RunnerCallbackRequest(BaseModel):
     status: RunnerJobStatus
     rows_transferred: Optional[int] = None
     error_message: Optional[str] = None
+    dcl_response: Optional[dict] = None

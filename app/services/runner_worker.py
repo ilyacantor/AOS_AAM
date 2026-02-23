@@ -6,6 +6,7 @@ remain "queued" in the DB.  This worker picks them up and retries the
 Farm dispatch.  AAM never executes data extraction — Farm does.
 """
 import asyncio
+import os
 from typing import Optional
 
 from ..logger import get_logger
@@ -14,33 +15,30 @@ from ..models import JobManifest
 
 _log = get_logger("services.runner_worker")
 
-WORKER_CONCURRENCY = 2
-POLL_INTERVAL_S = 2.0
+POLL_INTERVAL_S = float(os.environ.get("RUNNER_POLL_INTERVAL_S", "0.5"))
 
 _worker_task: Optional[asyncio.Task] = None
 _running = False
 
 
-def _claim_queued_jobs(limit: int) -> list[str]:
-    """Atomically claim queued jobs by updating them to 'running' and returning their IDs.
+def _claim_queued_jobs() -> list[str]:
+    """Atomically claim ALL queued jobs by updating them to 'running' and returning their IDs.
 
     Uses UPDATE ... RETURNING to prevent duplicate execution across restarts.
+    No limit — every queued job is claimed and dispatched in parallel.
     """
-    if limit <= 0:
-        return []
-
     from ..db import supabase_client as sb
     from psycopg2 import sql as psql
 
     query = psql.SQL(
         "UPDATE {} SET status = 'running', started_at = NOW(), last_heartbeat = NOW() "
         "WHERE job_id IN ("
-        "  SELECT job_id FROM {} WHERE status = 'queued' ORDER BY dispatched_at LIMIT %s"
+        "  SELECT job_id FROM {} WHERE status = 'queued' ORDER BY dispatched_at"
         ") RETURNING job_id"
     ).format(sb._ident("runner_jobs"), sb._ident("runner_jobs"))
 
     try:
-        rows = sb._execute_composed(query, params=(limit,))
+        rows = sb._execute_composed(query)
         return [r["job_id"] for r in rows]
     except Exception as exc:
         _log.error("Failed to claim queued jobs: %s", exc)
@@ -54,7 +52,7 @@ async def start_worker():
         return
     _running = True
     _worker_task = asyncio.create_task(_worker_loop())
-    _log.info("Background runner worker started (concurrency=%d)", WORKER_CONCURRENCY)
+    _log.info("Background runner worker started (poll=%.1fs, unlimited concurrency)", POLL_INTERVAL_S)
 
 
 async def stop_worker():
@@ -72,24 +70,20 @@ async def stop_worker():
 
 
 async def _worker_loop():
-    """Main loop: poll for queued jobs and dispatch to Farm with bounded concurrency.
+    """Main loop: poll for queued jobs and dispatch ALL to Farm in parallel.
 
-    Only claims as many jobs as we have capacity for (WORKER_CONCURRENCY - active).
-    This prevents marking hundreds of jobs 'running' that can't dispatch yet.
+    Claims every queued job each cycle and dispatches them concurrently
+    via asyncio.gather. Farm handles its own concurrency/backpressure.
     """
-    active_jobs: set = set()
-
     while _running:
         try:
-            capacity = WORKER_CONCURRENCY - len(active_jobs)
-            if capacity > 0:
-                claimed_ids = await asyncio.to_thread(_claim_queued_jobs, capacity)
+            claimed_ids = await asyncio.to_thread(_claim_queued_jobs)
 
-                if claimed_ids:
-                    _log.info("Worker claimed %d jobs (%d active)", len(claimed_ids), len(active_jobs))
-                    for job_id in claimed_ids:
-                        active_jobs.add(job_id)
-                        asyncio.create_task(_dispatch_job_to_farm(job_id, active_jobs))
+            if claimed_ids:
+                _log.info("Worker claimed %d jobs, dispatching in parallel", len(claimed_ids))
+                await asyncio.gather(
+                    *[_dispatch_job_to_farm(job_id) for job_id in claimed_ids]
+                )
 
             await asyncio.sleep(POLL_INTERVAL_S)
         except asyncio.CancelledError:
@@ -99,7 +93,7 @@ async def _worker_loop():
             await asyncio.sleep(POLL_INTERVAL_S)
 
 
-async def _dispatch_job_to_farm(job_id: str, active_jobs: set):
+async def _dispatch_job_to_farm(job_id: str):
     """Load a job's manifest and dispatch to Farm.
 
     AAM never executes data extraction.  If Farm is unreachable, the job
@@ -155,5 +149,3 @@ async def _dispatch_job_to_farm(job_id: str, active_jobs: set):
             )
         except Exception as _status_exc:
             _log.error("Failed to mark job %s as failed in DB after dispatch error: %s", job_id, _status_exc)
-    finally:
-        active_jobs.discard(job_id)
