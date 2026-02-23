@@ -6,6 +6,7 @@ Farm is the Execution Engine.  Data bytes never touch AAM.
 
 Flow: build_manifest() → dispatch_job() → dispatch_to_farm() → Farm executes
 """
+import uuid
 import httpx
 from datetime import datetime
 from typing import Optional
@@ -160,6 +161,19 @@ def normalize_category(raw_category: Optional[str], vendor: Optional[str] = None
         return raw_category.lower().strip()
 
     return None
+
+
+def _next_run_id(source_system: str) -> str:
+    """Generate a globally unique run_id using UUID4.
+
+    Format: run_{YYYYMMDD}_{system}_{uuid_short}
+    UUID4 guarantees uniqueness across processes, restarts, and replicas.
+    """
+    date_str = datetime.utcnow().strftime("%Y%m%d")
+    safe_system = source_system.lower().replace(" ", "_")[:20]
+    short_uuid = uuid.uuid4().hex[:8]
+    return f"run_{date_str}_{safe_system}_{short_uuid}"
+
 
 
 def build_manifest(

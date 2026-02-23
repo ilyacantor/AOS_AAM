@@ -2811,7 +2811,7 @@ async def ui_topology():
                 const jobId = j.job_id || '';
                 const pipeId = j.pipe_id || '';
                 const runId = j.run_id || '';
-                const src = j.source_system || jobId.replace(/^run_\d+_/, '').replace(/_\d+$/, '') || pipeId;
+                const src = j.source_system || jobId.replace(/^run_\d{8}_/, '').replace(/_[a-f0-9]+$/, '') || pipeId;
                 const label = src.length > 25 ? src.substring(0,22) + '...' : src;
                 const ts = j.completed_at || j.started_at || j.created_at || '';
                 const shortTs = ts ? new Date(ts).toLocaleTimeString() : '-';

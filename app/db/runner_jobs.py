@@ -213,34 +213,26 @@ def list_runner_jobs(
     status: Optional[str] = None,
     limit: int = 50,
 ) -> list[dict]:
-    """List runner jobs with optional filters."""
-    filters = {}
-    if pipe_id:
-        filters["pipe_id"] = pipe_id
-    if status:
-        filters["status"] = status
-
-    kwargs: dict = {"order": "dispatched_at.desc", "limit": limit}
-    if filters:
-        kwargs["filters"] = filters
-
+    """List runner jobs with optional filters, including source_system extracted from manifest."""
     from psycopg2 import sql as psql
-    # Extract source_system from manifest JSON so the UI can show human-readable labels
-    cols = ("job_id,pipe_id,run_id,status,dispatched_at,started_at,completed_at,"
-            "rows_transferred,error_message,last_heartbeat,dcl_response,"
-            "manifest::json->'source'->>'system' as source_system")
-    parts = [psql.SQL("SELECT {} FROM {}").format(
-        psql.SQL(cols), sb._ident("runner_jobs")
-    )]
+
+    conditions = []
     params: list = []
-    if filters:
-        clauses = []
-        for k, v in filters.items():
-            clauses.append(psql.SQL("{} = %s").format(psql.Identifier(k)))
-            params.append(v)
-        parts.append(psql.SQL("WHERE ") + psql.SQL(" AND ").join(clauses))
-    parts.append(psql.SQL("ORDER BY dispatched_at DESC LIMIT %s"))
+    if pipe_id:
+        conditions.append("pipe_id = %s")
+        params.append(pipe_id)
+    if status:
+        conditions.append("status = %s")
+        params.append(status)
+
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
     params.append(limit)
-    query = psql.SQL(" ").join(parts)
+
+    query = psql.SQL(
+        "SELECT job_id, pipe_id, run_id, status, dispatched_at, started_at, completed_at, "
+        "rows_transferred, error_message, last_heartbeat, dcl_response, "
+        "manifest::json->'source'->>'system' AS source_system "
+        "FROM {} " + where + " ORDER BY dispatched_at DESC NULLS LAST LIMIT %s"
+    ).format(sb._ident("runner_jobs"))
     rows = sb._execute_composed(query, tuple(params) if params else None)
     return rows

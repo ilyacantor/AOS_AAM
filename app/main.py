@@ -224,6 +224,7 @@ async def custom_redoc():
 # ---------------------------------------------------------------------------
 
 @app.get("/health")
+@app.get("/api/health")
 async def health_check():
     """Quick health check"""
     return {"status": "healthy", "service": "aam", "version": "0.1.0"}
