@@ -186,6 +186,7 @@ def build_manifest(
     snapshot_name: Optional[str] = None,
     aod_run_id: Optional[str] = None,
     farm_verification: bool = False,
+    run_id: Optional[str] = None,
 ) -> JobManifest:
     """Build an immutable Job Manifest from a pipe definition.
 
@@ -216,7 +217,8 @@ def build_manifest(
     access = pipe.get("access") or {}
     credentials_ref = access.get("auth_ref")
 
-    run_id = _next_run_id(source_system)
+    if run_id is None:
+        run_id = _next_run_id(source_system)
 
     raw_category = pipe.get("category") or pipe.get("app_category") or None
     vendor = pipe.get("source_system") or pipe.get("vendor_name") or None
@@ -353,6 +355,9 @@ def dispatch_batch(
     results = []
     errors = []
 
+    # Generate ONE batch_run_id for all pipes in this dispatch cycle
+    batch_run_id = _next_run_id("batch")
+
     for pid in pipe_ids:
         try:
             pipe = pipe_map.get(pid)
@@ -362,7 +367,7 @@ def dispatch_batch(
             if not pipe.get("category"):
                 errors.append({"pipe_id": pid, "status": "skipped", "error": "Unclassified category — incomplete inference, not dispatchable"})
                 continue
-            manifest = build_manifest(pipe, trigger, snapshot_name=current_snapshot, aod_run_id=current_aod_run_id)
+            manifest = build_manifest(pipe, trigger, snapshot_name=current_snapshot, aod_run_id=current_aod_run_id, run_id=batch_run_id)
             manifests_data.append(manifest.model_dump())
             manifest_objects.append(manifest)
             results.append({
