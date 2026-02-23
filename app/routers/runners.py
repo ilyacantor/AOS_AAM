@@ -149,10 +149,17 @@ async def list_jobs(
     limit: int = Query(50, le=200),
 ):
     """List runner jobs with optional filters."""
+    import json as _json
     jobs = list_runner_jobs(pipe_id=pipe_id, status=status, limit=limit)
     for j in jobs:
         if j.get("error_message") and "<!DOCTYPE" in j["error_message"]:
             j["error_message"] = re.sub(r"<!DOCTYPE[\s\S]*", "", j["error_message"]).strip()
+        # Parse dcl_response from JSON string to dict for frontend consumption
+        if j.get("dcl_response") and isinstance(j["dcl_response"], str):
+            try:
+                j["dcl_response"] = _json.loads(j["dcl_response"])
+            except (ValueError, TypeError):
+                pass
     return {"jobs": jobs, "count": len(jobs)}
 
 
@@ -216,3 +223,30 @@ async def runner_heartbeat(pipe_id: str):
 
     update_heartbeat(pipe_id)
     return {"job_id": pipe_id, "heartbeat": "ok"}
+
+
+@router.get("/farm-status/{job_id}")
+async def farm_status_proxy(job_id: str):
+    """Proxy to Farm's /api/farm/status/{job_id} for dispatch modal enrichment.
+
+    Returns Farm-side execution state (rows_generated vs rows_accepted)
+    alongside the AAM-side status. Only called when the dispatch modal
+    is open to avoid unnecessary requests.
+    """
+    import httpx
+    farm_base = settings.FARM_INTAKE_URL.replace("/api/farm/manifest-intake", "")
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(f"{farm_base}/api/farm/status/{job_id}")
+        if resp.status_code == 404:
+            raise HTTPException(status_code=404, detail="Job not found on Farm")
+        resp.raise_for_status()
+        return resp.json()
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=exc.response.status_code,
+            detail=f"Farm returned {exc.response.status_code}",
+        )
+    except httpx.RequestError as exc:
+        _log.warning("Farm status proxy failed for %s: %s", job_id, exc)
+        raise HTTPException(status_code=502, detail=f"Farm unreachable: {exc}")

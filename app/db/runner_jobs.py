@@ -227,7 +227,7 @@ def list_runner_jobs(
     from psycopg2 import sql as psql
     # Extract source_system from manifest JSON so the UI can show human-readable labels
     cols = ("job_id,pipe_id,run_id,status,dispatched_at,started_at,completed_at,"
-            "rows_transferred,error_message,last_heartbeat,"
+            "rows_transferred,error_message,last_heartbeat,dcl_response,"
             "manifest::json->'source'->>'system' as source_system")
     parts = [psql.SQL("SELECT {} FROM {}").format(
         psql.SQL(cols), sb._ident("runner_jobs")

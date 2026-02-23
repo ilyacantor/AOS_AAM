@@ -2753,7 +2753,7 @@ async def ui_topology():
         async function loadDispatchData() {{
             const body = document.getElementById('dp-body');
             if (!_dpData) {{
-                body.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--slate-500);">Loading...</td></tr>';
+                body.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--slate-500);">Loading...</td></tr>';
             }}
             try {{
                 const res = await fetch('/api/runners/jobs?limit=200');
@@ -2763,7 +2763,7 @@ async def ui_topology():
                 renderDispatchJobs(_dpData);
             }} catch (e) {{
                 if (!_dpData) {{
-                    body.innerHTML = '<tr><td colspan="5" style="color:#f87171;">Error: ' + e.message + '</td></tr>';
+                    body.innerHTML = '<tr><td colspan="6" style="color:#f87171;">Error: ' + e.message + '</td></tr>';
                 }}
             }}
         }}
@@ -2800,7 +2800,7 @@ async def ui_topology():
                 }});
             }}
             if (filtered.length === 0) {{
-                body.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:16px;color:var(--slate-500);">No jobs</td></tr>';
+                body.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:16px;color:var(--slate-500);">No jobs</td></tr>';
                 return;
             }}
             body.innerHTML = filtered.map((j, idx) => {{
@@ -2815,9 +2815,31 @@ async def ui_topology():
                 const label = src.length > 25 ? src.substring(0,22) + '...' : src;
                 const ts = j.completed_at || j.started_at || j.created_at || '';
                 const shortTs = ts ? new Date(ts).toLocaleTimeString() : '-';
+                // DCL POST result column
+                let dclHtml = '';
+                const dcl = j.dcl_response;
+                if (dcl) {{
+                    let parsed = dcl;
+                    if (typeof dcl === 'string') {{ try {{ parsed = JSON.parse(dcl); }} catch(e) {{ parsed = null; }} }}
+                    if (parsed && parsed.status === 'ingested') {{
+                        const code = parsed.dcl_status_code || 200;
+                        dclHtml = '<span style="color:#4ade80;font-weight:600;" title="DCL accepted (' + code + ')">' + code + ' ok</span>';
+                    }} else if (parsed) {{
+                        const code = parsed.dcl_status_code || parsed.status_code || '?';
+                        const reason = parsed.status || parsed.error || 'rejected';
+                        dclHtml = '<span style="color:#f87171;font-weight:600;" title="' + _escHtml(String(reason)) + '">' + code + ' fail</span>';
+                    }} else {{
+                        dclHtml = '<span style="color:#f87171;">err</span>';
+                    }}
+                }} else if (s === 'failed' || s === 'timed_out' || s === 'cancelled') {{
+                    dclHtml = '<span style="color:#f87171;">-</span>';
+                }} else {{
+                    dclHtml = '<span style="color:#94a3b8;">pending</span>';
+                }}
                 return '<tr class="dp-clickable" data-jobid="' + _escHtml(jobId) + '" title="Click for details">' +
                     '<td title="pipe: ' + pipeId + '">' + label + '</td>' +
                     '<td><span class="dp-status ' + s + '">' + s + '</span></td>' +
+                    '<td>' + dclHtml + '</td>' +
                     '<td style="text-align:right;">' + rows + '</td>' +
                     '<td>' + shortTs + '</td>' +
                     '<td>' + err + '</td>' +
@@ -2955,7 +2977,7 @@ async def ui_topology():
             </div>
             <div class="dp-jobs">
                 <table>
-                    <thead><tr><th>Pipe</th><th>Status</th><th style="text-align:right;">Rows</th><th>Time</th><th>Error</th></tr></thead>
+                    <thead><tr><th>Pipe</th><th>Status</th><th>DCL</th><th style="text-align:right;">Rows</th><th>Time</th><th>Error</th></tr></thead>
                     <tbody id="dp-body"></tbody>
                 </table>
             </div>
