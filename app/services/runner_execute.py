@@ -155,6 +155,10 @@ async def execute_job_inline(job_id: str, http_client: httpx.AsyncClient | None 
             dcl_body = resp.json()
             dcl_status = dcl_body.get("status", "")
             if dcl_status == "ingested":
+                _log.info(
+                    "DCL POST SUCCESS — pipe_id=%s | job_id=%s | http_code=%d | rows=%d",
+                    pipe_id, job_id, resp.status_code, dcl_body.get("rows_stored", len(extracted_data))
+                )
                 await asyncio.to_thread(
                     _finalize_job, job_id, "completed",
                     rows_transferred=dcl_body.get("rows_stored", len(extracted_data)),
@@ -169,6 +173,10 @@ async def execute_job_inline(job_id: str, http_client: httpx.AsyncClient | None 
                     "schema_drift_detected": dcl_body.get("schema_drift_detected", False),
                 }
             else:
+                _log.error(
+                    "DCL POST FAILED — pipe_id=%s | job_id=%s | http_code=%d | dcl_status=%s",
+                    pipe_id, job_id, resp.status_code, dcl_status
+                )
                 await asyncio.to_thread(
                     _finalize_job, job_id, "failed",
                     error_message=f"DCL returned unexpected status: {dcl_status}",
@@ -177,6 +185,10 @@ async def execute_job_inline(job_id: str, http_client: httpx.AsyncClient | None 
         else:
             error_detail = resp.text[:500] if resp else "No response"
             status_code = resp.status_code if resp else "unknown"
+            _log.error(
+                "DCL POST FAILED — pipe_id=%s | job_id=%s | http_code=%s | error=%s",
+                pipe_id, job_id, status_code, error_detail[:200]
+            )
             await asyncio.to_thread(
                 _finalize_job, job_id, "failed",
                 error_message=f"DCL returned {status_code}: {error_detail}",
@@ -184,7 +196,10 @@ async def execute_job_inline(job_id: str, http_client: httpx.AsyncClient | None 
             return {"job_id": job_id, "status": "failed", "error": f"DCL {status_code}: {error_detail}"}
 
     except httpx.ConnectError as exc:
-        _log.error("DCL unreachable for job %s — job failed, no fallback: %s", job_id, exc)
+        _log.error(
+            "DCL POST FAILED — pipe_id=%s | job_id=%s | error=connection_failed | details=%s",
+            pipe_id, job_id, str(exc)
+        )
         await asyncio.to_thread(
             _finalize_job, job_id, "failed",
             error_message=f"DCL unreachable: {exc}",
@@ -192,7 +207,10 @@ async def execute_job_inline(job_id: str, http_client: httpx.AsyncClient | None 
         return {"job_id": job_id, "status": "failed", "error": f"DCL unreachable: {exc}"}
 
     except Exception as exc:
-        _log.error("Runner failed job %s: %s", job_id, exc)
+        _log.error(
+            "DCL POST FAILED — pipe_id=%s | job_id=%s | error=runner_exception | details=%s",
+            pipe_id, job_id, str(exc)
+        )
         await asyncio.to_thread(_finalize_job, job_id, "failed", error_message=str(exc))
         return {"job_id": job_id, "status": "failed", "error": str(exc)}
 
