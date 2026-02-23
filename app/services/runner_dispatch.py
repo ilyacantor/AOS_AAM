@@ -355,9 +355,6 @@ def dispatch_batch(
     results = []
     errors = []
 
-    # Generate ONE batch_run_id for all pipes in this dispatch cycle
-    batch_run_id = _next_run_id("batch")
-
     for pid in pipe_ids:
         try:
             pipe = pipe_map.get(pid)
@@ -367,12 +364,15 @@ def dispatch_batch(
             if not pipe.get("category"):
                 errors.append({"pipe_id": pid, "status": "skipped", "error": "Unclassified category — incomplete inference, not dispatchable"})
                 continue
-            manifest = build_manifest(pipe, trigger, snapshot_name=current_snapshot, aod_run_id=current_aod_run_id, run_id=batch_run_id)
+
+            # Use aod_run_id as the manifest run_id so Farm can group all pipes in this batch
+            manifest = build_manifest(pipe, trigger, snapshot_name=current_snapshot, aod_run_id=current_aod_run_id, run_id=current_aod_run_id)
+
             manifests_data.append(manifest.model_dump())
             manifest_objects.append(manifest)
             results.append({
-                "job_id": manifest.run_id,
-                "run_id": manifest.run_id,
+                "job_id": manifest.source.pipe_id,  # Use pipe_id as unique key for AAM database
+                "run_id": manifest.run_id,  # Shared aod_run_id for Farm batch grouping
                 "pipe_id": manifest.source.pipe_id,
                 "status": "queued",
                 "trigger": trigger,

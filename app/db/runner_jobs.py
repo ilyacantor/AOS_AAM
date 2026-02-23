@@ -28,10 +28,14 @@ def create_runner_job(manifest_dict: dict) -> str:
 
 
 def create_runner_jobs_batch(manifests: list[dict]) -> list[str]:
-    """Bulk-insert runner jobs from a list of manifest dicts. Returns list of job_ids."""
+    """Bulk-insert runner jobs from a list of manifest dicts. Returns list of job_ids (pipe_ids).
+
+    Uses manifest.source.pipe_id as the job_id (PRIMARY KEY) for AAM's internal tracking.
+    The manifest.run_id may be shared across manifests in a batch (for Farm grouping).
+    """
     if not manifests:
         return []
-    job_ids = [m["run_id"] for m in manifests]
+    job_ids = [m["source"]["pipe_id"] for m in manifests]
     from psycopg2 import sql as psql
     conflict_rows = sb._execute_composed(
         psql.SQL("SELECT job_id FROM {} WHERE job_id = ANY(%s)").format(sb._ident("runner_jobs")),
@@ -40,14 +44,14 @@ def create_runner_jobs_batch(manifests: list[dict]) -> list[str]:
     if conflict_rows:
         existing = {r["job_id"] for r in conflict_rows}
         raise ValueError(
-            f"Runner jobs already exist for run_id(s): {sorted(existing)}. "
-            "Use distinct run_ids — AAM does not overwrite existing jobs."
+            f"Runner jobs already exist for pipe_id(s): {sorted(existing)}. "
+            "Use distinct pipe_ids or clear existing jobs first."
         )
     now = datetime.utcnow().isoformat()
     rows = []
     for m in manifests:
         rows.append({
-            "job_id": m["run_id"],
+            "job_id": m["source"]["pipe_id"],
             "pipe_id": m["source"]["pipe_id"],
             "status": "queued",
             "manifest": json.dumps(m, default=str),
