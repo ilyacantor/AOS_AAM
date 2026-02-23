@@ -52,6 +52,17 @@ def list_dcl_pushes(limit: int = 25) -> list[dict]:
     return rows
 
 
+def has_dcl_push_for_run(aod_run_id: str) -> bool:
+    """Check whether export-pipes has been pushed to DCL for a given AOD run."""
+    rows = sb.select(
+        "dcl_pushes",
+        columns="push_id",
+        filters={"aod_run_id": aod_run_id},
+        limit=1,
+    )
+    return len(rows) > 0
+
+
 def get_dcl_push(push_id: str) -> Optional[dict]:
     """Get a specific DCL push including full payload."""
     row = sb.select("dcl_pushes", filters={"push_id": push_id}, single=True)
