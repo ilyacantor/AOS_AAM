@@ -109,6 +109,7 @@ async def dispatch_multiple(req: RunnerBatchDispatchRequest):
             if farm_result.get("farm_response"):
                 result_dict["farm_response"] = farm_result["farm_response"]
         except Exception as exc:
+            result_dict["status"] = "error"
             result_dict["farm_error"] = str(exc)
 
     if farm_tasks:

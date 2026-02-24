@@ -1818,6 +1818,19 @@ async def ui_topology():
         .dp-status.queued {{ background: rgba(148,163,184,0.15); color: #94a3b8; }}
         .dp-error {{ color: #f87171; font-size: 0.6rem; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
         .dp-error:hover {{ white-space: normal; word-break: break-all; }}
+        .dp-detail {{ background: rgba(15,23,42,0.9); }}
+        .dp-detail td {{ padding: 0 !important; border-bottom: 1px solid rgba(51,65,85,0.3); }}
+        .dp-detail-inner {{
+            padding: 8px 12px; font-size: 0.62rem; color: var(--slate-400);
+            display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px;
+        }}
+        .dp-detail-inner .dp-kv {{ display: flex; gap: 6px; }}
+        .dp-detail-inner .dp-k {{ color: var(--slate-500); min-width: 70px; }}
+        .dp-detail-inner .dp-v {{ color: var(--slate-300); word-break: break-all; }}
+        .dp-detail-inner .dp-v.err {{ color: #f87171; }}
+        .dp-detail-inner .dp-full {{ grid-column: 1 / -1; }}
+        .dp-jobs tr.dp-clickable {{ cursor: pointer; }}
+        .dp-jobs tr.dp-clickable:hover td {{ background: rgba(51,65,85,0.3); }}
         .dp-filter {{
             display: flex; gap: 6px; padding: 8px 18px 0;
         }}
@@ -2766,25 +2779,88 @@ async def ui_topology():
                 body.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:16px;color:var(--slate-500);">No jobs</td></tr>';
                 return;
             }}
-            body.innerHTML = filtered.map(j => {{
+            body.innerHTML = filtered.map((j, idx) => {{
                 const s = j.status || 'queued';
                 const rows = j.rows_transferred || 0;
                 const rawErr = (j.error_message||'').replace(/<!DOCTYPE[\s\S]*$/i, '').trim() || (j.error_message||'').substring(0,80);
                 const err = j.error_message ? '<div class="dp-error" title="' + _escHtml(j.error_message).substring(0,200) + '">' + _escHtml(rawErr).substring(0,80) + '</div>' : '';
                 const jobId = j.job_id || '';
                 const pipeId = j.pipe_id || '';
+                const runId = j.run_id || '';
                 const src = j.source_system || jobId.replace(/^run_\d+_/, '').replace(/_\d+$/, '') || pipeId;
                 const label = src.length > 25 ? src.substring(0,22) + '...' : src;
                 const ts = j.completed_at || j.started_at || j.created_at || '';
                 const shortTs = ts ? new Date(ts).toLocaleTimeString() : '-';
-                return '<tr>' +
-                    '<td title="pipe: ' + pipeId + '&#10;job: ' + jobId + '">' + label + '</td>' +
+                return '<tr class="dp-clickable" onclick="toggleJobDetail(\'' + _escHtml(jobId) + '\', this)" title="Click for details">' +
+                    '<td title="pipe: ' + pipeId + '">' + label + '</td>' +
                     '<td><span class="dp-status ' + s + '">' + s + '</span></td>' +
                     '<td style="text-align:right;">' + rows + '</td>' +
                     '<td>' + shortTs + '</td>' +
                     '<td>' + err + '</td>' +
                     '</tr>';
             }}).join('');
+        }}
+
+        async function toggleJobDetail(jobId, rowEl) {{
+            var existing = rowEl.nextElementSibling;
+            if (existing && existing.classList.contains('dp-detail')) {{
+                existing.remove();
+                return;
+            }}
+            // Remove any other open detail rows
+            document.querySelectorAll('.dp-detail').forEach(function(el) {{ el.remove(); }});
+            var detailRow = document.createElement('tr');
+            detailRow.className = 'dp-detail';
+            detailRow.innerHTML = '<td colspan="5"><div class="dp-detail-inner"><span class="dp-v">Loading...</span></div></td>';
+            rowEl.after(detailRow);
+            try {{
+                var res = await fetch('/api/runners/jobs/' + encodeURIComponent(jobId));
+                if (!res.ok) {{
+                    detailRow.innerHTML = '<td colspan="5"><div class="dp-detail-inner"><span class="dp-v err">Failed to load job details (HTTP ' + res.status + ')</span></div></td>';
+                    return;
+                }}
+                var job = await res.json();
+                var m = job.manifest || {{}};
+                var src = m.source || {{}};
+                var tgt = m.target || {{}};
+                var prov = m.provenance || {{}};
+                var lim = m.limits || {{}};
+                var html = '';
+                function kv(k, v, cls) {{
+                    return '<div class="dp-kv"><span class="dp-k">' + k + '</span><span class="dp-v' + (cls ? ' '+cls : '') + '">' + _escHtml(String(v || '-')) + '</span></div>';
+                }}
+                html += kv('Pipe ID', src.pipe_id);
+                html += kv('Run ID', m.run_id);
+                html += kv('System', src.system);
+                html += kv('Adapter', src.adapter);
+                html += kv('Category', src.category);
+                html += kv('Snapshot', tgt.snapshot_name);
+                html += kv('DCL URL', tgt.dcl_url);
+                html += kv('Tenant', tgt.tenant_id);
+                html += kv('Trigger', prov.triggered_by);
+                html += kv('AOD Run', prov.aod_run_id);
+                html += kv('Timeout', lim.timeout_seconds ? lim.timeout_seconds + 's' : '-');
+                html += kv('Dispatched', job.dispatched_at);
+                if (src.credentials_ref) html += kv('Creds Ref', src.credentials_ref);
+                if (job.started_at) html += kv('Started', job.started_at);
+                if (job.completed_at) html += kv('Completed', job.completed_at);
+                if (job.last_heartbeat) html += kv('Heartbeat', job.last_heartbeat);
+                if (job.rows_transferred) html += kv('Rows', job.rows_transferred);
+                if (src.endpoint_ref) {{
+                    var ep = typeof src.endpoint_ref === 'object' ? JSON.stringify(src.endpoint_ref) : src.endpoint_ref;
+                    html += '<div class="dp-kv dp-full"><span class="dp-k">Endpoint</span><span class="dp-v">' + _escHtml(ep).substring(0, 200) + '</span></div>';
+                }}
+                if (job.error_message) {{
+                    var cleanErr = (job.error_message||'').replace(/<!DOCTYPE[\s\S]*$/i, '').trim();
+                    html += '<div class="dp-kv dp-full"><span class="dp-k">Error</span><span class="dp-v err">' + _escHtml(cleanErr).substring(0, 500) + '</span></div>';
+                }}
+                if (job.dcl_response) {{
+                    html += '<div class="dp-kv dp-full"><span class="dp-k">DCL Resp</span><span class="dp-v">' + _escHtml(JSON.stringify(job.dcl_response)).substring(0, 300) + '</span></div>';
+                }}
+                detailRow.innerHTML = '<td colspan="5"><div class="dp-detail-inner">' + html + '</div></td>';
+            }} catch (e) {{
+                detailRow.innerHTML = '<td colspan="5"><div class="dp-detail-inner"><span class="dp-v err">Error: ' + _escHtml(String(e)) + '</span></div></td>';
+            }}
         }}
 
         function renderPipelineLog(steps) {{
