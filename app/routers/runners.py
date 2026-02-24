@@ -17,7 +17,7 @@ from ..models import (
     RunnerCallbackRequest,
     RunnerJobStatus,
 )
-from ..services.runner_dispatch import dispatch_pipe, dispatch_batch, dispatch_to_farm
+from ..services.runner_dispatch import dispatch_pipe, dispatch_batch, dispatch_to_farm, notify_dcl_dispatch
 from ..db.runner_jobs import (
     get_runner_job,
     get_runner_progress,
@@ -116,6 +116,11 @@ async def dispatch_single(req: RunnerDispatchRequest):
                 ),
             )
 
+        # Notify DCL of dispatch intent (best-effort, non-blocking)
+        dcl_signal = await notify_dcl_dispatch()
+        if dcl_signal.get("status") != "notified":
+            _log.warning("DCL dispatch signal did not succeed: %s", dcl_signal)
+
         farm_result = await dispatch_to_farm(manifest)
         result["status"] = farm_result.get("status", "dispatched")
         if farm_result.get("error_class"):
@@ -202,6 +207,12 @@ async def dispatch_multiple(req: RunnerBatchDispatchRequest):
         except Exception as exc:
             result_dict["status"] = "error"
             result_dict["farm_error"] = str(exc)
+
+    # Notify DCL of dispatch intent ONCE for the whole batch (best-effort)
+    if farm_tasks:
+        dcl_signal = await notify_dcl_dispatch()
+        if dcl_signal.get("status") != "notified":
+            _log.warning("DCL dispatch signal did not succeed: %s", dcl_signal)
 
     if farm_tasks:
         # Throttle parallel Farm dispatch to avoid overwhelming Farm/DCL

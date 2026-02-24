@@ -598,3 +598,32 @@ async def dispatch_to_farm(manifest: JobManifest, *, payload: Optional[dict] = N
         )
         _log.warning("Farm unreachable: run_id=%s url=%s error=%s", manifest.run_id, farm_url, exc)
         return {"status": "farm_unreachable", "error": error_msg}
+
+
+async def notify_dcl_dispatch() -> dict:
+    """Notify DCL that a dispatch is starting (Path 2 signal).
+
+    Best-effort: DCL unavailability must NOT block Farm dispatch.
+    Uses settings.DCL_DISPATCH_URL which is already configured.
+    DCL's /export-pipes/dispatch endpoint is idempotent — safe to call
+    multiple times for the same dispatch_id.
+    """
+    dcl_url = settings.DCL_DISPATCH_URL
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(dcl_url)
+        if resp.status_code in (200, 201):
+            body = resp.json()
+            _log.info(
+                "DCL dispatch signal accepted: status=%s dispatch_id=%s",
+                body.get("status"), body.get("dispatch_id"),
+            )
+            return {"status": "notified", "dcl_response": body}
+        _log.warning(
+            "DCL dispatch signal returned HTTP %d: %s",
+            resp.status_code, resp.text[:300],
+        )
+        return {"status": "dcl_error", "error": f"HTTP {resp.status_code}"}
+    except Exception as exc:
+        _log.warning("DCL dispatch signal failed (non-blocking): %s", exc)
+        return {"status": "dcl_unreachable", "error": str(exc)}
