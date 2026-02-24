@@ -38,7 +38,7 @@ _POOLER_HOST = os.environ.get("SUPABASE_DB_HOST", "aws-0-us-west-2.pooler.supaba
 
 _DSN = (
     f"host={_POOLER_HOST} "
-    f"port=5432 "
+    f"port=6543 "
     f"dbname=postgres "
     f"user=postgres.{_PROJECT_REF} "
     f"password={_DB_PASSWORD} "
@@ -67,7 +67,7 @@ def _get_pool() -> psycopg2.pool.ThreadedConnectionPool:
     if _pool is None or _pool.closed:
         _pool = psycopg2.pool.ThreadedConnectionPool(
             minconn=2,
-            maxconn=5,
+            maxconn=10,
             dsn=_DSN,
         )
         _log.info("PostgreSQL connection pool created (pooler: %s)", _POOLER_HOST)
@@ -175,13 +175,26 @@ def insert(table: str, data: dict, *, on_conflict: Optional[str] = None) -> dict
     return rows[0] if rows else {}
 
 
-def insert_many(table: str, data: list[dict]) -> list[dict]:
+def insert_many(table: str, data: list[dict], *, on_conflict: Optional[str] = None) -> list[dict]:
     if not data:
         return []
     cols = list(data[0].keys())
     col_ids = sql.SQL(", ").join(_ident(c) for c in cols)
     template = sql.SQL("({})").format(sql.SQL(", ").join(sql.Placeholder() for _ in cols))
     query_head = sql.SQL("INSERT INTO {} ({}) VALUES ").format(_ident(table), col_ids)
+
+    # Build ON CONFLICT ... DO UPDATE SET clause if requested
+    conflict_suffix = ""
+    if on_conflict:
+        _validate_ident(on_conflict)
+        update_cols = [c for c in cols if c != on_conflict]
+        if update_cols:
+            set_parts = ", ".join(
+                f'"{c}" = EXCLUDED."{c}"' for c in update_cols
+            )
+            conflict_suffix = f' ON CONFLICT ("{on_conflict}") DO UPDATE SET {set_parts}'
+        else:
+            conflict_suffix = f' ON CONFLICT ("{on_conflict}") DO NOTHING'
 
     values_list = [tuple(row.get(c) for c in cols) for row in data]
 
@@ -192,7 +205,7 @@ def insert_many(table: str, data: list[dict]) -> list[dict]:
         tpl_str = template.as_string(conn)
         full_sql = query_str + ", ".join(
             cur.mogrify(tpl_str, vals).decode() for vals in values_list
-        ) + " RETURNING *"
+        ) + conflict_suffix + " RETURNING *"
         cur.execute(full_sql)
         if cur.description:
             return [dict(r) for r in cur.fetchall()]
@@ -207,7 +220,7 @@ def insert_many(table: str, data: list[dict]) -> list[dict]:
             tpl_str = template.as_string(conn)
             full_sql = query_str + ", ".join(
                 cur.mogrify(tpl_str, vals).decode() for vals in values_list
-            ) + " RETURNING *"
+            ) + conflict_suffix + " RETURNING *"
             cur.execute(full_sql)
             if cur.description:
                 return [dict(r) for r in cur.fetchall()]

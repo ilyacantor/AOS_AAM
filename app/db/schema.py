@@ -45,6 +45,9 @@ def _run_migrations():
         # Migration 2026-02-23: Add run_id column for batch grouping
         ("ALTER TABLE runner_jobs ADD COLUMN IF NOT EXISTS run_id VARCHAR", "add_run_id_column"),
         ("CREATE INDEX IF NOT EXISTS idx_runner_jobs_run_id ON runner_jobs(run_id)", "add_run_id_index"),
+        # Migration 2026-02-24: Add indexes for status queries and dispatch ordering
+        ("CREATE INDEX IF NOT EXISTS idx_runner_jobs_status ON runner_jobs(status)", "add_status_index"),
+        ("CREATE INDEX IF NOT EXISTS idx_runner_jobs_dispatched_at ON runner_jobs(dispatched_at DESC NULLS LAST)", "add_dispatched_at_index"),
     ]
 
     for sql_stmt, migration_name in migrations:

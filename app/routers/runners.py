@@ -127,22 +127,26 @@ async def dispatch_multiple(req: RunnerBatchDispatchRequest):
     if not req.pipe_ids:
         raise HTTPException(status_code=400, detail="pipe_ids is required")
 
-    # Wake Farm if it's sleeping (free-tier cold start can take 30-60s)
+    # Fire-and-forget Farm wake ping — runs concurrently while manifests are built.
+    # Its only purpose is waking Render cold-start; dispatch proceeds regardless.
     import httpx
     farm_base = settings.FARM_INTAKE_URL.replace("/api/farm/manifest-intake", "")
-    farm_awake = False
-    for attempt in range(4):
+
+    async def _wake_farm():
         try:
             async with httpx.AsyncClient(timeout=20.0) as client:
                 resp = await client.get(f"{farm_base}/api/health")
             if resp.status_code == 200:
-                farm_awake = True
-                _log.info("Farm health ping OK (attempt %d) — proceeding with batch dispatch", attempt + 1)
-                break
+                _log.info("Farm health wake-ping OK (status=%d)", resp.status_code)
+            else:
+                _log.warning(
+                    "Farm health wake-ping returned non-200: status=%d body=%s",
+                    resp.status_code, resp.text[:200],
+                )
         except Exception as exc:
-            _log.info("Farm health ping attempt %d failed: %s", attempt + 1, exc)
-    if not farm_awake:
-        _log.warning("Farm did not respond after 4 attempts — dispatching anyway (expect failures)")
+            _log.warning("Farm health wake-ping failed: %s", exc)
+
+    asyncio.create_task(_wake_farm())
 
     results = dispatch_batch(req.pipe_ids, req.trigger)
 
@@ -150,12 +154,13 @@ async def dispatch_multiple(req: RunnerBatchDispatchRequest):
     farm_tasks = []
     for result in results:
         manifest = result.pop("_manifest", None)
+        payload = result.pop("_payload", None)
         if manifest and result.get("status") == "queued":
-            farm_tasks.append((result, manifest))
+            farm_tasks.append((result, manifest, payload))
 
-    async def _dispatch_one(result_dict: dict, manifest_obj):
+    async def _dispatch_one(result_dict: dict, manifest_obj, payload_dict: dict):
         try:
-            farm_result = await dispatch_to_farm(manifest_obj)
+            farm_result = await dispatch_to_farm(manifest_obj, payload=payload_dict)
             result_dict["status"] = farm_result.get("status", "dispatched")
             if farm_result.get("error_class"):
                 result_dict["error_class"] = farm_result["error_class"]
@@ -168,7 +173,7 @@ async def dispatch_multiple(req: RunnerBatchDispatchRequest):
             result_dict["farm_error"] = str(exc)
 
     if farm_tasks:
-        await asyncio.gather(*[_dispatch_one(r, m) for r, m in farm_tasks])
+        await asyncio.gather(*[_dispatch_one(r, m, p) for r, m, p in farm_tasks])
 
     dispatched = [r for r in results if r.get("status") == "dispatched"]
     errors = [r for r in results if r.get("status") in ("error", "skipped", "farm_error", "farm_unreachable", "failed")]

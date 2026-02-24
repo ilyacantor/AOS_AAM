@@ -11,72 +11,57 @@ from typing import Optional
 from . import supabase_client as sb
 
 
-def delete_runner_jobs_for_pipes(pipe_ids: list[str]) -> int:
-    """Delete existing runner jobs for given pipe_ids before re-dispatch."""
-    if not pipe_ids:
-        return 0
-    from psycopg2 import sql as psql
-    query = psql.SQL(
-        "DELETE FROM {} WHERE job_id = ANY(%s) RETURNING job_id"
-    ).format(sb._ident("runner_jobs"))
-    rows = sb._execute_composed(query, (pipe_ids,))
-    return len(rows)
+def _build_job_row(manifest_dict: dict) -> dict:
+    """Build a complete runner_jobs row dict from a manifest.
+
+    Explicitly sets ALL columns so that UPSERT resets stale values
+    from a previous run (e.g. completed_at, error_message).
+    """
+    now = datetime.utcnow().isoformat()
+    return {
+        "job_id": manifest_dict["source"]["pipe_id"],
+        "pipe_id": manifest_dict["source"]["pipe_id"],
+        "run_id": manifest_dict["run_id"],
+        "status": "queued",
+        "manifest": json.dumps(manifest_dict, default=str),
+        "dispatched_at": now,
+        "started_at": None,
+        "completed_at": None,
+        "last_heartbeat": None,
+        "rows_transferred": 0,
+        "error_message": None,
+        "dcl_response": None,
+    }
 
 
 def create_runner_job(manifest_dict: dict) -> str:
     """Create a new runner job from a manifest dict. Returns job_id (= pipe_id).
 
-    Auto-cleans any existing job for the same pipe_id before inserting.
+    Uses UPSERT (ON CONFLICT DO UPDATE) so re-dispatch overwrites
+    the previous job in a single round-trip instead of DELETE + INSERT.
+    All columns are explicitly set to prevent stale values leaking through.
     """
-    job_id = manifest_dict["source"]["pipe_id"]
-    run_id = manifest_dict["run_id"]
-    now = datetime.utcnow().isoformat()
-
-    # Auto-clean stale job for this pipe_id (re-dispatch case)
-    delete_runner_jobs_for_pipes([job_id])
-
-    sb.insert("runner_jobs", {
-        "job_id": job_id,
-        "pipe_id": manifest_dict["source"]["pipe_id"],
-        "run_id": run_id,
-        "status": "queued",
-        "manifest": json.dumps(manifest_dict, default=str),
-        "dispatched_at": now,
-        "rows_transferred": 0,
-    })
-    return job_id
+    row = _build_job_row(manifest_dict)
+    sb.insert("runner_jobs", row, on_conflict="job_id")
+    return row["job_id"]
 
 
 def create_runner_jobs_batch(manifests: list[dict]) -> list[str]:
-    """Bulk-insert runner jobs from a list of manifest dicts. Returns list of job_ids (pipe_ids).
+    """Bulk-upsert runner jobs from a list of manifest dicts. Returns list of job_ids (pipe_ids).
 
     Uses manifest.source.pipe_id as the job_id (PRIMARY KEY) for AAM's internal tracking.
     The manifest.run_id may be shared across manifests in a batch (for Farm grouping).
+    UPSERT resets ALL columns so re-dispatched jobs start clean.
     """
     if not manifests:
         return []
-    job_ids = [m["source"]["pipe_id"] for m in manifests]
-
-    # Auto-clean stale jobs for these pipe_ids (re-dispatch case)
-    cleaned = delete_runner_jobs_for_pipes(job_ids)
-    if cleaned:
-        from ..logger import get_logger
-        get_logger("db.runner_jobs").info(
-            "Auto-cleaned %d stale runner jobs before re-dispatch", cleaned
-        )
-    now = datetime.utcnow().isoformat()
-    rows = []
-    for m in manifests:
-        rows.append({
-            "job_id": m["source"]["pipe_id"],
-            "pipe_id": m["source"]["pipe_id"],
-            "run_id": m["run_id"],
-            "status": "queued",
-            "manifest": json.dumps(m, default=str),
-            "dispatched_at": now,
-            "rows_transferred": 0,
-        })
-    sb.insert_many("runner_jobs", rows)
+    rows = [_build_job_row(m) for m in manifests]
+    job_ids = [r["job_id"] for r in rows]
+    sb.insert_many("runner_jobs", rows, on_conflict="job_id")
+    from ..logger import get_logger
+    get_logger("db.runner_jobs").info(
+        "Upserted %d runner jobs (batch dispatch)", len(rows)
+    )
     return job_ids
 
 

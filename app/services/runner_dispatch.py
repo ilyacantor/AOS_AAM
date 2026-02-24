@@ -378,7 +378,11 @@ def dispatch_batch(
     manifest_objects = []
     results = []
     errors = []
-    seen_pipe_ids = set()  # Dedup: multiple candidates can match the same declared pipe
+
+    # Dedup BEFORE building manifests: resolve the canonical pipe_id
+    # (matched_pipe_id or pipe_id) up front and skip duplicates early
+    # to avoid wasted build_manifest() calls.
+    seen_pipe_ids: set[str] = set()
 
     for pid in pipe_ids:
         try:
@@ -400,25 +404,26 @@ def dispatch_batch(
                 })
                 continue
 
+            # Pre-compute canonical pipe_id (same logic as build_manifest)
+            canonical_pid = pipe.get("matched_pipe_id") or pipe["pipe_id"]
+            if canonical_pid in seen_pipe_ids:
+                _log.debug("Skipping duplicate pipe %s (candidate %s) before manifest build", canonical_pid, pid)
+                continue
+            seen_pipe_ids.add(canonical_pid)
+
             manifest = build_manifest(pipe, trigger, snapshot_name=current_snapshot, aod_run_id=current_aod_run_id, run_id=batch_run_id)
 
-            # Dedup by manifest pipe_id (= matched_pipe_id or candidate_id).
-            # Multiple candidates can match the same declared pipe — only one job per pipe.
-            manifest_pipe_id = manifest.source.pipe_id
-            if manifest_pipe_id in seen_pipe_ids:
-                _log.debug("Skipping duplicate manifest for pipe %s (candidate %s)", manifest_pipe_id, pid)
-                continue
-            seen_pipe_ids.add(manifest_pipe_id)
-
-            manifests_data.append(manifest.model_dump())
+            manifest_payload = manifest.model_dump()
+            manifests_data.append(manifest_payload)
             manifest_objects.append(manifest)
             results.append({
-                "job_id": manifest_pipe_id,
+                "job_id": manifest.source.pipe_id,
                 "run_id": manifest.run_id,
-                "pipe_id": manifest_pipe_id,
+                "pipe_id": manifest.source.pipe_id,
                 "status": "queued",
                 "trigger": trigger,
                 "_manifest": manifest,
+                "_payload": manifest_payload,
             })
         except Exception as exc:
             _log.warning("Failed to build manifest for pipe %s: %s", pid, exc)
@@ -474,15 +479,18 @@ def _classify_farm_error(status_code: int, body: str, content_type: str) -> tupl
     return "UNKNOWN_ERROR", f"HTTP {status_code}: {body[:300]}"
 
 
-async def dispatch_to_farm(manifest: JobManifest) -> dict:
+async def dispatch_to_farm(manifest: JobManifest, *, payload: Optional[dict] = None) -> dict:
     """POST a JobManifest to Farm's intake endpoint (Path 2).
 
     AAM dispatches instructions to Farm.  Farm executes extraction and
     pushes data to DCL (Path 3).  The manifest's target.dcl_url tells
     Farm where to deliver — it is NOT the manifest's own destination.
+
+    If *payload* is provided it is sent as-is (avoids redundant model_dump()).
     """
     farm_url = settings.FARM_INTAKE_URL
-    payload = manifest.model_dump()
+    if payload is None:
+        payload = manifest.model_dump()
     attempt_at = datetime.utcnow().isoformat() + "Z"
 
     try:
