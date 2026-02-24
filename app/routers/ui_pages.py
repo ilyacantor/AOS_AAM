@@ -1713,6 +1713,7 @@ async def ui_topology():
         .sb-btn-accent:hover {{ background: rgba(251, 146, 60, 0.1); }}
         .sb-btn-runner {{ border-color: rgba(34, 197, 94, 0.3); color: #4ade80; }}
         .sb-btn-runner:hover {{ background: rgba(34, 197, 94, 0.1); }}
+        .sb-btn-runner:disabled {{ opacity: 0.5; cursor: not-allowed; }}
         .sb-btn-stop {{ border-color: rgba(248, 113, 113, 0.3); color: #f87171; }}
         .sb-btn-stop:hover {{ background: rgba(248, 113, 113, 0.15); }}
         .dispatch-pill {{
@@ -2050,6 +2051,7 @@ async def ui_topology():
                 var dclOkExport = exportData.delivery && exportData.delivery.export_pipes && exportData.delivery.export_pipes.ok;
                 var expCount = exportData.export ? exportData.export.total_connections : 0;
                 logStep('3', 'Export: ' + expCount + ' pipes to DCL' + (dclOkExport ? ' (accepted)' : ' (failed)'), dclOkExport);
+                checkDispatchReady();
 
                 // Step 4: Dispatch to DCL (creates dispatch row)
                 setStep('4/5 Dispatching');
@@ -2538,10 +2540,31 @@ async def ui_topology():
                 a.download = 'dcl-export-' + new Date().toISOString().slice(0,10) + '.json';
                 a.click();
                 showToast('Exported ' + data.pipe_count + ' pipes', 'success');
+                checkDispatchReady();
             }} catch (e) {{
                 showToast('Export failed: ' + e.message, 'error');
             }}
         }});
+
+        async function checkDispatchReady() {{
+            const btn = document.getElementById('btn-dispatch-all');
+            try {{
+                const res = await fetch('/api/runners/can-dispatch');
+                const data = await res.json();
+                if (data.ready) {{
+                    btn.disabled = false;
+                    btn.title = '';
+                    btn.textContent = 'Dispatch Runner';
+                }} else {{
+                    btn.disabled = true;
+                    btn.title = data.reason || 'Export to DCL first';
+                    btn.textContent = 'Dispatch Runner';
+                }}
+            }} catch (e) {{
+                // On error, leave enabled (server guard is the fallback)
+                btn.disabled = false;
+            }}
+        }}
 
         let _dispatchPollTimer = null;
         let _dispatchCounterTimer = null;
@@ -2948,6 +2971,7 @@ async def ui_topology():
 
         // Initialize
         loadTopology();
+        checkDispatchReady();
     </script>
 
     <div class="dispatch-overlay" id="dispatch-overlay" data-testid="dispatch-overlay" onclick="if(event.target===this)closeDispatchPanel()">

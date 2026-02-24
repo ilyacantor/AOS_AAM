@@ -69,6 +69,24 @@ def _require_dcl_export():
         )
 
 
+@router.get("/can-dispatch")
+def can_dispatch():
+    """Check whether the Dispatch Runner button should be enabled."""
+    handoffs = list_handoff_logs(limit=1)
+    if not handoffs:
+        return {"ready": False, "reason": "No AOD data fetched yet. Run the full pipeline first."}
+    aod_run_id = handoffs[0].get("aod_run_id")
+    snapshot_name = handoffs[0].get("snapshot_name", "unknown")
+    if not aod_run_id:
+        return {"ready": False, "reason": "Latest handoff has no run ID."}
+    if not has_dcl_push_for_run(aod_run_id):
+        return {
+            "ready": False,
+            "reason": f"Export to DCL required first for '{snapshot_name}'. Without it, Farm data will be rejected.",
+        }
+    return {"ready": True, "reason": None, "snapshot_name": snapshot_name}
+
+
 @router.post("/dispatch")
 async def dispatch_single(req: RunnerDispatchRequest):
     """Dispatch a runner job for a single pipe.
