@@ -2791,7 +2791,7 @@ async def ui_topology():
                 const label = src.length > 25 ? src.substring(0,22) + '...' : src;
                 const ts = j.completed_at || j.started_at || j.created_at || '';
                 const shortTs = ts ? new Date(ts).toLocaleTimeString() : '-';
-                return '<tr class="dp-clickable" onclick="toggleJobDetail(\'' + _escHtml(jobId) + '\', this)" title="Click for details">' +
+                return '<tr class="dp-clickable" onclick="toggleJobDetail(\\'' + _escHtml(jobId) + '\\', this)" title="Click for details">' +
                     '<td title="pipe: ' + pipeId + '">' + label + '</td>' +
                     '<td><span class="dp-status ' + s + '">' + s + '</span></td>' +
                     '<td style="text-align:right;">' + rows + '</td>' +
