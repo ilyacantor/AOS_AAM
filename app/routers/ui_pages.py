@@ -2683,15 +2683,39 @@ async def ui_topology():
         async function loadDclDispatchStatus() {{
             const banner = document.getElementById('dcl-dispatch-banner');
             try {{
-                const res = await fetch('/api/export/dcl/dispatch-status');
-                const data = await res.json();
-                const d = data.dcl_dispatch;
+                // Try dispatch status first (in-memory, set after DCL dispatch)
+                var d = null;
+                try {{
+                    const res = await fetch('/api/export/dcl/dispatch-status');
+                    const data = await res.json();
+                    d = data.dcl_dispatch;
+                }} catch (e) {{}}
+
+                // Fallback: always show latest AOD run info from DB
+                if (!d) {{
+                    try {{
+                        const runRes = await fetch('/api/handoff/aod/latest');
+                        if (runRes.ok) {{
+                            const run = await runRes.json();
+                            if (run && run.aod_run_id) {{
+                                d = {{
+                                    aod_run_id: run.aod_run_id,
+                                    snapshot_name: run.snapshot_name,
+                                    pipe_count: run.candidates_accepted,
+                                    ok: true,
+                                    timestamp: run.handoff_timestamp,
+                                }};
+                            }}
+                        }}
+                    }} catch (e) {{}}
+                }}
+
                 if (!d) {{
                     banner.style.display = 'none';
                     return;
                 }}
                 const statusColor = d.ok ? '#4ade80' : '#f87171';
-                const statusLabel = d.dcl_status || (d.ok ? 'ok' : 'failed');
+                const statusLabel = d.dcl_status || (d.ok ? 'ok' : 'pending');
                 const ts = d.timestamp ? new Date(d.timestamp).toLocaleTimeString() : '';
                 banner.style.display = 'block';
                 banner.style.borderColor = d.ok ? 'rgba(34,197,94,0.3)' : 'rgba(248,113,113,0.3)';
