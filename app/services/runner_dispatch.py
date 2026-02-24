@@ -135,7 +135,11 @@ VENDOR_CATEGORY = {
 
 
 def normalize_category(raw_category: Optional[str], vendor: Optional[str] = None) -> Optional[str]:
-    """Normalize a category to the closed vocabulary. Returns None if unclassifiable."""
+    """Normalize a category to a known vocabulary, with passthrough fallback.
+
+    Priority: VALID_CATEGORIES → CATEGORY_SYNONYMS → VENDOR_CATEGORY → raw passthrough.
+    Only returns None when both raw_category and vendor are empty/unmapped.
+    """
     if raw_category:
         cat = raw_category.lower().strip()
         if cat in VALID_CATEGORIES:
@@ -149,6 +153,11 @@ def normalize_category(raw_category: Optional[str], vendor: Optional[str] = None
         vendor_cat = VENDOR_CATEGORY.get(v)
         if vendor_cat:
             return vendor_cat
+
+    # Pass through non-empty categories even if unrecognized (e.g. "other")
+    # so pipes aren't silently skipped from dispatch
+    if raw_category:
+        return raw_category.lower().strip()
 
     return None
 
