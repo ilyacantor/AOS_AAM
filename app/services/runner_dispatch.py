@@ -362,6 +362,7 @@ def dispatch_batch(
     manifest_objects = []
     results = []
     errors = []
+    seen_pipe_ids = set()  # Dedup: multiple candidates can match the same declared pipe
 
     for pid in pipe_ids:
         try:
@@ -375,12 +376,20 @@ def dispatch_batch(
 
             manifest = build_manifest(pipe, trigger, snapshot_name=current_snapshot, aod_run_id=current_aod_run_id, run_id=batch_run_id)
 
+            # Dedup by manifest pipe_id (= matched_pipe_id or candidate_id).
+            # Multiple candidates can match the same declared pipe — only one job per pipe.
+            manifest_pipe_id = manifest.source.pipe_id
+            if manifest_pipe_id in seen_pipe_ids:
+                _log.debug("Skipping duplicate manifest for pipe %s (candidate %s)", manifest_pipe_id, pid)
+                continue
+            seen_pipe_ids.add(manifest_pipe_id)
+
             manifests_data.append(manifest.model_dump())
             manifest_objects.append(manifest)
             results.append({
-                "job_id": manifest.source.pipe_id,  # Use pipe_id as unique key for AAM database
-                "run_id": manifest.run_id,  # Shared aod_run_id for Farm batch grouping
-                "pipe_id": manifest.source.pipe_id,
+                "job_id": manifest_pipe_id,
+                "run_id": manifest.run_id,
+                "pipe_id": manifest_pipe_id,
                 "status": "queued",
                 "trigger": trigger,
                 "_manifest": manifest,
