@@ -210,16 +210,33 @@ async def push_to_dcl(request: Request):
 
     delivery_report = await _deliver_to_dcl(export_payload)
 
-    push_record = record_dcl_push(
-        pipe_count=export_data.total_connections,
-        payload=export_payload,
-        aod_run_id=aod_run_id or export_data.aod_run_id,
-        notes=notes,
-    )
+    # Only record the push if DCL actually accepted the blueprints.
+    # If DCL rejected (422, 500, etc.), the dispatch guard must block —
+    # recording a push for a failed delivery causes NO_MATCHING_PIPE.
+    ep_delivery = delivery_report.get("export_pipes") or {}
+    dcl_accepted = ep_delivery.get("ok", False)
+
+    push_record = None
+    if dcl_accepted:
+        push_record = record_dcl_push(
+            pipe_count=export_data.total_connections,
+            payload=export_payload,
+            aod_run_id=aod_run_id or export_data.aod_run_id,
+            notes=notes,
+        )
+    else:
+        dcl_status = ep_delivery.get("status")
+        dcl_error = ep_delivery.get("error") or ep_delivery.get("body", "")
+        _log.warning(
+            "DCL rejected export (status=%s) — push NOT recorded. "
+            "Dispatch guard will block until a successful export. Detail: %s",
+            dcl_status, str(dcl_error)[:300],
+        )
 
     return {
         "push": push_record,
         "delivery": delivery_report,
+        "dcl_accepted": dcl_accepted,
         "export": export_payload,
     }
 

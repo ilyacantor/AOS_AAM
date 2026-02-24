@@ -172,10 +172,11 @@ def _build_field_maps(candidate_ids: set[str], vendor_names: set[str]) -> dict:
             if fields:
                 maps["by_pipe_id"][pid] = fields
 
-            # Pipe metadata for export enrichment
+            # Pipe metadata for export enrichment.
+            # Keep empty lists as [] (not None) — DCL expects list type.
             maps["pipe_metadata"][pid] = {
                 "entity_scope": ", ".join(es_parsed) if es_parsed else None,
-                "identity_keys": ik_parsed or None,
+                "identity_keys": ik_parsed,
                 "transport_kind": row.get("transport_kind"),
                 "modality": row.get("modality"),
                 "change_semantics": row.get("change_semantics"),
