@@ -224,9 +224,23 @@ def list_runner_jobs(
     if filters:
         kwargs["filters"] = filters
 
-    rows = sb.select(
-        "runner_jobs",
-        columns="job_id,pipe_id,run_id,status,dispatched_at,started_at,completed_at,rows_transferred,error_message,last_heartbeat",
-        **kwargs,
-    )
+    from psycopg2 import sql as psql
+    # Extract source_system from manifest JSON so the UI can show human-readable labels
+    cols = ("job_id,pipe_id,run_id,status,dispatched_at,started_at,completed_at,"
+            "rows_transferred,error_message,last_heartbeat,"
+            "manifest::json->'source'->>'system' as source_system")
+    parts = [psql.SQL("SELECT {} FROM {}").format(
+        psql.SQL(cols), sb._ident("runner_jobs")
+    )]
+    params: list = []
+    if filters:
+        clauses = []
+        for k, v in filters.items():
+            clauses.append(psql.SQL("{} = %s").format(psql.Identifier(k)))
+            params.append(v)
+        parts.append(psql.SQL("WHERE ") + psql.SQL(" AND ").join(clauses))
+    parts.append(psql.SQL("ORDER BY dispatched_at DESC LIMIT %s"))
+    params.append(limit)
+    query = psql.SQL(" ").join(parts)
+    rows = sb._execute_composed(query, tuple(params) if params else None)
     return rows
