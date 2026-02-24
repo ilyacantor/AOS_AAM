@@ -174,8 +174,12 @@ def _build_field_maps(candidate_ids: set[str], vendor_names: set[str]) -> dict:
 
             # Pipe metadata for export enrichment.
             # Keep empty lists as [] (not None) — DCL expects list type.
+            # Truncate entity_scope to 128 chars (DCL column limit).
+            es_str = ", ".join(es_parsed) if es_parsed else None
+            if es_str and len(es_str) > 128:
+                es_str = es_str[:125] + "..."
             maps["pipe_metadata"][pid] = {
-                "entity_scope": ", ".join(es_parsed) if es_parsed else None,
+                "entity_scope": es_str,
                 "identity_keys": ik_parsed,
                 "transport_kind": row.get("transport_kind"),
                 "modality": row.get("modality"),
