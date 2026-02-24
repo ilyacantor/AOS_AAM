@@ -7,10 +7,12 @@ Farm dispatch.  AAM never executes data extraction — Farm does.
 """
 import asyncio
 import os
+from datetime import datetime, timedelta
 from typing import Optional
 
 from ..logger import get_logger
-from ..db.runner_jobs import get_runner_job, update_runner_status
+from ..config import settings
+from ..db.runner_jobs import get_runner_job, update_runner_status, increment_retry_count
 from ..models import JobManifest
 
 _log = get_logger("services.runner_worker")
@@ -33,7 +35,9 @@ def _claim_queued_jobs() -> list[str]:
     query = psql.SQL(
         "UPDATE {} SET status = 'running', started_at = NOW(), last_heartbeat = NOW() "
         "WHERE job_id IN ("
-        "  SELECT job_id FROM {} WHERE status = 'queued' ORDER BY dispatched_at"
+        "  SELECT job_id FROM {} WHERE status = 'queued'"
+        "  AND (retry_after IS NULL OR retry_after <= NOW()::text)"
+        "  ORDER BY dispatched_at"
         ") RETURNING job_id"
     ).format(sb._ident("runner_jobs"), sb._ident("runner_jobs"))
 
@@ -93,6 +97,18 @@ async def _worker_loop():
             await asyncio.sleep(POLL_INTERVAL_S)
 
 
+def _requeue_with_backoff(
+    job_id: str, attempt: int, max_retries: int, error_msg: str, retry_after: str,
+):
+    """Set job back to queued with a retry_after timestamp for backoff."""
+    from ..db import supabase_client as sb
+    sb.update("runner_jobs", {
+        "status": "queued",
+        "error_message": f"[REQUEUED attempt {attempt}/{max_retries}] {error_msg}",
+        "retry_after": retry_after,
+    }, filters={"job_id": job_id})
+
+
 async def _dispatch_job_to_farm(job_id: str):
     """Load a job's manifest and dispatch to Farm.
 
@@ -124,14 +140,34 @@ async def _dispatch_job_to_farm(job_id: str):
         if result.get("status") == "dispatched":
             _log.info("Worker: job %s dispatched to Farm successfully", job_id)
         elif result.get("status") == "farm_unreachable":
-            # Return to queued for later retry, but record what was tried so
-            # the Dispatch Status modal shows actionable context rather than silence.
+            # Transient error — increment retry count and decide: requeue or exhaust.
             unreachable_msg = result.get("error", "Farm unreachable — no detail captured")
-            _log.warning("Worker: Farm unreachable for job %s, returning to queued. %s", job_id, unreachable_msg)
-            await asyncio.to_thread(
-                update_runner_status, job_id, "queued",
-                error_message=f"[REQUEUED] {unreachable_msg}",
-            )
+            new_count = await asyncio.to_thread(increment_retry_count, job_id)
+            max_retries = settings.FARM_MAX_RETRIES
+
+            if new_count > max_retries:
+                exhaust_msg = (
+                    f"[RETRIES_EXHAUSTED] Failed after {new_count - 1}/{max_retries} retries. "
+                    f"Last error: {unreachable_msg}"
+                )
+                _log.warning("Worker: job %s exhausted %d retries, marking failed", job_id, max_retries)
+                await asyncio.to_thread(
+                    update_runner_status, job_id, "failed",
+                    error_message=exhaust_msg,
+                )
+            else:
+                # Exponential backoff: base * 2^(attempt-1), capped at 5 min
+                backoff_s = min(settings.FARM_RETRY_BACKOFF_S * (2 ** (new_count - 1)), 300)
+                retry_at = (datetime.utcnow() + timedelta(seconds=backoff_s)).isoformat()
+                _log.warning(
+                    "Worker: Farm unreachable for job %s (attempt %d/%d), "
+                    "returning to queued with retry_after=%s (%ds). %s",
+                    job_id, new_count, max_retries, retry_at, backoff_s, unreachable_msg,
+                )
+                await asyncio.to_thread(
+                    _requeue_with_backoff, job_id, new_count, max_retries,
+                    unreachable_msg, retry_at,
+                )
         else:
             err = result.get("error", "Farm dispatch failed")
             _log.warning("Worker: Farm rejected job %s [%s]: %s", job_id, result.get("error_class", "?"), err)

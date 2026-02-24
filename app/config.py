@@ -57,6 +57,16 @@ class Settings:
             self.FARM_INTAKE_URL: str = _farm_base + "/api/farm/manifest-intake"
         else:
             self.FARM_INTAKE_URL: str = _farm_base
+        # Maximum retries for transient Farm errors (502/503, connect errors).
+        # After this many requeue cycles, the job is permanently failed.
+        self.FARM_MAX_RETRIES: int = int(
+            os.environ.get("AAM_FARM_MAX_RETRIES", "5")
+        )
+        # Base backoff in seconds between transient Farm retries.
+        # Actual delay = base * 2^(retry_count - 1), capped at 5 minutes.
+        self.FARM_RETRY_BACKOFF_S: int = int(
+            os.environ.get("AAM_FARM_RETRY_BACKOFF_S", "10")
+        )
 
 
 settings = Settings()

@@ -479,6 +479,11 @@ def _classify_farm_error(status_code: int, body: str, content_type: str) -> tupl
     return "UNKNOWN_ERROR", f"HTTP {status_code}: {body[:300]}"
 
 
+# Error classes that indicate a transient infrastructure issue (reverse-proxy
+# hiccup, sleeping container) — the job should be requeued, not permanently failed.
+_TRANSIENT_ERROR_CLASSES = {"SLEEPING_APP", "GATEWAY_ERROR"}
+
+
 async def dispatch_to_farm(manifest: JobManifest, *, payload: Optional[dict] = None) -> dict:
     """POST a JobManifest to Farm's intake endpoint (Path 2).
 
@@ -528,6 +533,15 @@ async def dispatch_to_farm(manifest: JobManifest, *, payload: Optional[dict] = N
             manifest.run_id, manifest.source.pipe_id, farm_url, resp.status_code,
             error_class, content_type, detail,
         )
+        if error_class in _TRANSIENT_ERROR_CLASSES:
+            # Transient: don't write "failed" — let the worker requeue.
+            _log.info(
+                "Transient Farm error (%s) for pipe %s — returning farm_unreachable for retry",
+                error_class, manifest.source.pipe_id,
+            )
+            return {"status": "farm_unreachable", "error": error_msg}
+
+        # Permanent error — fail immediately
         update_runner_status(manifest.source.pipe_id, "failed", error_message=error_msg)
         return {
             "status": "farm_error",

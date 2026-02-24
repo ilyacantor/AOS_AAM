@@ -48,6 +48,10 @@ def _run_migrations():
         # Migration 2026-02-24: Add indexes for status queries and dispatch ordering
         ("CREATE INDEX IF NOT EXISTS idx_runner_jobs_status ON runner_jobs(status)", "add_status_index"),
         ("CREATE INDEX IF NOT EXISTS idx_runner_jobs_dispatched_at ON runner_jobs(dispatched_at DESC NULLS LAST)", "add_dispatched_at_index"),
+        # Migration 2026-02-24: Add retry_count for transient Farm error retry tracking
+        ("ALTER TABLE runner_jobs ADD COLUMN IF NOT EXISTS retry_count INTEGER DEFAULT 0", "add_retry_count_column"),
+        # Migration 2026-02-24: Add retry_after for backoff between transient retries
+        ("ALTER TABLE runner_jobs ADD COLUMN IF NOT EXISTS retry_after TEXT", "add_retry_after_column"),
     ]
 
     for sql_stmt, migration_name in migrations:

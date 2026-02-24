@@ -31,6 +31,8 @@ def _build_job_row(manifest_dict: dict) -> dict:
         "rows_transferred": 0,
         "error_message": None,
         "dcl_response": None,
+        "retry_count": 0,
+        "retry_after": None,
     }
 
 
@@ -221,3 +223,26 @@ def list_runner_jobs(
     ).format(sb._ident("runner_jobs"))
     rows = sb._execute_composed(query, tuple(params) if params else None)
     return rows
+
+
+def increment_retry_count(job_id: str) -> int:
+    """Atomically increment retry_count and return the new value.
+
+    Uses COALESCE to handle rows where retry_count is NULL (pre-migration).
+    """
+    from psycopg2 import sql as psql
+
+    query = psql.SQL(
+        "UPDATE {} SET retry_count = COALESCE(retry_count, 0) + 1 "
+        "WHERE job_id = %s RETURNING retry_count"
+    ).format(sb._ident("runner_jobs"))
+
+    rows = sb._execute_composed(query, (job_id,))
+    if rows:
+        return int(rows[0]["retry_count"])
+
+    from ..logger import get_logger
+    get_logger("db.runner_jobs").warning(
+        "increment_retry_count: no row found for job_id=%s", job_id
+    )
+    return 0

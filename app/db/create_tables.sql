@@ -219,7 +219,9 @@ CREATE TABLE IF NOT EXISTS runner_jobs (
     last_heartbeat TEXT,
     rows_transferred INTEGER DEFAULT 0,
     error_message TEXT,
-    dcl_response TEXT
+    dcl_response TEXT,
+    retry_count INTEGER DEFAULT 0,
+    retry_after TEXT
 );
 
 CREATE TABLE IF NOT EXISTS semantic_edges (
