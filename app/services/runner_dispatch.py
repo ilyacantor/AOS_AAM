@@ -192,13 +192,21 @@ def build_manifest(
     so the manifest aligns with the DCL export (critical for late-binding join).
     """
     # Use DeclaredPipe pipe_id for manifest alignment with export.
-    # Never fall back to candidate_id — that's not a valid DCL pipe.
+    # Two cases:
+    #   1. Candidate-as-pipe (from list_pipes/get_pipe→candidate): has "matched_pipe_id" key.
+    #      If null, candidate hasn't been inferred → reject.
+    #   2. Declared pipe (from get_pipe→declared_pipes): no "matched_pipe_id" key.
+    #      pipe_id is already the canonical DCL pipe ID → use directly.
     pipe_id = pipe.get("matched_pipe_id")
     if not pipe_id:
-        raise ValueError(
-            f"Pipe {pipe.get('pipe_id', '?')} has no matched_pipe_id — "
-            "run Infer before dispatch. Cannot use candidate_id as pipe_id."
-        )
+        if "matched_pipe_id" in pipe:
+            # Candidate with no inferred pipe — never fall back to candidate_id
+            raise ValueError(
+                f"Pipe {pipe.get('pipe_id', '?')} has no matched_pipe_id — "
+                "run Infer before dispatch. Cannot use candidate_id as pipe_id."
+            )
+        # Declared pipe — pipe_id is already canonical
+        pipe_id = pipe["pipe_id"]
     source_system = pipe.get("source_system", "unknown")
     fabric_plane = pipe.get("fabric_plane", "")
     transport_kind = pipe.get("transport_kind", "")
