@@ -36,8 +36,8 @@ async def ui_pipes_list(
     filter: Optional[str] = Query("all")
 ):
     """Pipes Inventory Screen"""
-    all_pipes = list_pipes()
-    
+    all_pipes = list_pipes(limit=200)
+
     # Single filter for asset classes
     if filter == "all":
         pipes = all_pipes
@@ -50,7 +50,7 @@ async def ui_pipes_list(
     source_systems = sorted(set(p.get("source_system", "") for p in all_pipes if p.get("source_system")))
     fabric_planes = ALL_PLANE_TYPES
     
-    all_drift = list_all_drift_events()
+    all_drift = list_all_drift_events(limit=200)
     drift_by_pipe = {}
     for d in all_drift:
         pid = d.get("pipe_id")
@@ -777,8 +777,8 @@ async def ui_candidates_list(
     view: Optional[str] = Query("sors_fabrics", description="View filter: all, sors, fabrics, sors_fabrics, ipaas, warehouse, gateway, eventbus")
 ):
     """Candidates Screen"""
-    all_candidates = list_candidates()
-    
+    all_candidates = list_candidates(limit=200)
+
     from ..constants import SOR_CATEGORIES as sor_categories
 
     # Resolve a candidate's fabric plane TYPE from its linkage or routing hint

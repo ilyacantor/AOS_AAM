@@ -71,7 +71,7 @@ def get_drift_events(pipe_id: str) -> list[dict]:
     return [_row_to_drift_event(row) for row in rows]
 
 
-def list_all_drift_events(limit: Optional[int] = None) -> list[dict]:
+def list_all_drift_events(limit: Optional[int] = 500) -> list[dict]:
     """List all drift events"""
     kwargs = {"order": "detected_at.desc"}
     if limit:

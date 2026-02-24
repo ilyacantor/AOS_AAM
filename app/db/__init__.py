@@ -20,6 +20,6 @@ from .sor_dispositions import set_sor_disposition, get_sor_dispositions  # noqa:
 from .reconciliation import get_aod_reconciliation, get_latest_aod_run  # noqa: F401
 from .stats import get_canonical_stats  # noqa: F401
 from .dcl_pushes import record_dcl_push, list_dcl_pushes, get_dcl_push  # noqa: F401
-from .runner_jobs import create_runner_job, update_runner_status, update_heartbeat, get_runner_job, list_runner_jobs, delete_runner_jobs_for_pipes  # noqa: F401
+from .runner_jobs import create_runner_job, update_runner_status, update_heartbeat, get_runner_job, list_runner_jobs  # noqa: F401
 from .dcl_ingest import compute_schema_hash, store_ingest, get_previous_schema_hash, list_ingests, get_ingest  # noqa: F401
 from .semantic_edges import store_semantic_edge, store_semantic_edges_batch, list_semantic_edges, get_semantic_edge, delete_semantic_edges_by_source, count_semantic_edges  # noqa: F401

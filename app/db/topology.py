@@ -95,7 +95,7 @@ def get_topology_data() -> dict:
     fabric_planes_found: set[str] = set()
     source_systems: set[str] = set()
 
-    candidates = sb.select("connection_candidates")
+    candidates = sb.select("connection_candidates", limit=2000)
 
     for c in candidates:
         cid = c["candidate_id"]
@@ -149,7 +149,7 @@ def get_topology_data() -> dict:
             "metadata": {"source_system": source},
         })
 
-    drift_rows = sb.select("drift_events", raw_params={"status": "eq.open"})
+    drift_rows = sb.select("drift_events", raw_params={"status": "eq.open"}, limit=500)
     pipes_with_drift = set(row["pipe_id"] for row in drift_rows)
 
     from ..constants import SOR_CATEGORIES
@@ -289,7 +289,7 @@ def get_topology_for_fabric_plane(fabric_plane: str) -> dict:
             },
         })
 
-    all_candidates = sb.select("connection_candidates")
+    all_candidates = sb.select("connection_candidates", limit=2000)
 
     pipe_count = 0
     for c in all_candidates:

@@ -15,7 +15,7 @@ from ..logger import get_logger
 _log = get_logger("db.reconciliation")
 
 
-def _get_handoff_summary(aod_run_id: str) -> Optional[dict]:
+def _get_handoff_summary(aod_run_id: str, candidates: list[dict]) -> Optional[dict]:
     """Return handoff log row, basic counts, and top-vendor breakdown."""
     handoff_rows = sb.select(
         "aod_handoff_log",
@@ -27,7 +27,6 @@ def _get_handoff_summary(aod_run_id: str) -> Optional[dict]:
         return None
     handoff_row = handoff_rows[0]
 
-    candidates = sb.select("connection_candidates", filters={"aod_run_id": aod_run_id})
     candidates_stored = len(candidates)
 
     fabric_planes = sb.select("fabric_planes", filters={"aod_run_id": aod_run_id})
@@ -78,9 +77,8 @@ def _get_handoff_summary(aod_run_id: str) -> Optional[dict]:
     }
 
 
-def _check_vendor_duplicates(aod_run_id: str) -> dict:
+def _check_vendor_duplicates(aod_run_id: str, candidates: list[dict]) -> dict:
     """Find vendors stored under different casings (e.g. Salesforce vs salesforce)."""
-    candidates = sb.select("connection_candidates", filters={"aod_run_id": aod_run_id})
 
     vendors_raw: dict[str, int] = defaultdict(int)
     for c in candidates:
@@ -113,7 +111,7 @@ def _check_vendor_duplicates(aod_run_id: str) -> dict:
     }
 
 
-def _compare_fabric_planes(aod_run_id: str) -> dict:
+def _compare_fabric_planes(aod_run_id: str, candidates: list[dict]) -> dict:
     """Compare fabric planes AOD explicitly sent vs what AAM stored.
 
     Also checks whether each stored plane has candidates linked to it.
@@ -163,7 +161,6 @@ def _compare_fabric_planes(aod_run_id: str) -> dict:
             "plane_id": row["plane_id"],
         }
 
-    candidates = sb.select("connection_candidates", filters={"aod_run_id": aod_run_id})
     candidates_per_plane: dict[str, int] = defaultdict(int)
     for c in candidates:
         fpid = c.get("fabric_plane_id")
@@ -280,7 +277,7 @@ def _categories_compatible(expected: str, found: str) -> bool:
     return False
 
 
-def _compare_sor_line_items(aod_run_id: str) -> dict:
+def _compare_sor_line_items(aod_run_id: str, candidates: list[dict]) -> dict:
     """Compare Farm SOR declarations and AOD SOR summary against AAM candidates."""
     from .sor_dispositions import get_sor_dispositions
 
@@ -321,7 +318,6 @@ def _compare_sor_line_items(aod_run_id: str) -> dict:
             "authoritative": s.get("authoritative", False),
         }
 
-    candidates = sb.select("connection_candidates", filters={"aod_run_id": aod_run_id})
     aam_by_vendor: dict[str, dict] = {}
     for c in candidates:
         vk = (c.get("vendor_name") or "unknown").lower()
@@ -434,13 +430,8 @@ def _compare_sor_line_items(aod_run_id: str) -> dict:
     }
 
 
-def _check_schema_completeness(aod_run_id: str) -> dict:
+def _check_schema_completeness(aod_run_id: str, candidates: list[dict]) -> dict:
     """Find candidates missing key AOD-provided fields."""
-    candidates = sb.select(
-        "connection_candidates",
-        filters={"aod_run_id": aod_run_id},
-        columns="candidate_id,vendor_name,display_name,category,known_endpoints,preferred_modality,connected_via_plane",
-    )
 
     issues = []
     aod_missing = {"vendor_name": 0, "display_name": 0,
@@ -495,18 +486,13 @@ def _check_schema_completeness(aod_run_id: str) -> dict:
     }
 
 
-def _check_pipe_schema_content(aod_run_id: str) -> dict:
+def _check_pipe_schema_content(aod_run_id: str, candidates: list[dict]) -> dict:
     """Check whether declared pipes created from this run have real schema content.
 
     Validates that entity_scope, identity_keys, and schema_info are populated
     after inference — i.e. that DCL will receive actual field definitions,
     not empty placeholders.
     """
-    candidates = sb.select(
-        "connection_candidates",
-        filters={"aod_run_id": aod_run_id},
-        columns="candidate_id,vendor_name,matched_pipe_id",
-    )
 
     pipe_ids = set()
     vendor_by_pipe: dict[str, str] = {}
@@ -527,7 +513,7 @@ def _check_pipe_schema_content(aod_run_id: str) -> dict:
             "has_issues": False,
         }
 
-    all_pipes = sb.select("declared_pipes")
+    all_pipes = sb.select("declared_pipes", limit=5000)
     pipes = [p for p in all_pipes if p.get("pipe_id") in pipe_ids]
 
     pipes_with = 0
@@ -580,9 +566,8 @@ def _check_pipe_schema_content(aod_run_id: str) -> dict:
     }
 
 
-def _check_duplicates(aod_run_id: str) -> dict:
+def _check_duplicates(aod_run_id: str, candidates: list[dict]) -> dict:
     """Find candidates sharing vendor + display_name combination."""
-    candidates = sb.select("connection_candidates", filters={"aod_run_id": aod_run_id})
 
     group_map: dict[tuple, list] = defaultdict(list)
     for c in candidates:
@@ -620,22 +605,24 @@ def get_aod_reconciliation(aod_run_id: str) -> dict:
     Delegates to focused sub-functions for each check, then assembles the
     full report.
     """
-    summary = _get_handoff_summary(aod_run_id)
+    # Load candidates once and pass to all sub-functions (OOM fix)
+    all_candidates = sb.select("connection_candidates", filters={"aod_run_id": aod_run_id}, limit=5000)
+
+    summary = _get_handoff_summary(aod_run_id, all_candidates)
     if summary is None:
         return {"error": f"No handoff found for run {aod_run_id}",
                 "aod_run_id": aod_run_id}
 
-    vendor_check = _check_vendor_duplicates(aod_run_id)
-    fabric_check = _compare_fabric_planes(aod_run_id)
-    sor_check = _compare_sor_line_items(aod_run_id)
-    completeness = _check_schema_completeness(aod_run_id)
-    duplicates = _check_duplicates(aod_run_id)
-    pipe_schema = _check_pipe_schema_content(aod_run_id)
+    vendor_check = _check_vendor_duplicates(aod_run_id, all_candidates)
+    fabric_check = _compare_fabric_planes(aod_run_id, all_candidates)
+    sor_check = _compare_sor_line_items(aod_run_id, all_candidates)
+    completeness = _check_schema_completeness(aod_run_id, all_candidates)
+    duplicates = _check_duplicates(aod_run_id, all_candidates)
+    pipe_schema = _check_pipe_schema_content(aod_run_id, all_candidates)
 
     handoff_row = summary["handoff_row"]
     candidates_stored = summary["candidates_stored"]
 
-    all_candidates = sb.select("connection_candidates", filters={"aod_run_id": aod_run_id})
     aod_origin_stored = sum(
         1 for c in all_candidates
         if not (c.get("asset_key") or "").startswith("infra:")

@@ -88,7 +88,7 @@ def get_pipe(pipe_id: str) -> Optional[dict]:
     return None
 
 
-def list_pipes(source_system: Optional[str] = None, fabric_plane: Optional[str] = None, limit: Optional[int] = None) -> list[dict]:
+def list_pipes(source_system: Optional[str] = None, fabric_plane: Optional[str] = None, limit: Optional[int] = 1000) -> list[dict]:
     """
     List pipes with optional filters.
 

@@ -163,7 +163,7 @@ def get_candidate(candidate_id: str) -> Optional[dict]:
     return None
 
 
-def list_candidates(status: Optional[str] = None, limit: Optional[int] = None) -> list[dict]:
+def list_candidates(status: Optional[str] = None, limit: Optional[int] = 1000) -> list[dict]:
     """List candidates with optional status filter, sorted by category"""
     filters = {}
     if status:

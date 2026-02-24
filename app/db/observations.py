@@ -54,7 +54,7 @@ def get_observations_for_candidate(candidate_id: str) -> list[dict]:
 
 def get_unprocessed_observations() -> list[dict]:
     """Get observations that haven't been processed"""
-    rows = sb.select("observations", raw_params={"processed": "eq.false"}, order="observed_at.asc")
+    rows = sb.select("observations", raw_params={"processed": "eq.false"}, order="observed_at.asc", limit=1000)
     return [_row_to_observation(row) for row in rows]
 
 
@@ -72,6 +72,7 @@ def get_all_schema_samples() -> list[dict]:
         "observations",
         columns="candidate_id,source_system,schema_sample",
         raw_params={"schema_sample": "not.is.null"},
+        limit=2000,
     )
     results = []
     for row in rows:

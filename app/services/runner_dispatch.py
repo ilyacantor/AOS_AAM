@@ -16,8 +16,6 @@ from ..logger import get_logger
 from ..db import (
     get_pipe,
     get_candidate,
-    list_candidates,
-    list_pipes,
 )
 from ..db.runner_jobs import create_runner_job, create_runner_jobs_batch, update_runner_status, list_runner_jobs, get_runner_job
 from ..models import (
