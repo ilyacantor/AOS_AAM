@@ -1754,11 +1754,15 @@ async def ui_topology():
             border-radius: 10px; width: 720px; max-width: 92vw;
             height: 72vh; display: flex; flex-direction: column;
             box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+            position: relative;
         }}
+        .dispatch-panel.dp-dragging {{ user-select: none; }}
         .dp-header {{
             display: flex; justify-content: space-between; align-items: center;
             padding: 14px 18px; border-bottom: 1px solid var(--slate-700);
+            cursor: grab;
         }}
+        .dp-header:active {{ cursor: grabbing; }}
         .dp-header h2 {{ font-size: 0.95rem; color: var(--slate-100); margin: 0; }}
         .dp-header .dp-close {{
             background: none; border: none; color: var(--slate-400);
@@ -1780,7 +1784,11 @@ async def ui_topology():
             display: flex; flex-direction: column; align-items: center;
             padding: 8px 14px; border-radius: 6px;
             background: rgba(30,41,59,0.8); min-width: 70px;
+            cursor: pointer; border: 1px solid transparent;
+            transition: border-color 0.15s, background 0.15s;
         }}
+        .dp-stat:hover {{ border-color: var(--slate-500); background: rgba(30,41,59,1); }}
+        .dp-stat.dp-active {{ border-color: var(--cyan-400); background: rgba(34,211,238,0.08); }}
         .dp-stat .dp-val {{ font-size: 1.3rem; font-weight: 700; }}
         .dp-stat .dp-lbl {{ font-size: 0.6rem; color: var(--slate-400); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }}
         .dp-stat.completed .dp-val {{ color: #4ade80; }}
@@ -1832,16 +1840,15 @@ async def ui_topology():
         .dp-detail-inner .dp-full {{ grid-column: 1 / -1; }}
         .dp-jobs tr.dp-clickable {{ cursor: pointer; }}
         .dp-jobs tr.dp-clickable:hover td {{ background: rgba(51,65,85,0.3); }}
-        .dp-filter {{
-            display: flex; gap: 6px; padding: 8px 18px 0;
+        .dp-stat[data-tooltip] {{ position: relative; }}
+        .dp-stat[data-tooltip]:hover::after {{
+            content: attr(data-tooltip); position: absolute; top: calc(100% + 6px); left: 50%;
+            transform: translateX(-50%); background: #1e293b; border: 1px solid var(--slate-600);
+            color: var(--slate-300); padding: 6px 10px; border-radius: 6px;
+            font-size: 0.6rem; white-space: normal; width: 180px; text-align: center;
+            z-index: 100; line-height: 1.4; pointer-events: none;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
         }}
-        .dp-filter-btn {{
-            background: rgba(30,41,59,0.8); border: 1px solid var(--slate-700);
-            color: var(--slate-400); padding: 3px 10px; border-radius: 4px;
-            font-size: 0.62rem; cursor: pointer; font-family: inherit;
-        }}
-        .dp-filter-btn:hover {{ border-color: var(--slate-500); color: var(--slate-200); }}
-        .dp-filter-btn.active {{ border-color: var(--cyan-400); color: var(--cyan-400); background: rgba(34,211,238,0.08); }}
     </style>
 </head>
 <body>
@@ -2768,12 +2775,45 @@ async def ui_topology():
             document.getElementById('dispatch-overlay').classList.remove('visible');
             document.body.style.overflow = '';
             stopDispatchPolling();
+            // Reset position so it re-centers next time
+            const panel = document.querySelector('.dispatch-panel');
+            if (panel) {{ panel.style.transform = ''; }}
         }}
+
+        // --- Drag-to-move dispatch panel ---
+        (function() {{
+            let isDragging = false, startX = 0, startY = 0, dx = 0, dy = 0;
+            document.addEventListener('mousedown', function(e) {{
+                const header = e.target.closest('.dp-header');
+                if (!header || e.target.closest('button')) return;
+                isDragging = true;
+                const panel = header.closest('.dispatch-panel');
+                panel.classList.add('dp-dragging');
+                const t = panel.style.transform;
+                const m = t.match(/translate\(([^,]+),\s*([^)]+)\)/);
+                dx = m ? parseFloat(m[1]) : 0;
+                dy = m ? parseFloat(m[2]) : 0;
+                startX = e.clientX; startY = e.clientY;
+                e.preventDefault();
+            }});
+            document.addEventListener('mousemove', function(e) {{
+                if (!isDragging) return;
+                const panel = document.querySelector('.dispatch-panel');
+                if (!panel) return;
+                panel.style.transform = 'translate(' + (dx + e.clientX - startX) + 'px,' + (dy + e.clientY - startY) + 'px)';
+            }});
+            document.addEventListener('mouseup', function() {{
+                if (!isDragging) return;
+                isDragging = false;
+                const panel = document.querySelector('.dispatch-panel');
+                if (panel) panel.classList.remove('dp-dragging');
+            }});
+        }})();
 
         function setDpFilter(f, el) {{
             _dpFilter = f;
-            document.querySelectorAll('.dp-filter-btn').forEach(b => b.classList.remove('active'));
-            el.classList.add('active');
+            document.querySelectorAll('.dp-stat').forEach(b => b.classList.remove('dp-active'));
+            el.classList.add('dp-active');
             renderDispatchJobs(_dpData);
         }}
 
@@ -2987,21 +3027,12 @@ async def ui_topology():
             </div>
             <div id="dcl-dispatch-banner" data-testid="dcl-dispatch-banner" style="padding:8px 12px;margin:0 0 8px;border-radius:6px;font-size:0.82rem;display:none;background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.2);"></div>
             <div class="dp-summary">
-                <div class="dp-stat total"><span class="dp-val" id="dp-total">-</span><span class="dp-lbl">Total</span></div>
-                <div class="dp-stat dispatched"><span class="dp-val" id="dp-dispatched">-</span><span class="dp-lbl">Dispatched</span></div>
-                <div class="dp-stat running"><span class="dp-val" id="dp-running">-</span><span class="dp-lbl">Running</span></div>
-                <div class="dp-stat completed"><span class="dp-val" id="dp-completed">-</span><span class="dp-lbl">Completed</span></div>
-                <div class="dp-stat failed"><span class="dp-val" id="dp-failed">-</span><span class="dp-lbl">Failed</span></div>
-                <div class="dp-stat queued"><span class="dp-val" id="dp-queued">-</span><span class="dp-lbl">Queued</span></div>
-            </div>
-            <div class="dp-filter">
-                <button class="dp-filter-btn active" onclick="setDpFilter('all',this)" data-testid="dp-filter-all">All</button>
-                <button class="dp-filter-btn" onclick="setDpFilter('dispatched',this)" data-testid="dp-filter-dispatched">Dispatched</button>
-                <button class="dp-filter-btn" onclick="setDpFilter('running',this)" data-testid="dp-filter-running">Running</button>
-                <button class="dp-filter-btn" onclick="setDpFilter('completed',this)" data-testid="dp-filter-completed">Completed</button>
-                <button class="dp-filter-btn" onclick="setDpFilter('failed',this)" data-testid="dp-filter-failed">Failed</button>
-                <button class="dp-filter-btn" onclick="setDpFilter('queued',this)" data-testid="dp-filter-queued">Queued</button>
-                <button class="dp-filter-btn" onclick="setDpFilter('cancelled',this)" data-testid="dp-filter-cancelled">Cancelled</button>
+                <div class="dp-stat total dp-active" onclick="setDpFilter('all',this)" data-tooltip="All jobs in this dispatch cycle, regardless of status. Click to show all." data-testid="dp-filter-all"><span class="dp-val" id="dp-total">-</span><span class="dp-lbl">Total</span></div>
+                <div class="dp-stat dispatched" onclick="setDpFilter('dispatched',this)" data-tooltip="Manifest sent to Farm, waiting for Farm to start extracting data. Farm has the instructions but hasn't begun yet." data-testid="dp-filter-dispatched"><span class="dp-val" id="dp-dispatched">-</span><span class="dp-lbl">Dispatched</span></div>
+                <div class="dp-stat running" onclick="setDpFilter('running',this)" data-tooltip="Farm is actively extracting data from the source system and pushing rows to DCL right now." data-testid="dp-filter-running"><span class="dp-val" id="dp-running">-</span><span class="dp-lbl">Running</span></div>
+                <div class="dp-stat completed" onclick="setDpFilter('completed',this)" data-tooltip="Farm finished extraction AND DCL accepted the data. This pipe's data is fully landed and usable." data-testid="dp-filter-completed"><span class="dp-val" id="dp-completed">-</span><span class="dp-lbl">Completed</span></div>
+                <div class="dp-stat failed" onclick="setDpFilter('failed',this)" data-tooltip="Something went wrong -- Farm couldn't extract, DCL rejected the data, or the connection timed out. Check the error column for details." data-testid="dp-filter-failed"><span class="dp-val" id="dp-failed">-</span><span class="dp-lbl">Failed</span></div>
+                <div class="dp-stat queued" onclick="setDpFilter('queued',this)" data-tooltip="Job is created but hasn't been sent to Farm yet. Waiting in line to be dispatched." data-testid="dp-filter-queued"><span class="dp-val" id="dp-queued">-</span><span class="dp-lbl">Queued</span></div>
             </div>
             <div class="dp-jobs">
                 <table>
