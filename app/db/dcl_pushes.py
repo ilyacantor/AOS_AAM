@@ -63,6 +63,34 @@ def has_dcl_push_for_run(aod_run_id: str) -> bool:
     return len(rows) > 0
 
 
+def get_exported_pipe_ids(aod_run_id: str) -> set[str]:
+    """Return the set of pipe_ids from the most recent DCL push for this run.
+
+    Used by dispatch to verify that every pipe being dispatched was actually
+    included in the last export — prevents NO_MATCHING_PIPE errors at Farm/DCL.
+    """
+    rows = sb.select(
+        "dcl_pushes",
+        columns="payload",
+        filters={"aod_run_id": aod_run_id},
+        order="pushed_at.desc",
+        limit=1,
+    )
+    if not rows or not rows[0].get("payload"):
+        return set()
+
+    raw = rows[0]["payload"]
+    payload = json.loads(raw) if isinstance(raw, str) else raw
+
+    pipe_ids: set[str] = set()
+    # The export payload contains a "pipes" list with pipe_id on each entry
+    for pipe in payload.get("pipes", []):
+        pid = pipe.get("pipe_id")
+        if pid:
+            pipe_ids.add(pid)
+    return pipe_ids
+
+
 def get_dcl_push(push_id: str) -> Optional[dict]:
     """Get a specific DCL push including full payload."""
     row = sb.select("dcl_pushes", filters={"push_id": push_id}, single=True)

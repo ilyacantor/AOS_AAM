@@ -189,8 +189,13 @@ async def infer_pipes():
                                 "plane_standard" if cat_lower == "other" else f"category:{cat_lower}",
                             )
             else:
-                # Create new pipe — collect for batch insert
-                pipe_id = str(uuid.uuid4())
+                # Create new pipe — collect for batch insert.
+                # Deterministic UUID: same (vendor, plane) always produces the
+                # same pipe_id, surviving resets and re-inference cycles.
+                pipe_id = str(uuid.uuid5(
+                    uuid.NAMESPACE_DNS,
+                    f"aam.pipe.{vendor_lower}.{inferred_plane}",
+                ))
                 vendor_to_pipe[vendor_lower] = pipe_id
 
                 transport_kind = "API"

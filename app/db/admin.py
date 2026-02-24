@@ -23,6 +23,7 @@ TABLE_PK_MAP = {
     "aod_policy_manifest": "policy_id",
     "aod_handoff_log": "handoff_id",
     "runner_jobs": "job_id",
+    "dcl_pushes": "push_id",
 }
 
 ALLOWED_TABLES = frozenset(TABLE_PK_MAP.keys())

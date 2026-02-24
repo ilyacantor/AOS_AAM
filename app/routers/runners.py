@@ -28,7 +28,7 @@ from ..db.runner_jobs import (
 )
 from ..config import settings
 from ..logger import get_logger
-from ..db.dcl_pushes import has_dcl_push_for_run
+from ..db.dcl_pushes import has_dcl_push_for_run, get_exported_pipe_ids
 from ..db.handoff import list_handoff_logs
 
 _log = get_logger("routers.runners")
@@ -36,11 +36,14 @@ _log = get_logger("routers.runners")
 router = APIRouter(prefix="/api/runners", tags=["Runners"])
 
 
-def _require_dcl_export():
+def _require_dcl_export() -> set[str]:
     """Guard: reject dispatch if export-pipes hasn't been pushed to DCL for the current snapshot.
 
     Without the export, DCL has no schema blueprints and will reject every
     record Farm pushes — wasting Farm compute and producing only NO_MATCHING_PIPE errors.
+
+    Returns the set of pipe_ids from the last DCL export so callers can
+    verify that every pipe being dispatched was actually exported.
     """
     handoffs = list_handoff_logs(limit=1)
     if not handoffs:
@@ -67,6 +70,7 @@ def _require_dcl_export():
                 f"Farm data will be rejected by DCL with NO_MATCHING_PIPE."
             ),
         )
+    return get_exported_pipe_ids(aod_run_id)
 
 
 @router.get("/can-dispatch")
@@ -94,13 +98,24 @@ async def dispatch_single(req: RunnerDispatchRequest):
     Builds a JobManifest, stores it, and POSTs it to Farm's intake
     endpoint.  AAM does NOT execute the job — Farm does.
     """
-    _require_dcl_export()
+    exported_ids = _require_dcl_export()
     try:
         result = dispatch_pipe(
             req.pipe_id,
             req.trigger,
         )
         manifest = result.pop("_manifest")
+
+        # Verify the pipe_id was included in the last DCL export
+        if exported_ids and manifest.source.pipe_id not in exported_ids:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Pipe {manifest.source.pipe_id} was not included in the last DCL export. "
+                    "Re-run 'Export to DCL' before dispatching."
+                ),
+            )
+
         farm_result = await dispatch_to_farm(manifest)
         result["status"] = farm_result.get("status", "dispatched")
         if farm_result.get("error_class"):
@@ -123,7 +138,7 @@ async def dispatch_multiple(req: RunnerBatchDispatchRequest):
     Builds manifests, stores them, and POSTs each to Farm's intake
     endpoint in parallel.  Pings Farm health first to wake cold instances.
     """
-    _require_dcl_export()
+    exported_ids = _require_dcl_export()
     if not req.pipe_ids:
         raise HTTPException(status_code=400, detail="pipe_ids is required")
 
@@ -149,6 +164,22 @@ async def dispatch_multiple(req: RunnerBatchDispatchRequest):
     asyncio.create_task(_wake_farm())
 
     results = dispatch_batch(req.pipe_ids, req.trigger)
+
+    # Validate every dispatched pipe_id was included in the last DCL export
+    if exported_ids:
+        for result in results:
+            manifest = result.get("_manifest")
+            if manifest and result.get("status") == "queued":
+                if manifest.source.pipe_id not in exported_ids:
+                    result["status"] = "skipped"
+                    result["error"] = (
+                        f"Pipe {manifest.source.pipe_id} was not included in the last DCL export. "
+                        "Re-run 'Export to DCL' before dispatching."
+                    )
+                    _log.warning(
+                        "Blocking dispatch of pipe %s — not in last DCL export",
+                        manifest.source.pipe_id,
+                    )
 
     # Extract manifests and dispatch to Farm inline (not just queued for background worker)
     farm_tasks = []

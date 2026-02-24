@@ -191,8 +191,14 @@ def build_manifest(
     Uses DeclaredPipe.pipe_id (via matched_pipe_id) as the canonical pipe_id
     so the manifest aligns with the DCL export (critical for late-binding join).
     """
-    # Use DeclaredPipe pipe_id for manifest alignment with export
-    pipe_id = pipe.get("matched_pipe_id") or pipe["pipe_id"]
+    # Use DeclaredPipe pipe_id for manifest alignment with export.
+    # Never fall back to candidate_id — that's not a valid DCL pipe.
+    pipe_id = pipe.get("matched_pipe_id")
+    if not pipe_id:
+        raise ValueError(
+            f"Pipe {pipe.get('pipe_id', '?')} has no matched_pipe_id — "
+            "run Infer before dispatch. Cannot use candidate_id as pipe_id."
+        )
     source_system = pipe.get("source_system", "unknown")
     fabric_plane = pipe.get("fabric_plane", "")
     transport_kind = pipe.get("transport_kind", "")
@@ -404,8 +410,22 @@ def dispatch_batch(
                 })
                 continue
 
-            # Pre-compute canonical pipe_id (same logic as build_manifest)
-            canonical_pid = pipe.get("matched_pipe_id") or pipe["pipe_id"]
+            # Pre-compute canonical pipe_id (same logic as build_manifest).
+            # Reject candidates that haven't been inferred yet.
+            canonical_pid = pipe.get("matched_pipe_id")
+            if not canonical_pid:
+                vendor = pipe.get("source_system", "?")
+                _log.warning(
+                    "Pipe %s skipped: no matched_pipe_id (vendor=%s). "
+                    "Run Infer before dispatch.",
+                    pid, vendor,
+                )
+                errors.append({
+                    "pipe_id": pid,
+                    "status": "skipped",
+                    "error": f"No matched_pipe_id — run Infer before dispatch (vendor={vendor})",
+                })
+                continue
             if canonical_pid in seen_pipe_ids:
                 _log.debug("Skipping duplicate pipe %s (candidate %s) before manifest build", canonical_pid, pid)
                 continue
