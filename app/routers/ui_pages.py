@@ -2550,19 +2550,23 @@ async def ui_topology():
             const btn = document.getElementById('btn-dispatch-all');
             try {{
                 const res = await fetch('/api/runners/can-dispatch');
+                if (!res.ok) {{
+                    btn.disabled = true;
+                    btn.title = 'Cannot verify dispatch readiness (HTTP ' + res.status + ')';
+                    return;
+                }}
                 const data = await res.json();
                 if (data.ready) {{
                     btn.disabled = false;
                     btn.title = '';
-                    btn.textContent = 'Dispatch Runner';
                 }} else {{
                     btn.disabled = true;
                     btn.title = data.reason || 'Export to DCL first';
-                    btn.textContent = 'Dispatch Runner';
                 }}
             }} catch (e) {{
-                // On error, leave enabled (server guard is the fallback)
-                btn.disabled = false;
+                btn.disabled = true;
+                btn.title = 'Cannot verify dispatch readiness: ' + e.message;
+                showToast('Dispatch check failed: ' + e.message, 'error');
             }}
         }}
 
