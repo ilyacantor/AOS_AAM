@@ -2791,7 +2791,7 @@ async def ui_topology():
                 const label = src.length > 25 ? src.substring(0,22) + '...' : src;
                 const ts = j.completed_at || j.started_at || j.created_at || '';
                 const shortTs = ts ? new Date(ts).toLocaleTimeString() : '-';
-                return '<tr class="dp-clickable" onclick="toggleJobDetail(\\'' + _escHtml(jobId) + '\\', this)" title="Click for details">' +
+                return '<tr class="dp-clickable" data-jobid="' + _escHtml(jobId) + '" title="Click for details">' +
                     '<td title="pipe: ' + pipeId + '">' + label + '</td>' +
                     '<td><span class="dp-status ' + s + '">' + s + '</span></td>' +
                     '<td style="text-align:right;">' + rows + '</td>' +
@@ -2799,6 +2799,13 @@ async def ui_topology():
                     '<td>' + err + '</td>' +
                     '</tr>';
             }}).join('');
+
+            // Event delegation for clickable job rows
+            body.querySelectorAll('tr.dp-clickable').forEach(function(tr) {{
+                tr.addEventListener('click', function() {{
+                    toggleJobDetail(tr.getAttribute('data-jobid'), tr);
+                }});
+            }});
         }}
 
         async function toggleJobDetail(jobId, rowEl) {{
