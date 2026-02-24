@@ -204,7 +204,15 @@ async def dispatch_multiple(req: RunnerBatchDispatchRequest):
             result_dict["farm_error"] = str(exc)
 
     if farm_tasks:
-        await asyncio.gather(*[_dispatch_one(r, m, p) for r, m, p in farm_tasks])
+        # Throttle parallel Farm dispatch to avoid overwhelming Farm/DCL
+        _FARM_CONCURRENCY = 10
+        sem = asyncio.Semaphore(_FARM_CONCURRENCY)
+
+        async def _throttled(result_dict: dict, manifest_obj, payload_dict: dict):
+            async with sem:
+                await _dispatch_one(result_dict, manifest_obj, payload_dict)
+
+        await asyncio.gather(*[_throttled(r, m, p) for r, m, p in farm_tasks])
 
     dispatched = [r for r in results if r.get("status") == "dispatched"]
     errors = [r for r in results if r.get("status") in ("error", "skipped", "farm_error", "farm_unreachable", "failed")]

@@ -439,6 +439,20 @@ def dispatch_batch(
                 continue
             seen_pipe_ids.add(canonical_pid)
 
+            # Idempotency guard: skip if a job for this pipe is already active
+            existing_job = get_runner_job(canonical_pid)
+            if existing_job and existing_job.get("status") in ("queued", "dispatched", "running"):
+                _log.warning(
+                    "Pipe %s already has an active job (status=%s) — skipping to prevent double dispatch",
+                    canonical_pid, existing_job["status"],
+                )
+                errors.append({
+                    "pipe_id": pid,
+                    "status": "skipped",
+                    "error": f"Job already {existing_job['status']} — cancel first or wait for completion",
+                })
+                continue
+
             manifest = build_manifest(pipe, trigger, snapshot_name=current_snapshot, aod_run_id=current_aod_run_id, run_id=batch_run_id)
 
             manifest_payload = manifest.model_dump()

@@ -83,11 +83,12 @@ def get_exported_pipe_ids(aod_run_id: str) -> set[str]:
     payload = json.loads(raw) if isinstance(raw, str) else raw
 
     pipe_ids: set[str] = set()
-    # The export payload contains a "pipes" list with pipe_id on each entry
-    for pipe in payload.get("pipes", []):
-        pid = pipe.get("pipe_id")
-        if pid:
-            pipe_ids.add(pid)
+    # The export payload nests pipes under fabric_planes[].connections[]
+    for plane in payload.get("fabric_planes", []):
+        for conn in plane.get("connections", []):
+            pid = conn.get("pipe_id")
+            if pid:
+                pipe_ids.add(pid)
     return pipe_ids
 
 
