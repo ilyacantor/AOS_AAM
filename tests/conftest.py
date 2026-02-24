@@ -28,7 +28,18 @@ def _use_temp_db(monkeypatch, tmp_path):
 
 @pytest.fixture
 def db():
-    """Initialise the database and return the module."""
+    """Initialise the database and return the module.
+
+    Clears test-affected tables BEFORE init_db() because supabase_client
+    connects to the real Supabase instance (ignores AAM_DATABASE_URL).
+    All tests share the same DB, so we must remove rows left by prior runs.
+    """
+    from app.db import supabase_client as sb
+    for table in ("connection_candidates", "declared_pipes"):
+        try:
+            sb.delete(table, delete_all=True)
+        except Exception:
+            pass  # Table may not exist on first run
     import app.db as db_mod
     db_mod.init_db()
     return db_mod

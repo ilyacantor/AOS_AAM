@@ -652,6 +652,7 @@ class TestBuildDCLExportWithMocks:
         monkeypatch.setattr("app.dcl_export.list_candidates", lambda **kwargs: mock_candidates)
         monkeypatch.setattr("app.dcl_export.get_all_schema_samples", lambda: [])
         monkeypatch.setattr("app.dcl_export.sb.select", lambda *a, **kw: mock_pipes_db)
+        monkeypatch.setattr("app.dcl_export.list_handoff_logs", lambda **kw: [])
 
         from app.dcl_export import build_dcl_export
         result = build_dcl_export()

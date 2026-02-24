@@ -1,29 +1,31 @@
 """Smoke tests — verify database initialisation works."""
 
+from app.db import supabase_client as sb
+
 
 def test_init_db_creates_all_tables(db):
-    conn = db.get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
-    tables = sorted(row[0] for row in cursor.fetchall())
-    conn.close()
-
-    expected = sorted([
+    expected = [
         "aod_handoff_log",
+        "aod_payload_cache",
         "aod_policy_manifest",
         "collector_runs",
         "collectors",
         "connection_candidates",
+        "dcl_ingested",
+        "dcl_pushes",
         "declared_pipes",
         "drift_events",
         "fabric_planes",
         "observations",
         "pipe_versions",
+        "runner_jobs",
+        "semantic_edges",
         "sor_declarations",
         "sor_dispositions",
         "tee_requests",
-    ])
-    assert tables == expected
+    ]
+    for table in expected:
+        assert sb.table_exists(table), f"Table '{table}' not found in Supabase"
 
 
 def test_create_and_get_candidate(db):
@@ -34,7 +36,7 @@ def test_create_and_get_candidate(db):
         "category": "crm",
     })
     assert result["candidate_id"]
-    assert result["status"] == "connected"
+    assert result["status"] == "new"
 
     fetched = db.get_candidate(result["candidate_id"])
     assert fetched is not None

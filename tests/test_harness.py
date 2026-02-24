@@ -68,7 +68,7 @@ def api(method, path, **kwargs):
 # These verify that we haven't broken existing core functionality.
 # ---------------------------------------------------------------------------
 
-def test_retention_fetch_aod():
+def test_retention_fetch_aod(run_id):
     """Retention: Fetch AOD data succeeds (no 'failed fetch')."""
     result = TestResult("Retention: Fetch AOD Data")
 
@@ -130,7 +130,7 @@ def test_retention_run_inference(run_id):
     return data, result
 
 
-def test_retention_export_dcl():
+def test_retention_export_dcl(run_id):
     """Retention: Export to DCL works."""
     result = TestResult("Retention: Export to DCL")
 
@@ -156,7 +156,7 @@ def test_retention_export_dcl():
     return result
 
 
-def test_retention_visualization():
+def test_retention_visualization(run_id):
     """Retention: Visualization pages load without errors."""
     result = TestResult("Retention: Visualization")
 
@@ -438,7 +438,7 @@ def test_phase1_dedup(run_id):
 # PHASE 2 TARGETS: Data Integrity — Mock removal, dual-table, SQL injection
 # ---------------------------------------------------------------------------
 
-def test_phase2_no_mock_data():
+def test_phase2_no_mock_data(run_id):
     """Phase 2: Adapters don't return mock data."""
     result = TestResult("Phase 2: No Mock Adapter Data")
 
@@ -463,7 +463,7 @@ def test_phase2_no_mock_data():
     return result
 
 
-def test_phase2_single_source_of_truth():
+def test_phase2_single_source_of_truth(run_id):
     """Phase 2: Candidates are the single source — no dual-table split brain."""
     result = TestResult("Phase 2: Single Source of Truth")
 
@@ -532,7 +532,7 @@ def test_phase3_handoff_errors_surfaced(run_id):
 # PHASE 4 TARGETS: UI & Cleanup
 # ---------------------------------------------------------------------------
 
-def test_phase4_drift_ui_states():
+def test_phase4_drift_ui_states(run_id):
     """Phase 4: Pipes page shows three drift states (Healthy/No data/N open)."""
     result = TestResult("Phase 4: Drift UI States")
 
@@ -551,7 +551,7 @@ def test_phase4_drift_ui_states():
     return result
 
 
-def test_phase4_frontend_no_js_errors():
+def test_phase4_frontend_no_js_errors(run_id):
     """Phase 4: Frontend pages have proper error handling."""
     result = TestResult("Phase 4: Frontend Error Handling")
 
