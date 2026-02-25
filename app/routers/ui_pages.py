@@ -2889,8 +2889,28 @@ async def ui_topology():
             body.innerHTML = filtered.map((j, idx) => {{
                 const s = j.status || 'queued';
                 const rows = j.rows_transferred || 0;
-                const rawErr = (j.error_message||'').replace(/<!DOCTYPE[\s\S]*$/i, '').trim() || (j.error_message||'').substring(0,80);
-                const err = j.error_message ? '<div class="dp-error" title="' + _escHtml(j.error_message).substring(0,200) + '">' + _escHtml(rawErr).substring(0,80) + '</div>' : '';
+                let errText = (j.error_message||'').replace(/<!DOCTYPE[\s\S]*$/i, '').trim();
+                if (!errText && (s === 'failed' || s === 'timed_out' || s === 'cancelled')) {{
+                    // Infer reason from available data
+                    if (s === 'timed_out') {{
+                        errText = 'Timed out — no response from Farm';
+                    }} else if (s === 'cancelled') {{
+                        errText = 'Cancelled by operator';
+                    }} else if (!j.dcl_response && j.rows_transferred === 0) {{
+                        errText = 'Farm failed — no rows extracted, no DCL response';
+                    }} else if (j.dcl_response) {{
+                        let dclP = j.dcl_response;
+                        if (typeof dclP === 'string') {{ try {{ dclP = JSON.parse(dclP); }} catch(e) {{ dclP = null; }} }}
+                        if (dclP && dclP.status && dclP.status !== 'ingested') {{
+                            errText = 'DCL rejected: ' + (dclP.status || dclP.error || 'unknown');
+                        }} else {{
+                            errText = 'Farm extraction failed';
+                        }}
+                    }} else {{
+                        errText = 'Farm extraction failed';
+                    }}
+                }}
+                const err = errText ? '<div class="dp-error" title="' + _escHtml(errText).substring(0,200) + '">' + _escHtml(errText).substring(0,80) + '</div>' : '';
                 const jobId = j.job_id || '';
                 const pipeId = j.pipe_id || '';
                 const runId = j.run_id || '';
@@ -2986,9 +3006,14 @@ async def ui_topology():
                     var ep = typeof src.endpoint_ref === 'object' ? JSON.stringify(src.endpoint_ref) : src.endpoint_ref;
                     html += '<div class="dp-kv dp-full"><span class="dp-k">Endpoint</span><span class="dp-v">' + _escHtml(ep).substring(0, 200) + '</span></div>';
                 }}
-                if (job.error_message) {{
-                    var cleanErr = (job.error_message||'').replace(/<!DOCTYPE[\s\S]*$/i, '').trim();
-                    html += '<div class="dp-kv dp-full"><span class="dp-k">Error</span><span class="dp-v err">' + _escHtml(cleanErr).substring(0, 500) + '</span></div>';
+                var jobErr = (job.error_message||'').replace(/<!DOCTYPE[\s\S]*$/i, '').trim();
+                if (!jobErr && (job.status === 'failed' || job.status === 'timed_out')) {{
+                    if (job.status === 'timed_out') jobErr = 'Timed out — no response from Farm within timeout window';
+                    else if (!job.dcl_response && !job.rows_transferred) jobErr = 'Farm failed — no rows extracted, no DCL response received';
+                    else jobErr = 'Farm extraction failed';
+                }}
+                if (jobErr) {{
+                    html += '<div class="dp-kv dp-full"><span class="dp-k">Error</span><span class="dp-v err">' + _escHtml(jobErr).substring(0, 500) + '</span></div>';
                 }}
                 if (job.dcl_response) {{
                     html += '<div class="dp-kv dp-full"><span class="dp-k">DCL Resp</span><span class="dp-v">' + _escHtml(JSON.stringify(job.dcl_response)).substring(0, 300) + '</span></div>';
