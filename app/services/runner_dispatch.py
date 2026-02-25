@@ -600,6 +600,69 @@ async def dispatch_to_farm(manifest: JobManifest, *, payload: Optional[dict] = N
         return {"status": "farm_unreachable", "error": error_msg}
 
 
+async def dispatch_to_farm_batch(
+    manifests: list[dict],
+    batch_id: str,
+    concurrency: int = 5,
+    payloads: list[dict] | None = None,
+) -> dict:
+    """POST all manifests to Farm's batch endpoint in a single HTTP round-trip.
+
+    Farm's /manifest-intake/batch accepts a BatchManifestRequest with a list of
+    manifests and a concurrency param. This replaces 57 individual POSTs with one.
+
+    Returns the Farm BatchManifestResponse on success, or an error dict on failure.
+    The caller should fall back to individual dispatch_to_farm() calls on error.
+    """
+    farm_batch_url = settings.FARM_BATCH_URL
+    attempt_at = datetime.utcnow().isoformat() + "Z"
+
+    batch_payload = {
+        "manifests": payloads if payloads else manifests,
+        "batch_id": batch_id,
+        "concurrency": concurrency,
+    }
+
+    try:
+        async with httpx.AsyncClient(
+            timeout=float(settings.RUNNER_JOB_TIMEOUT_S),
+        ) as client:
+            resp = await client.post(farm_batch_url, json=batch_payload)
+
+        if resp.status_code in (200, 201, 202):
+            body = resp.json()
+            _log.info(
+                "Batch dispatched to Farm: batch_id=%s manifests=%d "
+                "succeeded=%s failed=%s elapsed=%ss url=%s",
+                batch_id, len(manifests),
+                body.get("pipes_succeeded"), body.get("pipes_failed"),
+                body.get("elapsed_seconds"), farm_batch_url,
+            )
+            return {"status": "batch_dispatched", "farm_response": body}
+
+        content_type = resp.headers.get("content-type", "")
+        error_class, detail = _classify_farm_error(resp.status_code, resp.text, content_type)
+        error_msg = (
+            f"[{error_class}] Farm batch at {farm_batch_url!r} returned HTTP {resp.status_code} "
+            f"at {attempt_at}. {detail}"
+        )
+        _log.warning(
+            "Farm batch dispatch failed: batch_id=%s url=%s status=%d error_class=%s detail=%s",
+            batch_id, farm_batch_url, resp.status_code, error_class, detail,
+        )
+        return {"status": "farm_batch_error", "error_class": error_class, "error": error_msg}
+
+    except (httpx.ConnectError, httpx.TimeoutException) as exc:
+        error_msg = (
+            f"[CONNECT_ERROR] Farm batch at {farm_batch_url!r} was unreachable at {attempt_at}: {exc}."
+        )
+        _log.warning("Farm batch unreachable: batch_id=%s url=%s error=%s", batch_id, farm_batch_url, exc)
+        return {"status": "farm_batch_unreachable", "error": error_msg}
+    except Exception as exc:
+        _log.error("Unexpected error in batch dispatch: %s", exc, exc_info=True)
+        return {"status": "farm_batch_error", "error": str(exc)}
+
+
 async def notify_dcl_dispatch() -> dict:
     """Notify DCL that a dispatch is starting (Path 2 signal).
 

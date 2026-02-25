@@ -57,6 +57,8 @@ class Settings:
             self.FARM_INTAKE_URL: str = _farm_base + "/api/farm/manifest-intake"
         else:
             self.FARM_INTAKE_URL: str = _farm_base
+        # Batch endpoint for multi-manifest dispatch (one HTTP round-trip).
+        self.FARM_BATCH_URL: str = self.FARM_INTAKE_URL + "/batch"
         # Maximum retries for transient Farm errors (502/503, connect errors).
         # After this many requeue cycles, the job is permanently failed.
         self.FARM_MAX_RETRIES: int = int(

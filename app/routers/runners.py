@@ -17,7 +17,7 @@ from ..models import (
     RunnerCallbackRequest,
     RunnerJobStatus,
 )
-from ..services.runner_dispatch import dispatch_pipe, dispatch_batch, dispatch_to_farm, notify_dcl_dispatch
+from ..services.runner_dispatch import dispatch_pipe, dispatch_batch, dispatch_to_farm, dispatch_to_farm_batch, notify_dcl_dispatch
 from ..db.runner_jobs import (
     get_runner_job,
     get_runner_progress,
@@ -215,15 +215,59 @@ async def dispatch_multiple(req: RunnerBatchDispatchRequest):
             _log.warning("DCL dispatch signal did not succeed: %s", dcl_signal)
 
     if farm_tasks:
-        # Throttle parallel Farm dispatch to avoid overwhelming Farm/DCL
-        _FARM_CONCURRENCY = 10
-        sem = asyncio.Semaphore(_FARM_CONCURRENCY)
+        # Try batch dispatch first (single HTTP round-trip to Farm).
+        # Fall back to individual POSTs if batch fails.
+        all_payloads = [p for _, _, p in farm_tasks]
+        all_manifests = [m for _, m, _ in farm_tasks]
+        batch_id = all_manifests[0].run_id if all_manifests else "unknown"
 
-        async def _throttled(result_dict: dict, manifest_obj, payload_dict: dict):
-            async with sem:
-                await _dispatch_one(result_dict, manifest_obj, payload_dict)
+        batch_result = await dispatch_to_farm_batch(
+            manifests=[m.model_dump() for m in all_manifests],
+            batch_id=batch_id,
+            concurrency=5,
+            payloads=all_payloads,
+        )
 
-        await asyncio.gather(*[_throttled(r, m, p) for r, m, p in farm_tasks])
+        if batch_result.get("status") == "batch_dispatched":
+            # Batch succeeded — update result dicts from Farm's batch response
+            farm_resp = batch_result.get("farm_response", {})
+            push_results_list = farm_resp.get("push_results", [])
+            # Build lookup from pipe_id → push_result for status mapping
+            push_by_pipe = {pr.get("pipe_id"): pr for pr in push_results_list}
+            for result_dict, manifest_obj, _ in farm_tasks:
+                pid = manifest_obj.source.pipe_id
+                pr = push_by_pipe.get(pid, {})
+                pr_status = pr.get("status", "unknown")
+                if pr_status == "success":
+                    result_dict["status"] = "dispatched"
+                    update_runner_status(pid, "dispatched")
+                elif pr_status == "rejected":
+                    result_dict["status"] = "farm_error"
+                    result_dict["error_class"] = pr.get("error_type", "")
+                    result_dict["farm_error"] = pr.get("error", "")
+                    update_runner_status(pid, "failed", error_message=pr.get("error", ""))
+                else:
+                    result_dict["status"] = "dispatched"
+                    update_runner_status(pid, "dispatched")
+                result_dict["farm_response"] = pr
+            _log.info(
+                "Batch dispatch succeeded: %d manifests, Farm elapsed=%ss",
+                len(farm_tasks), farm_resp.get("elapsed_seconds"),
+            )
+        else:
+            # Batch failed — fall back to individual dispatch
+            _log.warning(
+                "Batch dispatch failed (%s), falling back to individual POSTs: %s",
+                batch_result.get("status"), batch_result.get("error", "")[:200],
+            )
+            _FARM_CONCURRENCY = 10
+            sem = asyncio.Semaphore(_FARM_CONCURRENCY)
+
+            async def _throttled(result_dict: dict, manifest_obj, payload_dict: dict):
+                async with sem:
+                    await _dispatch_one(result_dict, manifest_obj, payload_dict)
+
+            await asyncio.gather(*[_throttled(r, m, p) for r, m, p in farm_tasks])
 
     dispatched = [r for r in results if r.get("status") == "dispatched"]
     errors = [r for r in results if r.get("status") in ("error", "skipped", "farm_error", "farm_unreachable", "failed")]
