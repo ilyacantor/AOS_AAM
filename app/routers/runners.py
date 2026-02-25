@@ -338,11 +338,12 @@ async def list_jobs(
     pipe_id: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
     run_id: Optional[str] = Query(None),
+    latest_run: bool = Query(False),
     limit: int = Query(50, le=200),
 ):
     """List runner jobs with optional filters."""
     import json as _json
-    jobs = list_runner_jobs(pipe_id=pipe_id, status=status, run_id=run_id, limit=limit)
+    jobs = list_runner_jobs(pipe_id=pipe_id, status=status, run_id=run_id, latest_run=latest_run, limit=limit)
     for j in jobs:
         if j.get("error_message") and "<!DOCTYPE" in j["error_message"]:
             j["error_message"] = re.sub(r"<!DOCTYPE[\s\S]*", "", j["error_message"]).strip()

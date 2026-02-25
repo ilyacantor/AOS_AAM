@@ -2774,18 +2774,9 @@ async def ui_topology():
             }}
         }}
 
-        async function openDispatchPanel() {{
+        function openDispatchPanel() {{
             document.getElementById('dispatch-overlay').classList.add('visible');
             document.body.style.overflow = 'hidden';
-            if (!_dpRunId) {{
-                try {{
-                    const probe = await fetch('/api/runners/jobs?limit=1');
-                    const probeData = await probe.json();
-                    if (probeData.jobs && probeData.jobs.length > 0) {{
-                        _dpRunId = probeData.jobs[0].run_id;
-                    }}
-                }} catch(e) {{}}
-            }}
             loadDispatchData();
             loadDclDispatchStatus();
             // Start 10-second ambient refresh while panel is open
@@ -2907,6 +2898,7 @@ async def ui_topology():
             try {{
                 let _djUrl = '/api/runners/jobs?limit=200';
                 if (_dpRunId) _djUrl += '&run_id=' + encodeURIComponent(_dpRunId);
+                else _djUrl += '&latest_run=true';
                 const res = await fetch(_djUrl);
                 const data = await res.json();
                 _dpData = data.jobs || [];
