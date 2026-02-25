@@ -195,31 +195,14 @@ def cancel_queued_jobs() -> int:
         raise RuntimeError(f"Failed to cancel queued jobs: {exc}") from exc
 
 
-def get_latest_run_id() -> Optional[str]:
-    """Return the run_id of the most recently dispatched job, or None."""
-    from psycopg2 import sql as psql
-    query = psql.SQL(
-        "SELECT run_id FROM {} WHERE run_id IS NOT NULL "
-        "ORDER BY dispatched_at DESC NULLS LAST LIMIT 1"
-    ).format(sb._ident("runner_jobs"))
-    rows = sb._execute_composed(query)
-    return rows[0]["run_id"] if rows else None
-
-
 def list_runner_jobs(
     pipe_id: Optional[str] = None,
     status: Optional[str] = None,
     run_id: Optional[str] = None,
-    latest_run: bool = False,
     limit: int = 50,
 ) -> list[dict]:
     """List runner jobs with optional filters, including source_system extracted from manifest."""
     from psycopg2 import sql as psql
-
-    # When latest_run is requested and no explicit run_id provided,
-    # auto-resolve to the most recent dispatch cycle's run_id.
-    if latest_run and not run_id:
-        run_id = get_latest_run_id()
 
     conditions = []
     params: list = []
