@@ -2128,6 +2128,7 @@ async def ui_topology():
                             if (batchRes.ok) {{
                                 var batchData = await batchRes.json();
                                 runnerDispatched = batchData.dispatched || 0;
+                                if (batchData.jobs && batchData.jobs.length > 0) _dpRunId = batchData.jobs[0].run_id;
                             }}
                         }}
                     }} catch (re) {{}}
@@ -2718,6 +2719,7 @@ async def ui_topology():
                     body: JSON.stringify({{ pipe_ids: pipeIds, trigger: 'manual' }})
                 }});
                 const data = await res.json();
+                if (data.jobs && data.jobs.length > 0) _dpRunId = data.jobs[0].run_id;
 
                 if (res.ok) {{
                     const dispatched = data.dispatched || 0;
@@ -2745,6 +2747,7 @@ async def ui_topology():
         // ── Dispatch Panel ──
         let _dpFilter = 'all';
         let _dpData = null;
+        let _dpRunId = null;
 
         async function cancelAllJobs() {{
             const btn = document.getElementById('btn-stop-all');
@@ -2771,9 +2774,18 @@ async def ui_topology():
             }}
         }}
 
-        function openDispatchPanel() {{
+        async function openDispatchPanel() {{
             document.getElementById('dispatch-overlay').classList.add('visible');
             document.body.style.overflow = 'hidden';
+            if (!_dpRunId) {{
+                try {{
+                    const probe = await fetch('/api/runners/jobs?limit=1');
+                    const probeData = await probe.json();
+                    if (probeData.jobs && probeData.jobs.length > 0) {{
+                        _dpRunId = probeData.jobs[0].run_id;
+                    }}
+                }} catch(e) {{}}
+            }}
             loadDispatchData();
             loadDclDispatchStatus();
             // Start 10-second ambient refresh while panel is open
@@ -2893,7 +2905,9 @@ async def ui_topology():
                 body.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--slate-500);">Loading...</td></tr>';
             }}
             try {{
-                const res = await fetch('/api/runners/jobs?limit=200');
+                let _djUrl = '/api/runners/jobs?limit=200';
+                if (_dpRunId) _djUrl += '&run_id=' + encodeURIComponent(_dpRunId);
+                const res = await fetch(_djUrl);
                 const data = await res.json();
                 _dpData = data.jobs || [];
                 renderDispatchSummary(_dpData);

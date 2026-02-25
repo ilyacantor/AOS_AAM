@@ -198,6 +198,7 @@ def cancel_queued_jobs() -> int:
 def list_runner_jobs(
     pipe_id: Optional[str] = None,
     status: Optional[str] = None,
+    run_id: Optional[str] = None,
     limit: int = 50,
 ) -> list[dict]:
     """List runner jobs with optional filters, including source_system extracted from manifest."""
@@ -211,6 +212,9 @@ def list_runner_jobs(
     if status:
         conditions.append("status = %s")
         params.append(status)
+    if run_id:
+        conditions.append("run_id = %s")
+        params.append(run_id)
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
     params.append(limit)
