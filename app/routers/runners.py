@@ -338,7 +338,7 @@ async def list_jobs(
     pipe_id: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
     run_id: Optional[str] = Query(None),
-    limit: int = Query(50, le=200),
+    limit: int = Query(50, le=1000),
 ):
     """List runner jobs with optional filters."""
     import json as _json

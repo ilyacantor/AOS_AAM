@@ -2777,15 +2777,13 @@ async def ui_topology():
         async function openDispatchPanel() {{
             document.getElementById('dispatch-overlay').classList.add('visible');
             document.body.style.overflow = 'hidden';
-            if (!_dpRunId) {{
-                try {{
-                    const probe = await fetch('/api/runners/jobs?limit=1');
-                    const probeData = await probe.json();
-                    if (probeData.jobs && probeData.jobs.length > 0) {{
-                        _dpRunId = probeData.jobs[0].run_id;
-                    }}
-                }} catch(e) {{}}
-            }}
+            try {{
+                const probe = await fetch('/api/runners/jobs?limit=1');
+                const probeData = await probe.json();
+                if (probeData.jobs && probeData.jobs.length > 0) {{
+                    _dpRunId = probeData.jobs[0].run_id;
+                }}
+            }} catch(e) {{}}
             loadDispatchData();
             loadDclDispatchStatus();
             // Start 10-second ambient refresh while panel is open
@@ -2905,7 +2903,7 @@ async def ui_topology():
                 body.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--slate-500);">Loading...</td></tr>';
             }}
             try {{
-                let _djUrl = '/api/runners/jobs?limit=200';
+                let _djUrl = '/api/runners/jobs?limit=1000';
                 if (_dpRunId) _djUrl += '&run_id=' + encodeURIComponent(_dpRunId);
                 const res = await fetch(_djUrl);
                 const data = await res.json();
