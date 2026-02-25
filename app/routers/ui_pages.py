@@ -2008,6 +2008,7 @@ async def ui_topology():
         async function runFullPipeline() {{
             var btn = document.getElementById('btn-full-pipeline');
             btn.disabled = true;
+            localStorage.removeItem('aam_full_cycle');
             var start = Date.now();
             var timer = setInterval(function() {{
                 var s = Math.floor((Date.now() - start) / 1000);
@@ -2129,21 +2130,29 @@ async def ui_topology():
                     msg += ' (DCL unreachable)';
                 }}
                 showToast(msg, (dclOk && dispatchOk) ? 'success' : 'warning');
-                btn.textContent = 'Done (' + elapsed + 's)';
+                var cycleLabel = pipesCreated + ' pipes, ' + pipeCount + ' exported (' + elapsed + 's)';
+                btn.textContent = cycleLabel;
                 btn.disabled = false;
+                localStorage.setItem('aam_full_cycle', JSON.stringify({{
+                    label: cycleLabel,
+                    timestamp: new Date().toISOString(),
+                }}));
                 refreshSidebarRun();
                 if (runnerDispatched > 0) {{
                     openDispatchPanel();
                     startDispatchPolling();
                 }}
-                setTimeout(function() {{ btn.textContent = 'Full Pipeline'; }}, 3000);
             }} catch (e) {{
                 clearInterval(timer);
                 var elapsed = Math.floor((Date.now() - start) / 1000);
                 showToast('Pipeline failed: ' + e.message, 'error');
-                btn.textContent = 'Failed (' + elapsed + 's)';
+                var failLabel = 'Failed (' + elapsed + 's)';
+                btn.textContent = failLabel;
                 btn.disabled = false;
-                setTimeout(function() {{ btn.textContent = 'Full Pipeline'; }}, 3000);
+                localStorage.setItem('aam_full_cycle', JSON.stringify({{
+                    label: failLabel,
+                    timestamp: new Date().toISOString(),
+                }}));
             }}
         }}
 
@@ -2581,6 +2590,7 @@ async def ui_topology():
         let _dispatchCounterTimer = null;
         let _dispatchStart = 0;
         let _dispatchJobCount = 0;
+        let _dispatchPanelRefresh = null;
 
         function _startDispatchCounter(count) {{
             _dispatchStart = Date.now();
@@ -2712,6 +2722,11 @@ async def ui_topology():
             document.body.style.overflow = 'hidden';
             loadDispatchData();
             loadDclDispatchStatus();
+            // Start 10-second ambient refresh while panel is open
+            if (_dispatchPanelRefresh) clearInterval(_dispatchPanelRefresh);
+            _dispatchPanelRefresh = setInterval(() => {{
+                loadDispatchData();
+            }}, 10000);
         }}
 
         async function loadDclDispatchStatus() {{
@@ -2775,6 +2790,7 @@ async def ui_topology():
             document.getElementById('dispatch-overlay').classList.remove('visible');
             document.body.style.overflow = '';
             stopDispatchPolling();
+            if (_dispatchPanelRefresh) {{ clearInterval(_dispatchPanelRefresh); _dispatchPanelRefresh = null; }}
             // Reset position so it re-centers next time
             const panel = document.querySelector('.dispatch-panel');
             if (panel) {{ panel.style.transform = ''; }}
@@ -3008,6 +3024,19 @@ async def ui_topology():
                         if (age < 3600000) {{
                             renderPipelineLog(parsed.steps);
                         }}
+                    }}
+                }}
+            }} catch(e) {{}}
+        }})();
+
+        // Restore full-cycle label on pipeline button from previous run
+        (function() {{
+            try {{
+                var saved = localStorage.getItem('aam_full_cycle');
+                if (saved) {{
+                    var parsed = JSON.parse(saved);
+                    if (parsed.label) {{
+                        document.getElementById('btn-full-pipeline').textContent = parsed.label;
                     }}
                 }}
             }} catch(e) {{}}
