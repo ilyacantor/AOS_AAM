@@ -185,7 +185,7 @@ def cancel_queued_jobs() -> int:
     query = psql.SQL(
         "UPDATE {} SET status = 'cancelled', completed_at = NOW(), "
         "error_message = 'Cancelled by operator' "
-        "WHERE status IN ('queued', 'running') RETURNING job_id"
+        "WHERE status IN ('queued', 'dispatched', 'running') RETURNING job_id"
     ).format(sb2._ident("runner_jobs"))
 
     try:

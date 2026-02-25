@@ -247,21 +247,40 @@ async def dispatch_multiple(req: RunnerBatchDispatchRequest):
                 _terminal = ("completed", "failed", "timed_out")
 
                 if pr_status == "success":
-                    result_dict["status"] = "dispatched"
+                    # Farm already pushed data to DCL — job is DONE.
+                    result_dict["status"] = "completed"
+                    rows = pr.get("rows_accepted") or pr.get("rows_pushed") or 0
+                    dcl_resp = {
+                        "status_code": pr.get("status_code"),
+                        "rows_accepted": pr.get("rows_accepted"),
+                        "dcl_run_id": pr.get("dcl_run_id"),
+                        "schema_drift": pr.get("schema_drift", False),
+                    }
                     if current_status not in _terminal:
-                        update_runner_status(pid, "dispatched")
+                        update_runner_status(
+                            pid, "completed",
+                            rows_transferred=rows,
+                            dcl_response=dcl_resp,
+                        )
                     else:
                         _log.info(
-                            "Skipping 'dispatched' write — job %s already %s (callback arrived first)",
+                            "Skipping 'completed' write — job %s already %s (callback arrived first)",
                             pid, current_status,
                         )
                 elif pr_status == "rejected":
-                    result_dict["status"] = "farm_error"
+                    result_dict["status"] = "failed"
                     result_dict["error_class"] = pr.get("error_type", "")
                     result_dict["farm_error"] = pr.get("error", "")
                     if current_status not in _terminal:
                         update_runner_status(pid, "failed", error_message=pr.get("error", ""))
+                elif pr_status in ("failed", "degraded"):
+                    result_dict["status"] = "failed"
+                    result_dict["farm_error"] = pr.get("error", "")
+                    if current_status not in _terminal:
+                        update_runner_status(pid, "failed", error_message=pr.get("error", ""))
                 else:
+                    # Unknown status — mark as dispatched conservatively;
+                    # the callback will update to terminal when Farm finishes.
                     result_dict["status"] = "dispatched"
                     if current_status not in _terminal:
                         update_runner_status(pid, "dispatched")
