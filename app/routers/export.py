@@ -26,7 +26,7 @@ _log = get_logger("routers.export")
 
 router = APIRouter(tags=["Export"])
 
-_DCL_TIMEOUT = 45.0
+_DCL_TIMEOUT = 120.0
 
 _last_dcl_dispatch: dict | None = None
 
@@ -72,16 +72,17 @@ async def _deliver_to_dcl(export_payload: dict) -> dict:
                 _log.info("DCL export-pipes POST (bridge) %s → %d",
                           settings.DCL_EXPORT_PIPES_URL, resp.status_code)
             except Exception as exc:
+                error_detail = str(exc) or f"{type(exc).__name__}: {repr(exc)}"
                 report["export_pipes"] = {
                     "bridge": True,
                     "url": settings.DCL_EXPORT_PIPES_URL,
                     "ok": False,
                     "status": None,
                     "body": None,
-                    "error": str(exc),
+                    "error": error_detail,
                     "skipped": False,
                 }
-                _log.warning("DCL export-pipes POST (bridge) failed: %s", exc)
+                _log.warning("DCL export-pipes POST (bridge) failed: %s: %s", type(exc).__name__, error_detail)
         else:
             report["export_pipes"] = {
                 "bridge": True,
