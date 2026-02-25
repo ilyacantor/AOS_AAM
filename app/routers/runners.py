@@ -238,28 +238,65 @@ async def dispatch_multiple(req: RunnerBatchDispatchRequest):
                 pid = manifest_obj.source.pipe_id
                 pr = push_by_pipe.get(pid, {})
                 pr_status = pr.get("status", "unknown")
+
+                # Guard: Farm processes synchronously and fires callbacks
+                # before returning the batch response. Don't regress a
+                # terminal status that the callback already wrote.
+                current_job = get_runner_job(pid)
+                current_status = current_job.get("status") if current_job else None
+                _terminal = ("completed", "failed", "timed_out")
+
                 if pr_status == "success":
                     result_dict["status"] = "dispatched"
-                    update_runner_status(pid, "dispatched")
+                    if current_status not in _terminal:
+                        update_runner_status(pid, "dispatched")
+                    else:
+                        _log.info(
+                            "Skipping 'dispatched' write — job %s already %s (callback arrived first)",
+                            pid, current_status,
+                        )
                 elif pr_status == "rejected":
                     result_dict["status"] = "farm_error"
                     result_dict["error_class"] = pr.get("error_type", "")
                     result_dict["farm_error"] = pr.get("error", "")
-                    update_runner_status(pid, "failed", error_message=pr.get("error", ""))
+                    if current_status not in _terminal:
+                        update_runner_status(pid, "failed", error_message=pr.get("error", ""))
                 else:
                     result_dict["status"] = "dispatched"
-                    update_runner_status(pid, "dispatched")
+                    if current_status not in _terminal:
+                        update_runner_status(pid, "dispatched")
+                    else:
+                        _log.info(
+                            "Skipping 'dispatched' write — job %s already %s (callback arrived first)",
+                            pid, current_status,
+                        )
                 result_dict["farm_response"] = pr
             _log.info(
                 "Batch dispatch succeeded: %d manifests, Farm elapsed=%ss",
                 len(farm_tasks), farm_resp.get("elapsed_seconds"),
             )
         else:
-            # Batch failed — fall back to individual dispatch
-            _log.warning(
-                "Batch dispatch failed (%s), falling back to individual POSTs: %s",
-                batch_result.get("status"), batch_result.get("error", "")[:200],
-            )
+            # Batch failed — fall back to individual dispatch.
+            # WARNING: if the failure was a timeout, Farm may still be processing
+            # the original batch. Individual POSTs will create DUPLICATE work
+            # (57 + 57 = 114 manifests in flight against DCL).
+            batch_status = batch_result.get("status", "unknown")
+            is_timeout = "unreachable" in batch_status or "timeout" in batch_result.get("error", "").lower()
+            if is_timeout:
+                _log.error(
+                    "[BATCH_TIMEOUT_FALLBACK] Batch POST timed out (status=%s). "
+                    "Farm may still be processing the original batch — falling back "
+                    "to %d individual POSTs risks double-dispatch. error=%s",
+                    batch_status, len(farm_tasks),
+                    batch_result.get("error", "")[:300],
+                )
+            else:
+                _log.warning(
+                    "[BATCH_FALLBACK] Batch dispatch failed (status=%s), "
+                    "falling back to %d individual POSTs: %s",
+                    batch_status, len(farm_tasks),
+                    batch_result.get("error", "")[:200],
+                )
             _FARM_CONCURRENCY = 10
             sem = asyncio.Semaphore(_FARM_CONCURRENCY)
 

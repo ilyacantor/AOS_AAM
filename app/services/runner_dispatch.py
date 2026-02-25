@@ -623,9 +623,14 @@ async def dispatch_to_farm_batch(
         "concurrency": concurrency,
     }
 
+    # Batch timeout must exceed Farm's total processing time (57 pipes at
+    # concurrency=5 ≈ 12 waves × 5-30s = 60-360s).  Use 600s to avoid
+    # timing out and accidentally double-dispatching via the fallback path.
+    batch_timeout = max(float(settings.RUNNER_JOB_TIMEOUT_S), 600.0)
+
     try:
         async with httpx.AsyncClient(
-            timeout=float(settings.RUNNER_JOB_TIMEOUT_S),
+            timeout=batch_timeout,
         ) as client:
             resp = await client.post(farm_batch_url, json=batch_payload)
 
