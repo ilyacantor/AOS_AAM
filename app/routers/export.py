@@ -17,6 +17,7 @@ import httpx
 import json
 
 from ..db import get_pipe_stats, list_candidates, record_dcl_push, list_dcl_pushes, get_dcl_push
+from ..db.dcl_pushes import record_dcl_export_attempt, get_last_export_attempt
 from ..dcl_export import build_dcl_export
 from ..config import settings
 from ..logger import get_logger
@@ -216,6 +217,21 @@ async def push_to_dcl(request: Request):
     ep_delivery = delivery_report.get("export_pipes") or {}
     dcl_accepted = ep_delivery.get("ok", False)
 
+    # Persist every attempt (success + failure) for diagnostics.
+    # Unlike dcl_pushes (successes only), this lets operators query
+    # "why did the last export fail?" without searching logs.
+    try:
+        record_dcl_export_attempt(
+            aod_run_id=aod_run_id or export_data.aod_run_id,
+            pipe_count=export_data.total_connections,
+            dcl_ok=dcl_accepted,
+            dcl_status=ep_delivery.get("status"),
+            dcl_body=str(ep_delivery.get("body", ""))[:2000] if ep_delivery.get("body") else None,
+            dcl_error=ep_delivery.get("error"),
+        )
+    except Exception as exc:
+        _log.warning("Failed to record export attempt: %s", exc)
+
     push_record = None
     if dcl_accepted:
         push_record = record_dcl_push(
@@ -310,6 +326,18 @@ async def export_pipes_for_dcl(aod_run_id: Optional[str] = Query(None)):
     """Alias for /api/export/dcl/declared-pipes — same fabric-plane-grouped format."""
     export_data = build_dcl_export(aod_run_id=aod_run_id)
     return export_data.model_dump()
+
+
+@router.get("/api/export/dcl/last-attempt", tags=["Export"])
+async def last_export_attempt(aod_run_id: Optional[str] = Query(None)):
+    """Return the most recent DCL export attempt with full error detail.
+
+    Unlike /pushes (which only lists successes), this returns the last
+    attempt regardless of outcome — including the DCL HTTP status code,
+    response body, and error string.  Use this to diagnose export failures.
+    """
+    attempt = get_last_export_attempt(aod_run_id=aod_run_id)
+    return {"attempt": attempt}
 
 
 @router.get("/api/export/dcl/dispatch-status", tags=["Export"])

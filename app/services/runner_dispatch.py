@@ -677,9 +677,22 @@ async def notify_dcl_dispatch() -> dict:
     multiple times for the same dispatch_id.
     """
     dcl_url = settings.DCL_DISPATCH_URL
+
+    # Build context body so DCL can correlate the dispatch signal
+    # with the correct AOD run.  Previously sent empty POST.
+    body: dict = {"source": "aam"}
+    try:
+        from ..db.handoff import list_handoff_logs
+        handoffs = list_handoff_logs(limit=1)
+        if handoffs:
+            body["aod_run_id"] = handoffs[0].get("aod_run_id")
+            body["snapshot_name"] = handoffs[0].get("snapshot_name")
+    except Exception:
+        pass  # Best-effort — don't block dispatch on handoff lookup
+
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(dcl_url)
+            resp = await client.post(dcl_url, json=body)
         if resp.status_code in (200, 201):
             body = resp.json()
             _log.info(

@@ -92,6 +92,48 @@ def get_exported_pipe_ids(aod_run_id: str) -> set[str]:
     return pipe_ids
 
 
+def record_dcl_export_attempt(
+    aod_run_id: Optional[str],
+    pipe_count: int,
+    dcl_ok: bool,
+    dcl_status: Optional[int] = None,
+    dcl_body: Optional[str] = None,
+    dcl_error: Optional[str] = None,
+) -> dict:
+    """Record every DCL export attempt (success AND failure) for diagnostics.
+
+    Unlike record_dcl_push() which only records successes, this captures
+    the HTTP status, response body, and error string so operators can
+    diagnose why an export failed without searching stderr logs.
+    """
+    attempt_id = str(uuid.uuid4())
+    now = datetime.utcnow().isoformat()
+    row = {
+        "attempt_id": attempt_id,
+        "aod_run_id": aod_run_id,
+        "pipe_count": pipe_count,
+        "dcl_ok": dcl_ok,
+        "dcl_status": dcl_status,
+        "dcl_body": (dcl_body or "")[:2000] if dcl_body else None,
+        "dcl_error": dcl_error,
+        "created_at": now,
+    }
+    sb.insert("dcl_export_attempts", row)
+    return row
+
+
+def get_last_export_attempt(aod_run_id: Optional[str] = None) -> Optional[dict]:
+    """Return the most recent DCL export attempt, optionally filtered by run."""
+    filters = {"aod_run_id": aod_run_id} if aod_run_id else None
+    rows = sb.select(
+        "dcl_export_attempts",
+        filters=filters,
+        order="created_at.desc",
+        limit=1,
+    )
+    return rows[0] if rows else None
+
+
 def get_dcl_push(push_id: str) -> Optional[dict]:
     """Get a specific DCL push including full payload."""
     row = sb.select("dcl_pushes", filters={"push_id": push_id}, single=True)

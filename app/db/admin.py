@@ -34,11 +34,15 @@ def reset_aod_state():
     Clear candidate/fabric/SOR data so a fresh handoff can repopulate it.
 
     Uses a single multi-statement DELETE for one network round trip.
+    Runner jobs are excluded — they have their own UPSERT lifecycle
+    (dispatch batch overwrites on re-dispatch) and a dedicated
+    DELETE /api/runner-jobs admin endpoint for manual cleanup.
     """
     from psycopg2 import sql as psql
 
+    tables = [t for t in ALLOWED_TABLES if t != "runner_jobs"]
     stmts = psql.SQL("; ").join(
-        psql.SQL("DELETE FROM {}").format(sb._ident(t)) for t in ALLOWED_TABLES
+        psql.SQL("DELETE FROM {}").format(sb._ident(t)) for t in tables
     )
     conn = sb._get_conn()
     try:

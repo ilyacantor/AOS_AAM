@@ -208,6 +208,17 @@ CREATE TABLE IF NOT EXISTS dcl_pushes (
     notes TEXT
 );
 
+CREATE TABLE IF NOT EXISTS dcl_export_attempts (
+    attempt_id TEXT PRIMARY KEY,
+    aod_run_id TEXT,
+    pipe_count INTEGER DEFAULT 0,
+    dcl_ok BOOLEAN DEFAULT FALSE,
+    dcl_status INTEGER,
+    dcl_body TEXT,
+    dcl_error TEXT,
+    created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS runner_jobs (
     job_id TEXT PRIMARY KEY,
     pipe_id TEXT NOT NULL,

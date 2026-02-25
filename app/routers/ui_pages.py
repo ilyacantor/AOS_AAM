@@ -2058,60 +2058,88 @@ async def ui_topology():
                 var exportData = await res.json();
                 var dclOkExport = exportData.delivery && exportData.delivery.export_pipes && exportData.delivery.export_pipes.ok;
                 var expCount = exportData.export ? exportData.export.total_connections : 0;
-                logStep('3', 'Export: ' + expCount + ' pipes to DCL' + (dclOkExport ? ' (accepted)' : ' (failed)'), dclOkExport);
+
+                // Extract DCL error detail for operator visibility
+                var exportErrorDetail = '';
+                if (!dclOkExport && exportData.delivery && exportData.delivery.export_pipes) {{
+                    var ep = exportData.delivery.export_pipes;
+                    if (ep.error) {{
+                        exportErrorDetail = ep.error;
+                    }} else if (ep.status) {{
+                        exportErrorDetail = 'HTTP ' + ep.status;
+                        if (ep.body && typeof ep.body === 'string') exportErrorDetail += ' — ' + ep.body.substring(0, 200);
+                    }} else if (ep.skipped) {{
+                        exportErrorDetail = 'DCL_URL not configured';
+                    }}
+                }}
+
+                if (dclOkExport) {{
+                    logStep('3', 'Export: ' + expCount + ' pipes to DCL (accepted)', true);
+                }} else {{
+                    logStep('3', 'Export: ' + expCount + ' pipes to DCL (failed' + (exportErrorDetail ? ': ' + exportErrorDetail : '') + ')', false);
+                }}
                 checkDispatchReady();
 
-                // Step 4: Dispatch to DCL (creates dispatch row)
-                setStep('4/5 Dispatching');
-                var dispatchBody = {{}};
-                if (exportData.export) {{
-                    dispatchBody.aod_run_id = exportData.export.aod_run_id || null;
-                    dispatchBody.snapshot_name = exportData.export.snapshot_name || null;
-                    dispatchBody.pipe_count = exportData.export.total_connections || 0;
-                }}
-                res = await fetch('/api/export/dcl/dispatch', {{
-                    method: 'POST',
-                    headers: {{'Content-Type': 'application/json'}},
-                    body: JSON.stringify(dispatchBody)
-                }});
                 var dispatchOk = false;
-                var dispatchData = {{}};
-                if (res.ok) {{
-                    dispatchData = await res.json();
-                    dispatchOk = dispatchData.dispatch && dispatchData.dispatch.ok;
-                }}
-                var dBody = (dispatchData.dispatch && dispatchData.dispatch.body) || {{}};
-                var dStatus = dBody.status || (dispatchOk ? 'ok' : 'failed');
-                var dId = dBody.dispatch_id || '';
-                logStep('4', 'Dispatch: ' + dStatus + (dId ? ' (' + dId + ')' : ''), dispatchOk);
-
-                // Step 5: Dispatch Farm runners for all pipes
-                setStep('5/5 Runners');
                 var runnerDispatched = 0;
-                try {{
-                    var pipesRes = await fetch('/api/pipes');
-                    var pipesJson = await pipesRes.json();
-                    var pipeIds = (pipesJson.pipes || []).map(function(p) {{ return p.pipe_id; }}).filter(Boolean);
-                    if (pipeIds.length > 0) {{
-                        var batchRes = await fetch('/api/runners/dispatch-batch', {{
-                            method: 'POST',
-                            headers: {{ 'Content-Type': 'application/json' }},
-                            body: JSON.stringify({{ pipe_ids: pipeIds, trigger: 'pipeline' }})
-                        }});
-                        if (batchRes.ok) {{
-                            var batchData = await batchRes.json();
-                            runnerDispatched = batchData.dispatched || 0;
-                        }}
+
+                // Short-circuit: skip Steps 4+5 if export failed — they cannot
+                // succeed without DCL having the pipe blueprints, and attempting
+                // them burns 45+s of timeout each.
+                if (!dclOkExport) {{
+                    logStep('4', 'Dispatch: skipped (export failed)', false);
+                    logStep('5', 'Runners: skipped (export failed)', false);
+                }} else {{
+                    // Step 4: Dispatch to DCL (creates dispatch row)
+                    setStep('4/5 Dispatching');
+                    var dispatchBody = {{}};
+                    if (exportData.export) {{
+                        dispatchBody.aod_run_id = exportData.export.aod_run_id || null;
+                        dispatchBody.snapshot_name = exportData.export.snapshot_name || null;
+                        dispatchBody.pipe_count = exportData.export.total_connections || 0;
                     }}
-                }} catch (re) {{}}
-                logStep('5', 'Runners: ' + runnerDispatched + ' manifests dispatched to Farm', runnerDispatched > 0);
+                    res = await fetch('/api/export/dcl/dispatch', {{
+                        method: 'POST',
+                        headers: {{'Content-Type': 'application/json'}},
+                        body: JSON.stringify(dispatchBody)
+                    }});
+                    var dispatchData = {{}};
+                    if (res.ok) {{
+                        dispatchData = await res.json();
+                        dispatchOk = dispatchData.dispatch && dispatchData.dispatch.ok;
+                    }}
+                    var dBody = (dispatchData.dispatch && dispatchData.dispatch.body) || {{}};
+                    var dStatus = dBody.status || (dispatchOk ? 'ok' : 'failed');
+                    var dId = dBody.dispatch_id || '';
+                    logStep('4', 'Dispatch: ' + dStatus + (dId ? ' (' + dId + ')' : ''), dispatchOk);
+
+                    // Step 5: Dispatch Farm runners for all pipes
+                    setStep('5/5 Runners');
+                    try {{
+                        var pipesRes = await fetch('/api/pipes');
+                        var pipesJson = await pipesRes.json();
+                        var pipeIds = (pipesJson.pipes || []).map(function(p) {{ return p.pipe_id; }}).filter(Boolean);
+                        if (pipeIds.length > 0) {{
+                            var batchRes = await fetch('/api/runners/dispatch-batch', {{
+                                method: 'POST',
+                                headers: {{ 'Content-Type': 'application/json' }},
+                                body: JSON.stringify({{ pipe_ids: pipeIds, trigger: 'pipeline' }})
+                            }});
+                            if (batchRes.ok) {{
+                                var batchData = await batchRes.json();
+                                runnerDispatched = batchData.dispatched || 0;
+                            }}
+                        }}
+                    }} catch (re) {{}}
+                    logStep('5', 'Runners: ' + runnerDispatched + ' manifests dispatched to Farm', runnerDispatched > 0);
+                }}
 
                 clearInterval(timer);
                 var elapsed = Math.floor((Date.now() - start) / 1000);
 
                 var pipesCreated = inferData.pipes_created || 0;
                 var pipeCount = exportData.export ? exportData.export.total_connections : 0;
-                var dclOk = exportData.delivery && exportData.delivery.export_pipes && exportData.delivery.export_pipes.ok;
+                var dclOk = dclOkExport;
 
                 logStep('done', 'Complete in ' + elapsed + 's', dclOk && dispatchOk);
 
@@ -2126,8 +2154,8 @@ async def ui_topology():
                     msg += ' — DCL accepted + dispatched';
                 }} else if (dclOk) {{
                     msg += ' — DCL accepted (dispatch skipped)';
-                }} else if (exportData.delivery && exportData.delivery.export_pipes && exportData.delivery.export_pipes.error) {{
-                    msg += ' (DCL unreachable)';
+                }} else {{
+                    msg += ' — DCL export failed' + (exportErrorDetail ? ': ' + exportErrorDetail.substring(0, 100) : '');
                 }}
                 showToast(msg, (dclOk && dispatchOk) ? 'success' : 'warning');
                 var cycleLabel = pipesCreated + ' pipes, ' + pipeCount + ' exported (' + elapsed + 's)';

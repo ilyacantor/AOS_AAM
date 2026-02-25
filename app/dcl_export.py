@@ -316,6 +316,11 @@ def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
     total_connections = 0
     skipped: list[SkippedConnection] = []
 
+    # Global dedup: prevent the same matched_pipe_id from being exported
+    # in multiple fabric planes.  DCL's PipeDefinitionStore keys on pipe_id
+    # — duplicates cause 422 rejections.
+    seen_pipe_ids: set[str] = set()
+
     for plane_id, data in planes_dict.items():
         plane = data["plane"]
         candidates_list = data["candidates"]
@@ -331,7 +336,6 @@ def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
         )
 
         connections = []
-        seen_pipe_ids: set[str] = set()
         for candidate in candidates_list:
             cid = candidate.get("candidate_id", "")
             matched_pipe_id = candidate.get("matched_pipe_id")
@@ -371,7 +375,7 @@ def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
                 governance_status=candidate.get("governance_status"),
                 fields=resolved_fields,
                 entity_scope=pipe_meta.get("entity_scope"),
-                identity_keys=pipe_meta.get("identity_keys"),
+                identity_keys=pipe_meta.get("identity_keys") or [],
                 transport_kind=pipe_meta.get("transport_kind"),
                 modality=pipe_meta.get("modality"),
                 change_semantics=pipe_meta.get("change_semantics"),

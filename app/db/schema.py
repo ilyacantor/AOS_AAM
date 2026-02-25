@@ -52,6 +52,20 @@ def _run_migrations():
         ("ALTER TABLE runner_jobs ADD COLUMN IF NOT EXISTS retry_count INTEGER DEFAULT 0", "add_retry_count_column"),
         # Migration 2026-02-24: Add retry_after for backoff between transient retries
         ("ALTER TABLE runner_jobs ADD COLUMN IF NOT EXISTS retry_after TEXT", "add_retry_after_column"),
+        # Migration 2026-02-25: Track every DCL export attempt (success + failure) for diagnostics
+        (
+            "CREATE TABLE IF NOT EXISTS dcl_export_attempts ("
+            "attempt_id TEXT PRIMARY KEY, "
+            "aod_run_id TEXT, "
+            "pipe_count INTEGER DEFAULT 0, "
+            "dcl_ok BOOLEAN DEFAULT FALSE, "
+            "dcl_status INTEGER, "
+            "dcl_body TEXT, "
+            "dcl_error TEXT, "
+            "created_at TEXT NOT NULL"
+            ")",
+            "create_dcl_export_attempts_table",
+        ),
     ]
 
     for sql_stmt, migration_name in migrations:
