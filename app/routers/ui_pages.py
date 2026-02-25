@@ -2573,20 +2573,46 @@ async def ui_topology():
         }});
 
         document.getElementById('btn-export-dcl').addEventListener('click', async function() {{
+            const btn = this;
+            btn.disabled = true;
+            btn.textContent = 'Exporting...';
             try {{
-                const res = await fetch('/api/export/dcl/declared-pipes');
-                if (!res.ok) throw new Error('Request failed: ' + res.status);
+                const res = await fetch('/api/export/dcl/push', {{
+                    method: 'POST',
+                    headers: {{'Content-Type': 'application/json'}},
+                    body: '{{}}'
+                }});
+                if (!res.ok) {{
+                    var d = await res.json().catch(function() {{ return {{}}; }});
+                    throw new Error(d.detail || 'HTTP ' + res.status);
+                }}
                 const data = await res.json();
-                const blob = new Blob([JSON.stringify(data, null, 2)], {{ type: 'application/json' }});
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = 'dcl-export-' + new Date().toISOString().slice(0,10) + '.json';
-                a.click();
-                showToast('Exported ' + data.pipe_count + ' pipes', 'success');
+                const dclOk = data.dcl_accepted;
+                const pipeCount = data.export ? data.export.total_connections : 0;
+
+                // Offer JSON download of the export payload
+                if (data.export) {{
+                    const blob = new Blob([JSON.stringify(data.export, null, 2)], {{ type: 'application/json' }});
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'dcl-export-' + new Date().toISOString().slice(0,10) + '.json';
+                    a.click();
+                }}
+
+                if (dclOk) {{
+                    showToast('Exported ' + pipeCount + ' pipes to DCL (accepted)', 'success');
+                }} else {{
+                    var ep = data.delivery && data.delivery.export_pipes || {{}};
+                    var reason = ep.error || (ep.status ? 'HTTP ' + ep.status : 'unknown');
+                    showToast('Export ' + pipeCount + ' pipes — DCL rejected: ' + reason, 'error');
+                }}
                 checkDispatchReady();
             }} catch (e) {{
                 showToast('Export failed: ' + e.message, 'error');
+            }} finally {{
+                btn.disabled = false;
+                btn.textContent = 'Export to DCL';
             }}
         }});
 
