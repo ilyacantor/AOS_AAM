@@ -2082,6 +2082,7 @@ async def ui_topology():
 
                 var dispatchOk = false;
                 var runnerDispatched = 0;
+                var runnerSkipped = 0;
 
                 // Short-circuit: skip Steps 4+5 if export failed — they cannot
                 // succeed without DCL having the pipe blueprints, and attempting
@@ -2128,11 +2129,14 @@ async def ui_topology():
                             if (batchRes.ok) {{
                                 var batchData = await batchRes.json();
                                 runnerDispatched = batchData.dispatched || 0;
+                                runnerSkipped = batchData.skipped || 0;
                                 if (batchData.jobs && batchData.jobs.length > 0) _dpRunId = batchData.jobs[0].run_id;
                             }}
                         }}
                     }} catch (re) {{}}
-                    logStep('5', 'Runners: ' + runnerDispatched + ' manifests dispatched to Farm', runnerDispatched > 0);
+                    var runnerMsg = 'Runners: ' + runnerDispatched + ' dispatched to Farm';
+                    if (runnerSkipped > 0) runnerMsg += ', ' + runnerSkipped + ' already complete';
+                    logStep('5', runnerMsg, (runnerDispatched + runnerSkipped) > 0);
                 }}
 
                 clearInterval(timer);
