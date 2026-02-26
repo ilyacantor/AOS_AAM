@@ -2369,9 +2369,11 @@ async def ui_topology():
             renderNetwork();
         }}
 
-        function drawSourceNode({{ctx, x, y, state: {{selected, hover}}, style}}) {{
+        function drawSourceNode({{ctx, x, y, state: {{selected, hover}}, style, label}}) {{
             var sz = style.size;
             var r = 4;
+            var fontSize = 12;
+            var lineHeight = fontSize * 1.3;
             return {{
                 drawNode: function() {{
                     ctx.save();
@@ -2401,6 +2403,21 @@ async def ui_topology():
                     ctx.lineWidth = selected ? 2.5 : 1.5;
                     ctx.stroke();
                     ctx.restore();
+                    // Draw label
+                    if (label) {{
+                        ctx.save();
+                        ctx.font = fontSize + 'px Quicksand, sans-serif';
+                        ctx.fillStyle = '#ffffff';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        var lines = label.split('\\n');
+                        var totalH = lines.length * lineHeight;
+                        var startY = y + sz + 10 + lineHeight / 2;
+                        for (var i = 0; i < lines.length; i++) {{
+                            ctx.fillText(lines[i], x, startY + i * lineHeight);
+                        }}
+                        ctx.restore();
+                    }}
                 }},
                 nodeDimensions: {{ width: sz * 2, height: sz * 2 }}
             }};
