@@ -2303,31 +2303,40 @@ async def ui_topology():
             }}
 
             allNodes = data.nodes.map(n => {{
-                let color = n.type === 'fabric_plane'
+                let bg = n.type === 'fabric_plane'
                     ? nodeColors.fabric_plane[n.metadata.plane_type] || '#64748b'
                     : nodeColors[n.type] || '#64748b';
                 let borderWidth = 1;
-                let borderColor = undefined;
-                if (n.metadata && n.metadata.origin === 'Declared') {{
-                    color = '#f59e0b';
+                let isDeclared = n.metadata && n.metadata.origin === 'Declared';
+                if (isDeclared) {{
+                    bg = '#f59e0b';
                     borderWidth = 3;
-                    borderColor = '#fbbf24';
                 }}
+                var isGreySource = n.type === 'source_system' && !isDeclared;
+                var nodeColor = isDeclared
+                    ? {{ background: bg, border: '#fbbf24',
+                         highlight: {{ background: bg, border: '#22d3ee' }},
+                         hover: {{ background: bg, border: '#94a3b8' }} }}
+                    : {{ background: bg, border: '#475569',
+                         highlight: {{ background: bg, border: '#22d3ee' }},
+                         hover: {{ background: bg, border: '#94a3b8' }} }};
                 var humanized = n.label.indexOf('\\n') >= 0
                     ? n.label.split('\\n').map(humanizeLabel).join('\\n')
                     : humanizeLabel(n.label);
-                return {{
+                var node = {{
                     id: n.id,
                     label: humanized,
                     _rawLabel: n.label,
-                    shape: nodeShapes[n.type] || 'dot',
-                    color: borderColor ? {{ background: color, border: borderColor }} : color,
+                    shape: isGreySource ? 'custom' : (nodeShapes[n.type] || 'dot'),
+                    color: nodeColor,
                     borderWidth: borderWidth,
                     size: n.type === 'fabric_plane' ? 30 : (n.type === 'pipe' ? 20 : 15),
                     font: {{ color: '#ffffff', size: 12, face: 'Quicksand, sans-serif' }},
                     title: buildTooltip(n),
                     nodeData: n
                 }};
+                if (isGreySource) node.ctxRenderer = drawSourceNode;
+                return node;
             }});
 
             allEdges = data.edges.map(e => ({{
@@ -2358,6 +2367,43 @@ async def ui_topology():
                 }});
 
             renderNetwork();
+        }}
+
+        function drawSourceNode({{ctx, x, y, state: {{selected, hover}}, style}}) {{
+            var sz = style.size;
+            var r = 4;
+            return {{
+                drawNode: function() {{
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.moveTo(x - sz + r, y - sz);
+                    ctx.lineTo(x + sz - r, y - sz);
+                    ctx.quadraticCurveTo(x + sz, y - sz, x + sz, y - sz + r);
+                    ctx.lineTo(x + sz, y + sz - r);
+                    ctx.quadraticCurveTo(x + sz, y + sz, x + sz - r, y + sz);
+                    ctx.lineTo(x - sz + r, y + sz);
+                    ctx.quadraticCurveTo(x - sz, y + sz, x - sz, y + sz - r);
+                    ctx.lineTo(x - sz, y - sz + r);
+                    ctx.quadraticCurveTo(x - sz, y - sz, x - sz + r, y - sz);
+                    ctx.closePath();
+                    var grad = ctx.createLinearGradient(x, y - sz, x, y + sz);
+                    grad.addColorStop(0, '#1e293b');
+                    grad.addColorStop(1, '#334155');
+                    ctx.fillStyle = grad;
+                    ctx.fill();
+                    if (selected) {{
+                        ctx.shadowColor = 'rgba(34, 211, 238, 0.5)';
+                        ctx.shadowBlur = 15;
+                        ctx.shadowOffsetX = 0;
+                        ctx.shadowOffsetY = 0;
+                    }}
+                    ctx.strokeStyle = selected ? '#22d3ee' : (hover ? '#94a3b8' : '#475569');
+                    ctx.lineWidth = selected ? 2.5 : 1.5;
+                    ctx.stroke();
+                    ctx.restore();
+                }},
+                nodeDimensions: {{ width: sz * 2, height: sz * 2 }}
+            }};
         }}
 
         function humanizeLabel(raw) {{
@@ -2429,7 +2475,17 @@ async def ui_topology():
             const baseOptions = {{
                 nodes: {{
                     borderWidth: 2,
-                    shadow: true
+                    shadow: true,
+                    chosen: {{
+                        node: function(values, id, selected, hovering) {{
+                            if (selected) {{
+                                values.shadowColor = 'rgba(34, 211, 238, 0.5)';
+                                values.shadowSize = 15;
+                                values.shadowX = 0;
+                                values.shadowY = 0;
+                            }}
+                        }}
+                    }}
                 }},
                 edges: {{
                     smooth: {{ type: 'continuous' }}
