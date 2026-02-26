@@ -446,10 +446,9 @@ def dispatch_batch(
                     "Pipe %s already has an active job (status=%s) — skipping to prevent double dispatch",
                     canonical_pid, existing_job["status"],
                 )
-                skip_status = "already_completed" if existing_job["status"] == "completed" else "skipped"
                 errors.append({
                     "pipe_id": pid,
-                    "status": skip_status,
+                    "status": "skipped",
                     "error": f"Job already {existing_job['status']} — cancel first or wait for completion",
                 })
                 continue

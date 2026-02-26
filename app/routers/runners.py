@@ -326,22 +326,16 @@ async def dispatch_multiple(req: RunnerBatchDispatchRequest):
             await asyncio.gather(*[_throttled(r, m, p) for r, m, p in farm_tasks])
 
     errors = [r for r in results if r.get("status") in ("error", "skipped", "farm_error", "farm_unreachable", "failed")]
-    sent_to_farm = [r for r in results if r.get("status") in ("dispatched", "completed", "running", "already_completed")]
-    already_done = [r for r in sent_to_farm if r.get("status") == "already_completed"]
+    sent_to_farm = [r for r in results if r.get("status") in ("dispatched", "completed", "running")]
 
-    _log.info("Batch dispatch: %d sent to Farm (%d completed inline, %d already completed), %d errors/skipped",
-              len(sent_to_farm), len([r for r in sent_to_farm if r.get("status") == "completed"]),
-              len(already_done), len(errors))
-
-    msg = f"{len(sent_to_farm)} manifests dispatched to Farm"
-    if already_done:
-        msg = f"{len(sent_to_farm) - len(already_done)} dispatched to Farm ({len(already_done)} already completed)"
+    _log.info("Batch dispatch: %d sent to Farm (%d completed inline), %d errors/skipped",
+              len(sent_to_farm), len([r for r in sent_to_farm if r.get("status") == "completed"]), len(errors))
 
     return {
         "dispatched": len(sent_to_farm),
         "errors": len(errors),
         "jobs": results,
-        "message": msg,
+        "message": f"{len(sent_to_farm)} manifests dispatched to Farm",
     }
 
 
