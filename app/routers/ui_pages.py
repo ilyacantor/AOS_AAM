@@ -1714,8 +1714,26 @@ async def ui_topology():
         .sb-btn-runner {{ border-color: rgba(34, 197, 94, 0.3); color: #4ade80; }}
         .sb-btn-runner:hover {{ background: rgba(34, 197, 94, 0.1); }}
         .sb-btn-runner:disabled {{ opacity: 0.5; cursor: not-allowed; }}
+        .sb-btn-primary {{
+            background: var(--cyan-400); color: #0f172a; font-weight: 700;
+            border-color: var(--cyan-400);
+        }}
+        .sb-btn-primary:hover {{ background: var(--cyan-500); border-color: var(--cyan-500); color: #0f172a; }}
+        .sb-btn-primary:disabled {{ opacity: 0.5; cursor: not-allowed; background: var(--cyan-400); color: #0f172a; }}
         .sb-btn-stop {{ border-color: rgba(248, 113, 113, 0.3); color: #f87171; }}
         .sb-btn-stop:hover {{ background: rgba(248, 113, 113, 0.15); }}
+        .sb-btn-ghost {{
+            background: transparent; border: 1px dashed var(--slate-600);
+            color: var(--slate-500); font-weight: 400;
+        }}
+        .sb-btn-ghost:hover {{ background: rgba(34, 211, 238, 0.06); border-color: rgba(34, 211, 238, 0.25); color: var(--cyan-400); border-style: solid; }}
+        .sb-badge {{
+            width: 100%; padding: 3px 8px; border-radius: 10px;
+            font-size: 0.65rem; font-weight: 500; text-align: center;
+            background: rgba(51, 65, 85, 0.6); color: var(--slate-400);
+            border: 1px solid var(--slate-700); cursor: default;
+            margin-bottom: 2px; display: none;
+        }}
         .dispatch-pill {{
             display: inline-block; padding: 1px 7px; border-radius: 8px;
             font-size: 0.62rem; font-weight: 600; letter-spacing: 0.3px;
@@ -1726,10 +1744,15 @@ async def ui_topology():
         .dispatch-pill.failed {{ background: rgba(248,113,113,0.2); color: #f87171; }}
         @keyframes pulse-blue {{ 0%,100% {{ opacity:1; }} 50% {{ opacity:0.6; }} }}
         .sb-select {{
-            width: 100%; padding: 3px 6px; font-size: 0.7rem;
+            width: 100%; padding: 3px 20px 3px 6px; font-size: 0.7rem;
             background: rgba(15, 23, 42, 0.6); border: 1px solid var(--slate-700);
             border-radius: 4px; color: var(--slate-300);
             font-family: inherit; cursor: pointer; margin-bottom: 3px;
+            appearance: none; -webkit-appearance: none; -moz-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2394a3b8' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 6px center;
+            background-size: 10px;
         }}
         .sb-select:focus {{ outline: none; border-color: rgba(34, 211, 238, 0.4); }}
         .sb-legend {{ display: flex; flex-direction: column; gap: 2px; }}
@@ -1872,10 +1895,11 @@ async def ui_topology():
             </div>
             <div class="sb-section">
                 <div class="sb-title">Actions</div>
-                <button class="sb-btn sb-btn-accent" onclick="fetchAodData()" id="fetch-aod-btn">Fetch AOD Data</button>
+                <button class="sb-btn" onclick="fetchAodData()" id="fetch-aod-btn">Fetch AOD Data</button>
                 <button class="sb-btn" id="btn-run-inference">Run Inference</button>
                 <button class="sb-btn" id="btn-export-dcl">Export to DCL</button>
-                <button class="sb-btn" onclick="runFullPipeline()" id="btn-full-pipeline" data-testid="btn-full-pipeline" style="background:var(--green-700,#15803d);color:#fff;margin-top:4px;">Full Pipeline</button>
+                <button class="sb-btn sb-btn-primary" onclick="runFullPipeline()" id="btn-full-pipeline" data-testid="btn-full-pipeline" style="margin-top:4px;">Full Pipeline</button>
+                <div class="sb-badge" id="pipeline-result-badge"></div>
                 <button class="sb-btn sb-btn-runner" onclick="dispatchAllRunners()" id="btn-dispatch-all" data-testid="btn-dispatch-all">Dispatch Runner</button>
                 <button class="sb-btn sb-btn-stop" onclick="cancelAllJobs()" id="btn-stop-all" data-testid="btn-stop-all" style="display:none;">Stop All</button>
                 <button class="sb-btn" onclick="openDispatchPanel()" id="btn-view-dispatch" data-testid="btn-view-dispatch" style="font-size:0.72rem;">View Dispatch</button>
@@ -1908,7 +1932,7 @@ async def ui_topology():
                     <option value="_fit">Fit to Screen</option>
                     <option value="_unlock">Unlock Nodes</option>
                 </select>
-                <button class="sb-btn" onclick="resetView()" style="margin-top:1px;">Reset</button>
+                <button class="sb-btn sb-btn-ghost" onclick="resetView()" style="margin-top:1px;">Reset</button>
             </div>
             <div class="sb-section">
                 <div class="sb-title">Legend</div>
@@ -2009,6 +2033,9 @@ async def ui_topology():
             var btn = document.getElementById('btn-full-pipeline');
             btn.disabled = true;
             localStorage.removeItem('aam_full_cycle');
+            var badge = document.getElementById('pipeline-result-badge');
+            badge.style.display = 'none';
+            badge.textContent = '';
             var start = Date.now();
             var timer = setInterval(function() {{
                 var s = Math.floor((Date.now() - start) / 1000);
@@ -2164,8 +2191,11 @@ async def ui_topology():
                 }}
                 showToast(msg, (dclOk && dispatchOk) ? 'success' : 'warning');
                 var cycleLabel = pipesCreated + ' pipes, ' + pipeCount + ' exported (' + elapsed + 's)';
-                btn.textContent = cycleLabel;
+                btn.textContent = 'Full Pipeline';
                 btn.disabled = false;
+                var badge = document.getElementById('pipeline-result-badge');
+                badge.textContent = cycleLabel;
+                badge.style.display = 'block';
                 localStorage.setItem('aam_full_cycle', JSON.stringify({{
                     label: cycleLabel,
                     timestamp: new Date().toISOString(),
@@ -2180,8 +2210,11 @@ async def ui_topology():
                 var elapsed = Math.floor((Date.now() - start) / 1000);
                 showToast('Pipeline failed: ' + e.message, 'error');
                 var failLabel = 'Failed (' + elapsed + 's)';
-                btn.textContent = failLabel;
+                btn.textContent = 'Full Pipeline';
                 btn.disabled = false;
+                var badge = document.getElementById('pipeline-result-badge');
+                badge.textContent = failLabel;
+                badge.style.display = 'block';
                 localStorage.setItem('aam_full_cycle', JSON.stringify({{
                     label: failLabel,
                     timestamp: new Date().toISOString(),
@@ -3124,14 +3157,16 @@ async def ui_topology():
             }} catch(e) {{}}
         }})();
 
-        // Restore full-cycle label on pipeline button from previous run
+        // Restore full-cycle result badge from previous run
         (function() {{
             try {{
                 var saved = localStorage.getItem('aam_full_cycle');
                 if (saved) {{
                     var parsed = JSON.parse(saved);
                     if (parsed.label) {{
-                        document.getElementById('btn-full-pipeline').textContent = parsed.label;
+                        var badge = document.getElementById('pipeline-result-badge');
+                        badge.textContent = parsed.label;
+                        badge.style.display = 'block';
                     }}
                 }}
             }} catch(e) {{}}

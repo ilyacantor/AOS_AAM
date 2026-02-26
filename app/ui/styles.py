@@ -52,8 +52,9 @@ NAV_STYLE = """
         background: rgba(148, 163, 184, 0.25);
         flex-shrink: 0;
     }
-    .nav-links { display: flex; gap: 8px; }
+    .nav-links { display: flex; gap: 8px; flex-wrap: nowrap; overflow-x: auto; }
     .nav-link {
+        white-space: nowrap;
         color: #ffffff;
         text-decoration: none;
         padding: 8px 16px;
