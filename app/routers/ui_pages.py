@@ -1757,6 +1757,24 @@ async def ui_topology():
         .sb-select:focus {{ outline: none; border-color: rgba(34, 211, 238, 0.4); }}
         .sb-legend {{ display: flex; flex-direction: column; gap: 2px; }}
         .sb-legend-item {{ display: flex; align-items: center; gap: 5px; font-size: 0.65rem; color: var(--slate-400); }}
+        .topo-zoom-controls {{
+            position: absolute; bottom: 12px; right: 12px; z-index: 50;
+            display: flex; flex-direction: column; gap: 4px;
+        }}
+        .topo-zoom-btn {{
+            width: 32px; height: 32px; border-radius: 6px;
+            background: rgba(30, 41, 59, 0.9); border: 1px solid var(--slate-700);
+            color: var(--slate-300); font-size: 1rem; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            font-family: inherit; padding: 0; line-height: 1;
+            transition: all 0.15s;
+        }}
+        .topo-zoom-btn:hover {{ border-color: rgba(34, 211, 238, 0.3); color: var(--cyan-400); }}
+        .topo-legend-overlay {{
+            position: absolute; bottom: 12px; left: 12px; z-index: 50;
+            background: rgba(30, 41, 59, 0.9); border: 1px solid var(--slate-700);
+            border-radius: 6px; padding: 8px 10px;
+        }}
         .sb-legend-item svg {{ width: 10px; height: 10px; flex-shrink: 0; }}
         .node-details {{
             position: absolute; top: 10px; right: 10px; width: 260px;
@@ -1934,7 +1952,15 @@ async def ui_topology():
                 </select>
                 <button class="sb-btn sb-btn-ghost" onclick="resetView()" style="margin-top:1px;">Reset</button>
             </div>
-            <div class="sb-section">
+        </aside>
+        <main class="topo-main">
+            <div id="topology-container"></div>
+            <div class="topo-zoom-controls">
+                <button class="topo-zoom-btn" onclick="if(network)network.moveTo({{scale:network.getScale()*1.3}})" title="Zoom in">+</button>
+                <button class="topo-zoom-btn" onclick="if(network)network.moveTo({{scale:network.getScale()/1.3}})" title="Zoom out">&minus;</button>
+                <button class="topo-zoom-btn" onclick="fitToScreen()" title="Fit to screen">&#x2b1c;</button>
+            </div>
+            <div class="topo-legend-overlay">
                 <div class="sb-title">Legend</div>
                 <div class="sb-legend">
                     <div class="sb-legend-item"><svg viewBox="0 0 12 12"><polygon points="6,0 12,6 6,12 0,6" fill="#a78bfa"/></svg> Gateway</div>
@@ -1947,9 +1973,6 @@ async def ui_topology():
                     <div class="sb-legend-item"><svg viewBox="0 0 12 12"><rect x="1" y="1" width="10" height="10" fill="#f59e0b" stroke="#fbbf24" stroke-width="2"/></svg> SOR</div>
                 </div>
             </div>
-        </aside>
-        <main class="topo-main">
-            <div id="topology-container"></div>
             <div id="node-details" class="node-details">
                 <button class="close-btn" onclick="closeDetails()">&times;</button>
                 <h3 id="detail-title">Node Details</h3>
@@ -2290,9 +2313,13 @@ async def ui_topology():
                     borderWidth = 3;
                     borderColor = '#fbbf24';
                 }}
+                var humanized = n.label.indexOf('\\n') >= 0
+                    ? n.label.split('\\n').map(humanizeLabel).join('\\n')
+                    : humanizeLabel(n.label);
                 return {{
                     id: n.id,
-                    label: n.label,
+                    label: humanized,
+                    _rawLabel: n.label,
                     shape: nodeShapes[n.type] || 'dot',
                     color: borderColor ? {{ background: color, border: borderColor }} : color,
                     borderWidth: borderWidth,
@@ -2307,8 +2334,8 @@ async def ui_topology():
                 id: e.id,
                 from: e.source,
                 to: e.target,
-                color: {{ color: '#475569', opacity: 0.6 }},
-                width: e.type === 'candidate_to_pipe' ? 2 : 1,
+                color: {{ color: '#64748b', opacity: 0.8 }},
+                width: e.type === 'candidate_to_pipe' ? 2 : 1.5,
                 dashes: e.type === 'candidate_for_source',
                 arrows: {{ to: {{ enabled: true, scaleFactor: 0.5 }} }}
             }}));
@@ -2333,8 +2360,18 @@ async def ui_topology():
             renderNetwork();
         }}
 
+        function humanizeLabel(raw) {{
+            var acronyms = ['AWS','API','SAP','ERP','CRM','HR','IT','UI','ID','IP','SQL','ETL','CSV','SSO','DCL','AAM','AOD','IOT'];
+            return raw.split('_').map(function(w) {{
+                var up = w.toUpperCase();
+                if (acronyms.indexOf(up) >= 0) return up;
+                return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+            }}).join(' ');
+        }}
+
         function buildTooltip(node) {{
-            let lines = [node.label.replace('\\n', ' — ')];
+            var rawLabel = node._rawLabel || node.label;
+            let lines = [rawLabel.replace('\\n', ' — ')];
             if (node.type === 'fabric_plane') {{
                 if (node.metadata.vendor) lines.push('Vendor: ' + node.metadata.vendor);
                 lines.push('Type: ' + (node.metadata.plane_type || 'unknown'));
