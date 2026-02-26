@@ -105,7 +105,7 @@ async def ui_pipes_list(
                 "dispatched": ("Dispatched", "runner-queued"),
                 "running": ("Running", "runner-running"),
                 "pushing": ("Pushing", "runner-running"),
-                "completed": (f"Done ({rows_done}r)", "runner-completed"),
+                "completed": (f"Done — {rows_done:,} rows", "runner-completed"),
                 "failed": ("Failed", "runner-failed"),
                 "timed_out": ("Timeout", "runner-failed"),
             }
@@ -417,7 +417,7 @@ async def ui_pipes_list(
                 'dispatched':['Dispatched','runner-queued'],
                 'running':   ['Running',   'runner-running'],
                 'pushing':   ['Pushing',   'runner-running'],
-                'completed': ['Done (' + rows + 'r)', 'runner-completed'],
+                'completed': ['Done — ' + Number(rows).toLocaleString() + ' rows', 'runner-completed'],
                 'failed':    ['Failed',    'runner-failed'],
                 'timed_out': ['Timeout',   'runner-failed'],
             }};
@@ -724,7 +724,7 @@ async def ui_pipe_detail(pipe_id: str):
                         'dispatched':['Dispatched','#94a3b8', 'rgba(148,163,184,0.2)'],
                         'running':   ['Running',   '#60a5fa', 'rgba(59,130,246,0.2)'],
                         'pushing':   ['Pushing',   '#60a5fa', 'rgba(59,130,246,0.2)'],
-                        'completed': ['Done (' + r + ' rows)', '#4ade80', 'rgba(34,197,94,0.2)'],
+                        'completed': ['Done — ' + Number(r).toLocaleString() + ' rows', '#4ade80', 'rgba(34,197,94,0.2)'],
                         'failed':    ['Failed',    '#f87171', 'rgba(248,113,113,0.2)'],
                         'timed_out': ['Timeout',   '#f87171', 'rgba(248,113,113,0.2)'],
                     }};
@@ -1688,7 +1688,12 @@ async def ui_topology():
         .topo-sidebar::-webkit-scrollbar {{ width: 3px; }}
         .topo-sidebar::-webkit-scrollbar-thumb {{ background: var(--slate-700); border-radius: 3px; }}
         .topo-main {{ flex: 1; min-width: 0; position: relative; }}
-        #topology-container {{ width: 100%; height: 100%; border: 1px solid var(--slate-700); border-radius: 8px; background: rgba(15, 23, 42, 0.8); }}
+        #topology-container {{
+            width: 100%; height: 100%; border: 1px solid var(--slate-700); border-radius: 8px;
+            background-color: rgba(15, 23, 42, 0.8);
+            background-image: radial-gradient(circle, rgba(148, 163, 184, 0.07) 1px, transparent 1px);
+            background-size: 20px 20px;
+        }}
         .sb-section {{ padding: 8px 10px; }}
         .sb-section + .sb-section {{ border-top: 1px solid rgba(51, 65, 85, 0.5); }}
         .sb-title {{ font-size: 0.58rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--slate-500); margin-bottom: 5px; font-weight: 600; }}
@@ -1776,14 +1781,68 @@ async def ui_topology():
             border-radius: 6px; padding: 8px 10px;
         }}
         .sb-legend-item svg {{ width: 10px; height: 10px; flex-shrink: 0; }}
+        .sb-accordion-hdr {{
+            display: flex; align-items: center; gap: 5px; cursor: pointer;
+            user-select: none;
+        }}
+        .sb-accordion-hdr .sb-title {{ margin-bottom: 0; }}
+        .sb-accordion-chev {{
+            font-size: 0.55rem; color: var(--slate-500);
+            transition: transform 0.2s ease;
+            display: inline-block;
+        }}
+        .sb-accordion-hdr.open .sb-accordion-chev {{ transform: rotate(90deg); }}
+        .sb-accordion-body {{
+            max-height: 0; overflow: hidden;
+            transition: max-height 0.25s ease;
+        }}
+        .sb-accordion-body.open {{ max-height: 400px; }}
+        .sb-accordion-count {{
+            font-size: 0.55rem; color: var(--slate-500); font-weight: 400;
+        }}
+        @keyframes sb-spin {{ to {{ transform: rotate(360deg); }} }}
+        .sb-btn-loading {{
+            position: relative; padding-left: 22px; pointer-events: none;
+        }}
+        .sb-btn-loading::before {{
+            content: ''; position: absolute; left: 6px; top: 50%;
+            width: 10px; height: 10px; margin-top: -5px;
+            border: 2px solid var(--slate-600); border-top-color: var(--cyan-400);
+            border-radius: 50%; animation: sb-spin 0.6s linear infinite;
+        }}
         .node-details {{
             position: absolute; top: 10px; right: 10px; width: 260px;
             background: rgba(30, 41, 59, 0.95); border: 1px solid var(--slate-700);
-            border-radius: 8px; padding: 12px; display: none; z-index: 100;
+            border-radius: 8px; padding: 12px; z-index: 100;
+            opacity: 0; transform: translateY(-8px); pointer-events: none;
+            transition: opacity 0.2s ease, transform 0.2s ease;
         }}
-        .node-details.visible {{ display: block; }}
-        .node-details h3 {{ margin-bottom: 8px; color: var(--cyan-400); font-size: 0.85rem; }}
+        .node-details.visible {{ opacity: 1; transform: translateY(0); pointer-events: auto; }}
+        .node-details h3 {{ margin: 0 0 8px 0; color: var(--cyan-400); font-size: 0.85rem; padding-right: 20px; }}
         .node-details .close-btn {{ position: absolute; top: 6px; right: 8px; background: none; border: none; color: var(--slate-400); cursor: pointer; font-size: 1rem; }}
+        .node-details .close-btn:hover {{ color: #fff; }}
+        .node-details .field {{ display: flex; justify-content: space-between; align-items: baseline; padding: 3px 0; border-bottom: 1px solid rgba(51, 65, 85, 0.4); }}
+        .node-details .field:last-child {{ border-bottom: none; }}
+        .node-details .field-label {{ font-size: 0.65rem; color: var(--slate-500); text-transform: uppercase; letter-spacing: 0.05em; }}
+        .node-details .field-value {{ font-size: 0.72rem; color: var(--slate-200); text-align: right; max-width: 60%; word-break: break-word; }}
+        .topo-search-wrap {{
+            position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+            z-index: 50; display: flex; align-items: center;
+        }}
+        .topo-search {{
+            width: 200px; padding: 5px 26px 5px 10px; font-size: 0.72rem;
+            background: rgba(30, 41, 59, 0.9); border: 1px solid var(--slate-700);
+            border-radius: 6px; color: var(--slate-200); font-family: inherit;
+            outline: none; transition: border-color 0.15s;
+        }}
+        .topo-search::placeholder {{ color: var(--slate-500); }}
+        .topo-search:focus {{ border-color: rgba(34, 211, 238, 0.4); }}
+        .topo-search-clear {{
+            position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+            background: none; border: none; color: var(--slate-500); cursor: pointer;
+            font-size: 0.85rem; padding: 0 2px; display: none; line-height: 1;
+        }}
+        .topo-search-clear:hover {{ color: var(--slate-300); }}
 
         .dispatch-overlay {{
             position: fixed; inset: 0; background: rgba(0,0,0,0.6);
@@ -1924,8 +1983,14 @@ async def ui_topology():
                 <span id="dispatch-all-status" style="display:none;font-size:0.68rem;margin-top:2px;"></span>
             </div>
             <div class="sb-section" id="pipeline-log-section" style="display:none;">
-                <div class="sb-title">Pipeline Log</div>
-                <div id="pipeline-log" data-testid="pipeline-log" style="font-size:0.72rem;line-height:1.6;"></div>
+                <div class="sb-accordion-hdr" id="pipeline-log-toggle" onclick="togglePipelineLog()">
+                    <span class="sb-accordion-chev">&#9654;</span>
+                    <span class="sb-title">Pipeline Log</span>
+                    <span class="sb-accordion-count" id="pipeline-log-count"></span>
+                </div>
+                <div class="sb-accordion-body" id="pipeline-log-body">
+                    <div id="pipeline-log" data-testid="pipeline-log" style="font-size:0.72rem;line-height:1.6;margin-top:5px;"></div>
+                </div>
             </div>
             <div class="sb-section">
                 <div class="sb-title">View</div>
@@ -1955,6 +2020,10 @@ async def ui_topology():
         </aside>
         <main class="topo-main">
             <div id="topology-container"></div>
+            <div class="topo-search-wrap">
+                <input type="text" class="topo-search" id="topo-search" placeholder="Search nodes..." oninput="filterNodesBySearch(this.value)">
+                <button class="topo-search-clear" id="topo-search-clear" onclick="clearNodeSearch()">&times;</button>
+            </div>
             <div class="topo-zoom-controls">
                 <button class="topo-zoom-btn" onclick="if(network)network.moveTo({{scale:network.getScale()*1.3}})" title="Zoom in">+</button>
                 <button class="topo-zoom-btn" onclick="if(network)network.moveTo({{scale:network.getScale()/1.3}})" title="Zoom out">&minus;</button>
@@ -1999,6 +2068,7 @@ async def ui_topology():
             }}, 500);
             btn.textContent = 'Fetching... 0s';
             btn.disabled = true;
+            btn.classList.add('sb-btn-loading');
             try {{
                 var res = await fetch('/api/handoff/aod/fetch', {{ method: 'POST' }});
                 var data = await res.json();
@@ -2006,12 +2076,14 @@ async def ui_topology():
                 _fetchTimer = null;
                 var elapsed = Math.floor((Date.now() - _fetchStart) / 1000);
                 if (res.ok) {{
+                    btn.classList.remove('sb-btn-loading');
                     btn.textContent = 'Fetched (' + elapsed + 's)';
                     btn.disabled = false;
                     _fetchRunning = false;
                     showToast('Fetch complete in ' + elapsed + 's', 'success');
                     setTimeout(() => location.reload(), 1200);
                 }} else {{
+                    btn.classList.remove('sb-btn-loading');
                     showToast(data.detail || 'Fetch failed', 'error');
                     btn.textContent = 'Failed (' + elapsed + 's)';
                     btn.disabled = false;
@@ -2021,6 +2093,7 @@ async def ui_topology():
                 clearInterval(_fetchTimer);
                 _fetchTimer = null;
                 var elapsed = Math.floor((Date.now() - _fetchStart) / 1000);
+                btn.classList.remove('sb-btn-loading');
                 showToast('Fetch failed: ' + e.message, 'error');
                 btn.textContent = 'Failed (' + elapsed + 's)';
                 btn.disabled = false;
@@ -2055,6 +2128,7 @@ async def ui_topology():
         async function runFullPipeline() {{
             var btn = document.getElementById('btn-full-pipeline');
             btn.disabled = true;
+            btn.classList.add('sb-btn-loading');
             localStorage.removeItem('aam_full_cycle');
             var badge = document.getElementById('pipeline-result-badge');
             badge.style.display = 'none';
@@ -2214,6 +2288,7 @@ async def ui_topology():
                 }}
                 showToast(msg, (dclOk && dispatchOk) ? 'success' : 'warning');
                 var cycleLabel = pipesCreated + ' pipes, ' + pipeCount + ' exported (' + elapsed + 's)';
+                btn.classList.remove('sb-btn-loading');
                 btn.textContent = 'Full Pipeline';
                 btn.disabled = false;
                 var badge = document.getElementById('pipeline-result-badge');
@@ -2233,6 +2308,7 @@ async def ui_topology():
                 var elapsed = Math.floor((Date.now() - start) / 1000);
                 showToast('Pipeline failed: ' + e.message, 'error');
                 var failLabel = 'Failed (' + elapsed + 's)';
+                btn.classList.remove('sb-btn-loading');
                 btn.textContent = 'Full Pipeline';
                 btn.disabled = false;
                 var badge = document.getElementById('pipeline-result-badge');
@@ -2565,8 +2641,9 @@ async def ui_topology():
             const content = document.getElementById('detail-content');
 
             title.textContent = node.label;
+            var typeLabel = humanizeLabel(node.nodeData.type);
 
-            let html = `<div class="field"><div class="field-label">Type</div><div class="field-value">${{node.nodeData.type}}</div></div>`;
+            let html = `<div class="field"><div class="field-label">Type</div><div class="field-value">${{typeLabel}}</div></div>`;
 
             const meta = node.nodeData.metadata;
             for (const [key, value] of Object.entries(meta)) {{
@@ -2590,6 +2667,28 @@ async def ui_topology():
 
         function closeDetails() {{
             document.getElementById('node-details').classList.remove('visible');
+        }}
+
+        function filterNodesBySearch(query) {{
+            var clearBtn = document.getElementById('topo-search-clear');
+            clearBtn.style.display = query ? 'block' : 'none';
+            if (!network) return;
+            var q = query.toLowerCase().trim();
+            var updates = allNodes.map(function(n) {{
+                if (!q || n.label.toLowerCase().indexOf(q) >= 0) {{
+                    return {{ id: n.id, opacity: 1.0 }};
+                }} else {{
+                    return {{ id: n.id, opacity: 0.15 }};
+                }}
+            }});
+            network.body.data.nodes.update(updates);
+        }}
+
+        function clearNodeSearch() {{
+            var input = document.getElementById('topo-search');
+            input.value = '';
+            filterNodesBySearch('');
+            input.focus();
         }}
 
         function applyTopologyFilters() {{
@@ -2684,6 +2783,7 @@ async def ui_topology():
         document.getElementById('btn-run-inference').addEventListener('click', async function() {{
             var btn = this;
             btn.disabled = true;
+            btn.classList.add('sb-btn-loading');
             _inferStart = Date.now();
             if (_inferTimer) clearInterval(_inferTimer);
             _inferTimer = setInterval(function() {{
@@ -2702,10 +2802,12 @@ async def ui_topology():
                     if (data.from_candidates) msg += ' (' + data.from_candidates + ' from candidates)';
                     if (data.candidates_unmatched) msg += ', ' + data.candidates_unmatched + ' unmatched';
                     showToast(msg, data.pipes_created > 0 ? 'success' : 'warning');
+                    btn.classList.remove('sb-btn-loading');
                     btn.textContent = 'Inferred (' + elapsed + 's)';
                     btn.disabled = false;
                     setTimeout(() => location.reload(), 1200);
                 }} else {{
+                    btn.classList.remove('sb-btn-loading');
                     showToast('Error: ' + (data.detail || 'Failed'), 'error');
                     btn.textContent = 'Failed (' + elapsed + 's)';
                     btn.disabled = false;
@@ -2714,6 +2816,7 @@ async def ui_topology():
                 clearInterval(_inferTimer);
                 _inferTimer = null;
                 var elapsed = Math.floor((Date.now() - _inferStart) / 1000);
+                btn.classList.remove('sb-btn-loading');
                 showToast('Error: ' + e.message, 'error');
                 btn.textContent = 'Failed (' + elapsed + 's)';
                 btn.disabled = false;
@@ -2723,6 +2826,7 @@ async def ui_topology():
         document.getElementById('btn-export-dcl').addEventListener('click', async function() {{
             const btn = this;
             btn.disabled = true;
+            btn.classList.add('sb-btn-loading');
             btn.textContent = 'Exporting...';
             try {{
                 const res = await fetch('/api/export/dcl/push', {{
@@ -2759,6 +2863,7 @@ async def ui_topology():
             }} catch (e) {{
                 showToast('Export failed: ' + e.message, 'error');
             }} finally {{
+                btn.classList.remove('sb-btn-loading');
                 btn.disabled = false;
                 btn.textContent = 'Export to DCL';
             }}
@@ -2826,9 +2931,9 @@ async def ui_topology():
                         const rows = _dpData.reduce((s, j) => s + (j.rows_transferred || 0), 0);
                         const elapsed = Math.floor((Date.now() - _dispatchStart) / 1000);
                         if (failed === 0) {{
-                            statusEl.innerHTML = '<span class="dispatch-pill completed">Done (' + rows + 'r) ' + elapsed + 's</span>';
+                            statusEl.innerHTML = '<span class="dispatch-pill completed">Done — ' + rows.toLocaleString() + ' rows in ' + elapsed + 's</span>';
                         }} else {{
-                            statusEl.innerHTML = '<span class="dispatch-pill failed">' + failed + ' failed (' + elapsed + 's)</span>';
+                            statusEl.innerHTML = '<span class="dispatch-pill failed">' + failed + ' failed in ' + elapsed + 's</span>';
                         }}
                     }}
                 }}
@@ -2843,6 +2948,7 @@ async def ui_topology():
             const btn = document.getElementById('btn-dispatch-all');
             const statusEl = document.getElementById('dispatch-all-status');
             btn.disabled = true;
+            btn.classList.add('sb-btn-loading');
             btn.textContent = 'Dispatching...';
             statusEl.style.display = 'inline-block';
             statusEl.innerHTML = '<span class="dispatch-pill queued">Queued</span>';
@@ -2854,6 +2960,7 @@ async def ui_topology():
 
                 if (pipeIds.length === 0) {{
                     showToast('No pipes to dispatch', 'warning');
+                    btn.classList.remove('sb-btn-loading');
                     btn.disabled = false;
                     btn.textContent = 'Dispatch Runner';
                     statusEl.style.display = 'none';
@@ -2880,12 +2987,14 @@ async def ui_topology():
                 }} else {{
                     statusEl.innerHTML = '<span class="dispatch-pill failed">Failed</span>';
                     showToast('Dispatch failed: ' + (data.detail || res.status), 'error');
+                    btn.classList.remove('sb-btn-loading');
                     btn.disabled = false;
                     btn.textContent = 'Dispatch Runner';
                 }}
             }} catch (e) {{
                 statusEl.innerHTML = '<span class="dispatch-pill failed">Error</span>';
                 showToast('Error: ' + e.message, 'error');
+                btn.classList.remove('sb-btn-loading');
                 btn.disabled = false;
                 btn.textContent = 'Dispatch Runner';
             }}
@@ -3240,15 +3349,33 @@ async def ui_topology():
         function renderPipelineLog(steps) {{
             var section = document.getElementById('pipeline-log-section');
             var container = document.getElementById('pipeline-log');
+            var countEl = document.getElementById('pipeline-log-count');
             if (!steps || steps.length === 0) {{
                 section.style.display = 'none';
                 return;
             }}
             section.style.display = 'block';
+            countEl.textContent = '(' + steps.length + ')';
             container.innerHTML = steps.map(function(s) {{
                 var icon = s.ok ? '<span style="color:#4ade80;">&#10003;</span>' : '<span style="color:#f87171;">&#10007;</span>';
                 return '<div style="display:flex;align-items:center;gap:6px;">' + icon + ' <span style="color:var(--slate-300,#cbd5e1);">' + s.text + '</span></div>';
             }}).join('');
+            // Restore accordion state
+            var wasOpen = localStorage.getItem('aam_pipeline_log_open') === '1';
+            var hdr = document.getElementById('pipeline-log-toggle');
+            var body = document.getElementById('pipeline-log-body');
+            if (wasOpen) {{
+                hdr.classList.add('open');
+                body.classList.add('open');
+            }}
+        }}
+
+        function togglePipelineLog() {{
+            var hdr = document.getElementById('pipeline-log-toggle');
+            var body = document.getElementById('pipeline-log-body');
+            var isOpen = hdr.classList.toggle('open');
+            body.classList.toggle('open');
+            localStorage.setItem('aam_pipeline_log_open', isOpen ? '1' : '0');
         }}
 
         // Restore pipeline log from previous run
