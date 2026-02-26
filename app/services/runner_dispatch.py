@@ -441,7 +441,7 @@ def dispatch_batch(
 
             # Idempotency guard: skip if a job for this pipe is already active
             existing_job = get_runner_job(canonical_pid)
-            if existing_job and existing_job.get("status") in ("queued", "dispatched", "running", "completed"):
+            if existing_job and existing_job.get("status") in ("queued", "dispatched", "running"):
                 _log.warning(
                     "Pipe %s already has an active job (status=%s) — skipping to prevent double dispatch",
                     canonical_pid, existing_job["status"],
