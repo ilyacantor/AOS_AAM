@@ -32,11 +32,8 @@ def _get_handoff_summary(aod_run_id: str, candidates: list[dict]) -> Optional[di
     fabric_planes = sb.select("fabric_planes", filters={"aod_run_id": aod_run_id})
     fabric_planes_stored = len(fabric_planes)
 
-    sor_categories = SOR_CATEGORIES
-    sors_stored = sum(
-        1 for c in candidates
-        if (c.get("category") or "").lower() in sor_categories
-    )
+    from .stats import _is_aod_sor
+    sors_stored = sum(1 for c in candidates if _is_aod_sor(c))
 
     fabrics_by_type: dict[str, int] = defaultdict(int)
     plane_id_to_type = {fp["plane_id"]: fp["plane_type"] for fp in fabric_planes}

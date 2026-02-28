@@ -152,11 +152,8 @@ def get_topology_data() -> dict:
     drift_rows = sb.select("drift_events", raw_params={"status": "eq.open"}, limit=500)
     pipes_with_drift = set(row["pipe_id"] for row in drift_rows)
 
-    from ..constants import SOR_CATEGORIES
-    sors_count = sum(
-        1 for c in candidates
-        if (c.get("category") or "").lower() in SOR_CATEGORIES
-    )
+    from .stats import _is_aod_sor
+    sors_count = sum(1 for c in candidates if _is_aod_sor(c))
 
     nodes_by_type: dict[str, int] = {}
     for n in nodes:

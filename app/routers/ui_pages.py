@@ -779,7 +779,7 @@ async def ui_candidates_list(
     """Candidates Screen"""
     all_candidates = list_candidates(limit=200)
 
-    from ..constants import SOR_CATEGORIES as sor_categories
+    from ..db.stats import _is_aod_sor
 
     # Resolve a candidate's fabric plane TYPE from its linkage or routing hint
     _plane_view_map = {
@@ -798,12 +798,12 @@ async def ui_candidates_list(
     if view == "all":
         candidates = all_candidates
     elif view == "sors":
-        candidates = [c for c in all_candidates if c.get("category", "").lower() in sor_categories]
+        candidates = [c for c in all_candidates if _is_aod_sor(c)]
     elif view == "fabrics":
         candidates = [c for c in all_candidates if _plane_type(c) is not None]
     elif view == "sors_fabrics":
         candidates = [c for c in all_candidates
-                      if c.get("category", "").lower() in sor_categories or _plane_type(c) is not None]
+                      if _is_aod_sor(c) or _plane_type(c) is not None]
     elif view in _plane_view_map:
         target = _plane_view_map[view]
         candidates = [c for c in all_candidates if _plane_type(c) == target]

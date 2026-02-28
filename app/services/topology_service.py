@@ -7,7 +7,7 @@ take precedence over candidate-derived SOR classifications.
 from datetime import datetime
 
 from ..logger import get_logger
-from ..constants import SOR_CATEGORIES
+from ..db.stats import _is_aod_sor
 from ..db import list_pipes, list_candidates, get_canonical_stats
 from ..db.fabric_planes import get_fabric_planes
 from ..db.sor_declarations import get_sor_declarations
@@ -152,7 +152,7 @@ def build_topology_summary() -> dict:
         if "is_candidate" not in sor_systems[key]:
             sor_systems[key]["is_candidate"] = True
         category = c.get("category", "").lower()
-        if category in SOR_CATEGORIES:
+        if _is_aod_sor(c):
             sor_systems[key]["is_sor"] = True
             if not sor_systems[key].get("category"):
                 sor_systems[key]["category"] = category
