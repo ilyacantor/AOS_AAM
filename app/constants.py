@@ -4,11 +4,11 @@ AAM Shared Constants.
 Single source of truth for category sets and mappings used
 across handoff, topology, and reconciliation logic.
 
-DESIGN RULE (RACI v4): AAM owns Fabric Plane Inference (A/R).
-AOD provides evidence leads (hints). AAM uses vendor identity,
-display name hints, evidence leads, and endpoint signal analysis
-to infer fabric plane. Application categories alone are not
-sufficient, but combined with evidence they inform inference.
+DESIGN RULE (RACI v6): AOD identifies fabric planes (A/R for Fabric Plane Identification).
+AAM owns Fabric Plane Connection (A/R) — validates and connects to planes detected by AOD.
+AOD provides plane type, vendor, and evidence tier. AAM uses these to establish
+connectivity (pipe blueprints, work orders). Application categories alone are not
+sufficient, but combined with AOD's detection evidence they inform connection strategy.
 """
 
 # SOR (System of Record) categories recognized by AAM

@@ -52,6 +52,7 @@ class DCLConnectionSchema(BaseModel):
     vendor: str
     category: str
     governance_status: Optional[str] = None
+    sor_tagging: Optional[str] = None                 # AOD's SOR tagging (JSON string or label)
     fields: List[str] = []
     entity_scope: Optional[str] = None                # From pipe inference
     identity_keys: Optional[List[str]] = None           # From pipe inference
@@ -373,6 +374,7 @@ def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
                 vendor=candidate.get("vendor_name", "Unknown"),
                 category=_normalize_export_category(candidate.get("category"), candidate.get("vendor_name")),
                 governance_status=candidate.get("governance_status"),
+                sor_tagging=candidate.get("sor_tagging"),
                 fields=resolved_fields,
                 entity_scope=pipe_meta.get("entity_scope"),
                 identity_keys=pipe_meta.get("identity_keys") or [],
