@@ -52,7 +52,7 @@ class DCLConnectionSchema(BaseModel):
     vendor: str
     category: str
     governance_status: Optional[str] = None
-    sor_tagging: Optional[str] = None                 # AOD's SOR tagging (JSON string or label)
+    sor_tagging: Optional[str] = None                 # AOD SOR determination (JSON string)
     fields: List[str] = []
     entity_scope: Optional[str] = None                # From pipe inference
     identity_keys: Optional[List[str]] = None           # From pipe inference
@@ -87,6 +87,20 @@ class SkippedConnection(BaseModel):
     discovered_at: Optional[str] = None
 
 
+class SORDeclarationExport(BaseModel):
+    """AOD-authoritative SOR declaration, passed through to DCL.
+
+    Per RACI v6 rows 166-167, AOD owns SOR identification.
+    AAM stores these at handoff and forwards them here so DCL
+    uses AOD's authority — not ad-hoc vendor counting.
+    """
+    domain: str = ""
+    vendor: str = ""
+    category: str = ""
+    confidence: str = "high"
+    source: str = "farm"
+
+
 class DCLExportResponse(BaseModel):
     """Response for DCL export endpoint"""
     aod_run_id: Optional[str] = None
@@ -97,6 +111,7 @@ class DCLExportResponse(BaseModel):
     skipped_connections: List[SkippedConnection] = []  # Candidates without matched_pipe_id
     skipped_count: int = 0
     source: str = "aam"
+    systems_of_record: List[SORDeclarationExport] = []  # AOD-authoritative SORs
 
 
 # ---------------------------------------------------------------------------
@@ -374,7 +389,7 @@ def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
                 vendor=candidate.get("vendor_name", "Unknown"),
                 category=_normalize_export_category(candidate.get("category"), candidate.get("vendor_name")),
                 governance_status=candidate.get("governance_status"),
-                sor_tagging=candidate.get("sor_tagging"),
+                sor_tagging=candidate.get("sor_tagging"),  # AOD SOR determination (JSON string)
                 fields=resolved_fields,
                 entity_scope=pipe_meta.get("entity_scope"),
                 identity_keys=pipe_meta.get("identity_keys") or [],
@@ -405,6 +420,35 @@ def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
             total_connections, len(skipped),
         )
 
+    # --- Fetch AOD-authoritative SOR declarations for this run ---
+    # Per RACI v6 rows 166-167, AOD owns SOR identification.
+    # AAM stores these at handoff; now we forward them to DCL.
+    sor_summaries: List[SORDeclarationExport] = []
+    if aod_run_id:
+        try:
+            from .db.sor_declarations import get_sor_declarations
+            sor_decls = get_sor_declarations(aod_run_id=aod_run_id)
+            sor_summaries = [
+                SORDeclarationExport(
+                    domain=s.get("domain", ""),
+                    vendor=s.get("vendor", ""),
+                    category=s.get("category", ""),
+                    confidence=s.get("confidence", "high"),
+                    source=s.get("source", "farm"),
+                )
+                for s in sor_decls
+            ]
+            _log.info(
+                "DCL export: %d AOD-authoritative SORs for run %s: %s",
+                len(sor_summaries), aod_run_id,
+                [s.vendor for s in sor_summaries],
+            )
+        except Exception as e:
+            _log.error(
+                "DCL export: failed to fetch SOR declarations for run %s: %s",
+                aod_run_id, e,
+            )
+
     return DCLExportResponse(
         aod_run_id=aod_run_id,
         snapshot_name=snapshot_name,
@@ -414,4 +458,5 @@ def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
         skipped_connections=skipped,
         skipped_count=len(skipped),
         source="aam",
+        systems_of_record=sor_summaries,
     )

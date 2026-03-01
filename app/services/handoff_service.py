@@ -91,6 +91,20 @@ def normalize_candidates(raw_candidates: list[dict]) -> list[dict]:
                 c["preferred_modality"] = None
         elif pm is not None:
             c["preferred_modality"] = None
+
+        # Normalize sor_tagging: AOD sends CandidateSORTagging as a Pydantic
+        # model (dict in JSON).  AAM stores it as a JSON *string* in a TEXT
+        # column.  Without this conversion the dict's Python repr is stored,
+        # which is not valid JSON and breaks downstream parsing in DCL.
+        st = c.get("sor_tagging")
+        if st is not None and isinstance(st, dict):
+            c["sor_tagging"] = json.dumps(st)
+        elif st is not None and not isinstance(st, str):
+            _log.warning(
+                "Unexpected sor_tagging type %s for %s, stripping to null",
+                type(st).__name__, c.get("asset_key", "?"),
+            )
+            c["sor_tagging"] = None
     return raw_candidates
 
 
