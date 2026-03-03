@@ -80,7 +80,8 @@ CREATE TABLE IF NOT EXISTS aod_handoff_log (
     handoff_timestamp TEXT NOT NULL,
     processed_at TEXT NOT NULL,
     aod_fabric_planes TEXT,
-    aod_sor_vendors TEXT
+    aod_sor_vendors TEXT,
+    reconciliation_manifest TEXT
 );
 
 CREATE TABLE IF NOT EXISTS aod_payload_cache (

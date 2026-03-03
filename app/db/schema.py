@@ -66,6 +66,8 @@ def _run_migrations():
             ")",
             "create_dcl_export_attempts_table",
         ),
+        # Migration 2026-03-03: Store AOD reconciliation manifest in handoff log
+        ("ALTER TABLE aod_handoff_log ADD COLUMN IF NOT EXISTS reconciliation_manifest TEXT", "add_reconciliation_manifest_column"),
     ]
 
     for sql_stmt, migration_name in migrations:
