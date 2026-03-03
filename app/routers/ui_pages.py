@@ -3230,7 +3230,7 @@ async def ui_topology():
                     }} else if (j.dcl_response) {{
                         let dclP = j.dcl_response;
                         if (typeof dclP === 'string') {{ try {{ dclP = JSON.parse(dclP); }} catch(e) {{ dclP = null; }} }}
-                        if (dclP && dclP.status && dclP.status !== 'ingested') {{
+                        if (dclP && dclP.status && dclP.status !== 'ingested' && !(dclP.status_code && dclP.status_code < 300 && !dclP.error_type)) {{
                             errText = 'DCL rejected: ' + (dclP.status || dclP.error || 'unknown');
                         }} else {{
                             errText = 'Farm extraction failed';
@@ -3253,7 +3253,7 @@ async def ui_topology():
                 if (dcl) {{
                     let parsed = dcl;
                     if (typeof dcl === 'string') {{ try {{ parsed = JSON.parse(dcl); }} catch(e) {{ parsed = null; }} }}
-                    if (parsed && parsed.status === 'ingested') {{
+                    if (parsed && (parsed.status === 'ingested' || (parsed.status_code && parsed.status_code < 300 && !parsed.error_type))) {{
                         const code = parsed.dcl_status_code || 200;
                         dclHtml = '<span style="color:#4ade80;font-weight:600;" title="DCL accepted (' + code + ')">' + code + ' ok</span>';
                     }} else if (parsed) {{

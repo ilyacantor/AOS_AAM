@@ -251,9 +251,11 @@ async def dispatch_multiple(req: RunnerBatchDispatchRequest):
                     result_dict["status"] = "completed"
                     rows = pr.get("rows_accepted") or pr.get("rows_pushed") or 0
                     dcl_resp = {
+                        "status": "ingested",
                         "status_code": pr.get("status_code"),
                         "rows_accepted": pr.get("rows_accepted"),
                         "dcl_run_id": pr.get("dcl_run_id"),
+                        "error_type": pr.get("error_type"),
                         "schema_drift": pr.get("schema_drift", False),
                     }
                     if current_status not in _terminal:
