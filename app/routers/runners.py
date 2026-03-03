@@ -368,9 +368,13 @@ async def cancel_all_queued():
 
 
 @router.get("/progress")
-async def runner_progress():
-    """Live progress monitor for batch dispatch — shows counts by status."""
-    return get_runner_progress()
+async def runner_progress(aod_run_id: Optional[str] = Query(None, description="Scope progress to a specific AOD run")):
+    """Live progress monitor for batch dispatch — shows counts by status.
+
+    When *aod_run_id* is provided, only jobs from that run are counted.
+    Without it, ALL jobs across ALL runs are aggregated (legacy behavior).
+    """
+    return get_runner_progress(aod_run_id=aod_run_id)
 
 
 @router.get("/jobs")

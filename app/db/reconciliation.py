@@ -645,6 +645,27 @@ def get_aod_reconciliation(aod_run_id: str) -> dict:
         + pipe_schema_issues
     )
 
+    # ── Intake reconciliation from AOD's manifest ──
+    raw_manifest = handoff_row.get("reconciliation_manifest")
+    manifest = {}
+    if raw_manifest:
+        import json as _json
+        manifest = _json.loads(raw_manifest) if isinstance(raw_manifest, str) else raw_manifest
+
+    candidates_received = handoff_row.get("candidates_received", 0)
+    aod_universe = manifest.get("aod_candidate_universe", candidates_received)
+    excluded_count = manifest.get("candidates_excluded", 0)
+    intake_recon = {
+        "aod_candidate_universe": aod_universe,
+        "aam_candidates_received": candidates_received,
+        "aam_candidates_accepted": handoff_row.get("candidates_accepted"),
+        "farm_sor_candidates_added": manifest.get("farm_sor_candidates_added", 0),
+        "candidates_excluded_by_aod": excluded_count,
+        "excluded_detail": manifest.get("excluded_detail", []),
+        "status_filter_used": manifest.get("status_filter_used"),
+        "gap_explained": (aod_universe - candidates_received) == excluded_count if aod_universe and excluded_count else None,
+    }
+
     return {
         "aod_run_id": aod_run_id,
         "snapshot_name": summary["snapshot_name"],
@@ -653,6 +674,7 @@ def get_aod_reconciliation(aod_run_id: str) -> dict:
             "candidates": handoff_row.get("candidates_received"),
             "candidates_accepted": handoff_row.get("candidates_accepted"),
         },
+        "intake_reconciliation": intake_recon,
         "aam_stored": {
             "candidates": candidates_stored,
             "aod_origin_candidates": aod_origin_stored,

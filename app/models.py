@@ -205,6 +205,7 @@ class AODHandoffRequest(BaseModel):
     sors: list[SORDeclaration] = Field(default_factory=list, description="Authoritative SOR declarations from Farm")
     policy_version: Optional[str] = Field(None, description="Version of governance policy applied")
     handoff_timestamp: datetime = Field(default_factory=datetime.utcnow)
+    reconciliation_manifest: Optional[dict] = Field(None, description="AOD's candidate universe reconciliation: exported vs excluded with reasons")
 
 
 class AODHandoffResponse(BaseModel):

@@ -3187,6 +3187,13 @@ async def ui_topology():
             document.getElementById('dp-queued').textContent = counts.queued;
             const hasActive = counts.queued > 0 || counts.running > 0 || counts.pushing > 0;
             document.getElementById('btn-stop-all').style.display = hasActive ? 'block' : 'none';
+            // Show which run the results are scoped to
+            const ctxEl = document.getElementById('dp-run-context');
+            if (_dpRunId) {{
+                ctxEl.textContent = 'Showing jobs for run ' + _dpRunId.substring(0, 20) + '\u2026';
+            }} else {{
+                ctxEl.textContent = 'Showing all jobs (no run filter)';
+            }}
         }}
 
         function _escHtml(s) {{
@@ -3422,6 +3429,7 @@ async def ui_topology():
                 <button class="dp-close" onclick="closeDispatchPanel()" data-testid="btn-close-dispatch">&times;</button>
             </div>
             <div id="dcl-dispatch-banner" data-testid="dcl-dispatch-banner" style="padding:8px 12px;margin:0 0 8px;border-radius:6px;font-size:0.82rem;display:none;background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.2);"></div>
+            <div id="dp-run-context" style="padding:4px 12px;margin:0 0 6px;font-size:0.78rem;color:var(--slate-500);"></div>
             <div class="dp-summary">
                 <div class="dp-stat total dp-active" onclick="setDpFilter('all',this)" data-tooltip="All jobs in this dispatch cycle, regardless of status. Click to show all." data-testid="dp-filter-all"><span class="dp-val" id="dp-total">-</span><span class="dp-lbl">Total</span></div>
                 <div class="dp-stat dispatched" onclick="setDpFilter('dispatched',this)" data-tooltip="Manifest sent to Farm, waiting for Farm to start extracting data. Farm has the instructions but hasn't begun yet." data-testid="dp-filter-dispatched"><span class="dp-val" id="dp-dispatched">-</span><span class="dp-lbl">Dispatched</span></div>

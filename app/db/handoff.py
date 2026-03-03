@@ -27,6 +27,7 @@ def create_handoff_log(handoff_data: dict) -> dict:
         "processed_at": now,
         "aod_fabric_planes": json.dumps(handoff_data.get("aod_fabric_planes", [])),
         "aod_sor_vendors": json.dumps(handoff_data.get("aod_sor_vendors", [])),
+        "reconciliation_manifest": json.dumps(handoff_data.get("reconciliation_manifest")) if handoff_data.get("reconciliation_manifest") else None,
     }
 
     sb.insert("aod_handoff_log", data)

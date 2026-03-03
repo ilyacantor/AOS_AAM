@@ -129,20 +129,32 @@ def get_runner_job(job_id: str) -> Optional[dict]:
     return row
 
 
-def get_runner_progress() -> dict:
-    """Get aggregate progress counts for all runner jobs.
-    Returns counts by status, plus timing info for the current batch."""
+def get_runner_progress(aod_run_id: str = None) -> dict:
+    """Get aggregate progress counts for runner jobs, optionally scoped to a run.
+
+    When *aod_run_id* is provided, only jobs linked to that AOD discovery run
+    are counted — preventing stale data from previous dispatches from inflating
+    the summary.
+    """
     from psycopg2 import sql as psql
     from . import supabase_client as sb2
 
-    query = psql.SQL(
-        "SELECT status, COUNT(*) as cnt, "
-        "MIN(dispatched_at) as earliest, MAX(completed_at) as latest, "
-        "SUM(COALESCE(rows_transferred, 0)) as total_rows "
-        "FROM {} GROUP BY status ORDER BY status"
-    ).format(sb2._ident("runner_jobs"))
-
-    rows = sb2._execute_composed(query)
+    if aod_run_id:
+        query = psql.SQL(
+            "SELECT status, COUNT(*) as cnt, "
+            "MIN(dispatched_at) as earliest, MAX(completed_at) as latest, "
+            "SUM(COALESCE(rows_transferred, 0)) as total_rows "
+            "FROM {} WHERE aod_run_id = %s GROUP BY status ORDER BY status"
+        ).format(sb2._ident("runner_jobs"))
+        rows = sb2._execute_composed(query, [aod_run_id])
+    else:
+        query = psql.SQL(
+            "SELECT status, COUNT(*) as cnt, "
+            "MIN(dispatched_at) as earliest, MAX(completed_at) as latest, "
+            "SUM(COALESCE(rows_transferred, 0)) as total_rows "
+            "FROM {} GROUP BY status ORDER BY status"
+        ).format(sb2._ident("runner_jobs"))
+        rows = sb2._execute_composed(query)
 
     by_status = {}
     total = 0

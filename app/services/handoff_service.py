@@ -528,6 +528,7 @@ def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
         "handoff_timestamp": request.handoff_timestamp.isoformat() if request.handoff_timestamp else None,
         "aod_fabric_planes": aod_fabric_planes_data,
         "aod_sor_vendors": aod_sor_vendors,
+        "reconciliation_manifest": request.reconciliation_manifest,
     })
 
     return AODHandoffResponse(
