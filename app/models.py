@@ -65,6 +65,7 @@ class TeeRequestStatus(str, Enum):
     VERIFIED = "verified"
 
 
+# CONTRACT: must match AOD AODActionType enum in aod/src/aod/models/output_contracts.py
 class AODActionType(str, Enum):
     """Action type from AOD governance decision"""
     INVENTORY_ONLY = "inventory_only"  # Human review required - blocking findings exist
