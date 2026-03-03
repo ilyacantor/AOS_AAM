@@ -295,35 +295,52 @@ async def dispatch_multiple(req: RunnerBatchDispatchRequest):
                 len(farm_tasks), farm_resp.get("elapsed_seconds"),
             )
         else:
-            # Batch failed — fall back to individual dispatch.
-            # WARNING: if the failure was a timeout, Farm may still be processing
-            # the original batch. Individual POSTs will create DUPLICATE work
-            # (57 + 57 = 114 manifests in flight against DCL).
+            # Batch failed — determine if timeout or explicit rejection.
             batch_status = batch_result.get("status", "unknown")
             is_timeout = "unreachable" in batch_status or "timeout" in batch_result.get("error", "").lower()
+
             if is_timeout:
+                # TIMEOUT: Farm may still be processing the original batch.
+                # DO NOT re-dispatch — that creates guaranteed duplicates.
+                # Mark all jobs as "dispatched" (batch in-flight) and let
+                # Farm's callback path update to terminal status on completion.
                 _log.error(
-                    "[BATCH_TIMEOUT_FALLBACK] Batch POST timed out (status=%s). "
-                    "Farm may still be processing the original batch — falling back "
-                    "to %d individual POSTs risks double-dispatch. error=%s",
+                    "[BATCH_TIMEOUT] Batch POST timed out (status=%s). "
+                    "Farm may still be processing — NOT falling back to "
+                    "individual dispatch (%d manifests). Marking as dispatched "
+                    "and relying on Farm callbacks. error=%s",
                     batch_status, len(farm_tasks),
                     batch_result.get("error", "")[:300],
                 )
+                for result_dict, manifest_obj, _ in farm_tasks:
+                    pid = manifest_obj.source.pipe_id
+                    result_dict["status"] = "dispatched"
+                    result_dict["farm_response"] = {
+                        "note": "batch_timeout_no_fallback",
+                        "batch_status": batch_status,
+                    }
+                    current_job = get_runner_job(pid)
+                    current_status = current_job.get("status") if current_job else None
+                    if current_status not in ("completed", "failed", "timed_out"):
+                        update_runner_status(pid, "dispatched")
             else:
+                # NON-TIMEOUT failure (Farm explicitly rejected the batch
+                # with 4xx/5xx). Safe to fall back to individual dispatch
+                # because Farm definitively did NOT process those manifests.
                 _log.warning(
-                    "[BATCH_FALLBACK] Batch dispatch failed (status=%s), "
+                    "[BATCH_FALLBACK] Batch dispatch rejected (status=%s), "
                     "falling back to %d individual POSTs: %s",
                     batch_status, len(farm_tasks),
                     batch_result.get("error", "")[:200],
                 )
-            _FARM_CONCURRENCY = 10
-            sem = asyncio.Semaphore(_FARM_CONCURRENCY)
+                _FARM_CONCURRENCY = 10
+                sem = asyncio.Semaphore(_FARM_CONCURRENCY)
 
-            async def _throttled(result_dict: dict, manifest_obj, payload_dict: dict):
-                async with sem:
-                    await _dispatch_one(result_dict, manifest_obj, payload_dict)
+                async def _throttled(result_dict: dict, manifest_obj, payload_dict: dict):
+                    async with sem:
+                        await _dispatch_one(result_dict, manifest_obj, payload_dict)
 
-            await asyncio.gather(*[_throttled(r, m, p) for r, m, p in farm_tasks])
+                await asyncio.gather(*[_throttled(r, m, p) for r, m, p in farm_tasks])
 
     errors = [r for r in results if r.get("status") in ("error", "farm_error", "farm_unreachable", "failed")]
     sent_to_farm = [r for r in results if r.get("status") in ("dispatched", "completed", "running")]
