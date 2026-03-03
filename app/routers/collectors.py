@@ -125,9 +125,11 @@ async def infer_pipes():
         vendor_lower = vendor.lower()
 
         # Governance check (pure computation)
+        # Only explicit "provision" permits auto-connect. Any unknown or
+        # unexpected action_type blocks — fail-safe against contract drift.
         execution_allowed = candidate.get("execution_allowed", True)
         action_type = candidate.get("action_type", "provision")
-        if not execution_allowed or action_type == "inventory_only":
+        if not execution_allowed or action_type != "provision":
             match_failures.append({"candidate_id": cid, "reason": "Blocked by AOD governance"})
             continue
 

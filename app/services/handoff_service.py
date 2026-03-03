@@ -92,6 +92,32 @@ def normalize_candidates(raw_candidates: list[dict]) -> list[dict]:
         elif pm is not None:
             c["preferred_modality"] = None
 
+        # Normalize action_type: only "provision" and "inventory_only" are valid.
+        # Unknown values default to "inventory_only" (fail-safe: block auto-provisioning)
+        # so that unexpected values never silently auto-connect systems.
+        _valid_action_types = {"provision", "inventory_only"}
+        at = c.get("action_type")
+        if at and isinstance(at, str):
+            at_lower = at.lower().strip()
+            if at_lower not in _valid_action_types:
+                _log.warning(
+                    "CONTRACT VIOLATION: Unknown action_type '%s' from AOD for candidate "
+                    "asset_key=%s vendor=%s (aod_asset_id=%s). "
+                    "Valid values are 'provision' and 'inventory_only'. "
+                    "Defaulting to 'inventory_only' to prevent unreviewed auto-provisioning.",
+                    at, c.get("asset_key", "?"), c.get("vendor_name", "?"),
+                    c.get("aod_asset_id", "?"),
+                )
+                at_lower = "inventory_only"
+            c["action_type"] = at_lower
+        elif at is not None:
+            _log.warning(
+                "CONTRACT VIOLATION: Non-string action_type %r (type=%s) from AOD for "
+                "candidate asset_key=%s. Defaulting to 'inventory_only'.",
+                at, type(at).__name__, c.get("asset_key", "?"),
+            )
+            c["action_type"] = "inventory_only"
+
         # Normalize sor_tagging: AOD sends CandidateSORTagging as a Pydantic
         # model (dict in JSON).  AAM stores it as a JSON *string* in a TEXT
         # column.  Without this conversion the dict's Python repr is stored,
