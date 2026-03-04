@@ -224,7 +224,7 @@ async def dispatch_multiple(req: RunnerBatchDispatchRequest):
         batch_result = await dispatch_to_farm_batch(
             manifests=[m.model_dump() for m in all_manifests],
             batch_id=batch_id,
-            concurrency=5,
+            concurrency=10,
             payloads=all_payloads,
         )
 
