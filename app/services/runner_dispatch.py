@@ -19,7 +19,7 @@ from ..db import (
     list_candidates,
     list_pipes,
 )
-from ..db.runner_jobs import create_runner_job, create_runner_jobs_batch, update_runner_status, list_runner_jobs, get_runner_job
+from ..db.runner_jobs import create_runner_job, create_runner_jobs_batch, update_runner_status, list_runner_jobs, get_runner_job, get_runner_jobs_batch
 from ..models import (
     JobManifest,
     SourceSpec,
@@ -398,6 +398,16 @@ def dispatch_batch(
     # to avoid wasted build_manifest() calls.
     seen_pipe_ids: set[str] = set()
 
+    # Pre-fetch existing job statuses in ONE batch query (~75ms total)
+    # instead of N serial get_runner_job() calls (~75ms each = ~4-5s at 57 pipes).
+    # This also enables pre-filtering completed pipes so Farm never sees them.
+    _candidate_canonical_pids: list[str] = []
+    for pid in pipe_ids:
+        pipe = pipe_map.get(pid)
+        if pipe and pipe.get("category") and pipe.get("matched_pipe_id"):
+            _candidate_canonical_pids.append(pipe["matched_pipe_id"])
+    existing_jobs_map = get_runner_jobs_batch(_candidate_canonical_pids) if _candidate_canonical_pids else {}
+
     for pid in pipe_ids:
         try:
             pipe = pipe_map.get(pid)
@@ -439,17 +449,21 @@ def dispatch_batch(
                 continue
             seen_pipe_ids.add(canonical_pid)
 
-            # Idempotency guard: skip if a job for this pipe is already active
-            existing_job = get_runner_job(canonical_pid)
-            if existing_job and existing_job.get("status") in ("queued", "dispatched", "running"):
-                _log.warning(
-                    "Pipe %s already has an active job (status=%s) — skipping to prevent double dispatch",
+            # Idempotency guard: skip if a job for this pipe is already active or completed.
+            # Uses batch-fetched map instead of per-pipe DB roundtrip.
+            # Adding "completed" prevents re-dispatching pipes that Farm already processed —
+            # in the failed run, 62/89 manifests were wasted idempotency hits on Farm.
+            existing_job = existing_jobs_map.get(canonical_pid)
+            _skip_statuses = ("queued", "dispatched", "running", "completed")
+            if existing_job and existing_job.get("status") in _skip_statuses:
+                _log.info(
+                    "Pipe %s already has job (status=%s) — skipping",
                     canonical_pid, existing_job["status"],
                 )
                 errors.append({
                     "pipe_id": pid,
                     "status": "skipped",
-                    "error": f"Job already {existing_job['status']} — cancel first or wait for completion",
+                    "error": f"Job already {existing_job['status']}",
                 })
                 continue
 
