@@ -19,7 +19,7 @@ from ..db import (
     list_candidates,
     list_pipes,
 )
-from ..db.runner_jobs import create_runner_job, create_runner_jobs_batch, update_runner_status, list_runner_jobs, get_runner_job, get_runner_jobs_batch
+from ..db.runner_jobs import create_runner_job, create_runner_jobs_batch, update_runner_status, list_runner_jobs, get_runner_job
 from ..models import (
     JobManifest,
     SourceSpec,
@@ -398,16 +398,6 @@ def dispatch_batch(
     # to avoid wasted build_manifest() calls.
     seen_pipe_ids: set[str] = set()
 
-    # Pre-collect canonical pipe_ids for batch idempotency check.
-    # This replaces N serial get_runner_job() calls with 1 batch query
-    # (~75ms total vs ~4-5s at 57 × 75ms/roundtrip to Supabase PG).
-    _candidate_canonical_pids: list[str] = []
-    for pid in pipe_ids:
-        pipe = pipe_map.get(pid)
-        if pipe and pipe.get("category") and pipe.get("matched_pipe_id"):
-            _candidate_canonical_pids.append(pipe["matched_pipe_id"])
-    existing_jobs_map = get_runner_jobs_batch(_candidate_canonical_pids) if _candidate_canonical_pids else {}
-
     for pid in pipe_ids:
         try:
             pipe = pipe_map.get(pid)
@@ -450,8 +440,7 @@ def dispatch_batch(
             seen_pipe_ids.add(canonical_pid)
 
             # Idempotency guard: skip if a job for this pipe is already active
-            # Uses batch-fetched map instead of per-pipe DB roundtrip
-            existing_job = existing_jobs_map.get(canonical_pid)
+            existing_job = get_runner_job(canonical_pid)
             if existing_job and existing_job.get("status") in ("queued", "dispatched", "running"):
                 _log.warning(
                     "Pipe %s already has an active job (status=%s) — skipping to prevent double dispatch",

@@ -20,7 +20,6 @@ from ..models import (
 from ..services.runner_dispatch import dispatch_pipe, dispatch_batch, dispatch_to_farm, dispatch_to_farm_batch, notify_dcl_dispatch
 from ..db.runner_jobs import (
     get_runner_job,
-    get_runner_jobs_batch,
     get_runner_progress,
     list_runner_jobs,
     update_runner_status,
@@ -229,13 +228,6 @@ async def dispatch_multiple(req: RunnerBatchDispatchRequest):
             payloads=all_payloads,
         )
 
-        # Batch-fetch current job statuses for all pipes in one query.
-        # Replaces N serial get_runner_job() calls (~75ms each to Supabase PG)
-        # with one WHERE job_id = ANY(%s) query (~75ms total for all pipes).
-        _all_task_pids = [m.source.pipe_id for _, m, _ in farm_tasks]
-        _current_jobs_map = get_runner_jobs_batch(_all_task_pids)
-        _terminal = ("completed", "failed", "timed_out")
-
         if batch_result.get("status") == "batch_dispatched":
             # Batch succeeded — update result dicts from Farm's batch response
             farm_resp = batch_result.get("farm_response", {})
@@ -250,8 +242,9 @@ async def dispatch_multiple(req: RunnerBatchDispatchRequest):
                 # Guard: Farm processes synchronously and fires callbacks
                 # before returning the batch response. Don't regress a
                 # terminal status that the callback already wrote.
-                current_job = _current_jobs_map.get(pid)
+                current_job = get_runner_job(pid)
                 current_status = current_job.get("status") if current_job else None
+                _terminal = ("completed", "failed", "timed_out")
 
                 if pr_status == "success":
                     # Farm already pushed data to DCL — job is DONE.
@@ -328,8 +321,9 @@ async def dispatch_multiple(req: RunnerBatchDispatchRequest):
                         "note": "batch_timeout_no_fallback",
                         "batch_status": batch_status,
                     }
-                    current_status = _current_jobs_map.get(pid, {}).get("status")
-                    if current_status not in _terminal:
+                    current_job = get_runner_job(pid)
+                    current_status = current_job.get("status") if current_job else None
+                    if current_status not in ("completed", "failed", "timed_out"):
                         update_runner_status(pid, "dispatched")
             else:
                 # NON-TIMEOUT failure (Farm explicitly rejected the batch

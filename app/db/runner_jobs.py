@@ -129,32 +129,6 @@ def get_runner_job(job_id: str) -> Optional[dict]:
     return row
 
 
-def get_runner_jobs_batch(job_ids: list[str]) -> dict[str, dict]:
-    """Bulk-fetch runner jobs by ID in a single query. Returns {job_id: job_dict}.
-
-    Replaces N serial get_runner_job() calls with one WHERE job_id = ANY(%s)
-    query. At ~75ms/roundtrip to Supabase PG, fetching 57 jobs serially costs
-    ~4-5s; this batch query costs ~75ms total.
-    """
-    if not job_ids:
-        return {}
-    from psycopg2 import sql as psql
-
-    query = psql.SQL("SELECT * FROM {} WHERE job_id = ANY(%s)").format(
-        sb._ident("runner_jobs")
-    )
-    rows = sb._execute_composed(query, (job_ids,))
-
-    result = {}
-    for row in rows:
-        if row.get("manifest") and isinstance(row["manifest"], str):
-            row["manifest"] = json.loads(row["manifest"])
-        if row.get("dcl_response") and isinstance(row["dcl_response"], str):
-            row["dcl_response"] = json.loads(row["dcl_response"])
-        result[row["job_id"]] = row
-    return result
-
-
 def get_runner_progress(aod_run_id: str = None) -> dict:
     """Get aggregate progress counts for runner jobs, optionally scoped to a run.
 
