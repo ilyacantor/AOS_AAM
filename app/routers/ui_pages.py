@@ -3418,6 +3418,8 @@ async def ui_topology():
 
         // Initialize
         loadTopology();
+        refreshSidebarRun();
+        setInterval(refreshSidebarRun, 10000);  // poll every 10s for external handoffs
         checkDispatchReady();
     </script>
 
