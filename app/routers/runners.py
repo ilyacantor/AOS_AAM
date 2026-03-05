@@ -137,6 +137,130 @@ async def dispatch_single(req: RunnerDispatchRequest):
         raise HTTPException(status_code=404, detail=str(exc))
 
 
+async def _background_batch_dispatch(
+    farm_tasks: list,
+    all_manifests: list,
+    all_payloads: list,
+    batch_id: str,
+) -> None:
+    """Background task: dispatch manifests to Farm and update job statuses.
+
+    Runs after the /dispatch-batch endpoint has already returned.
+    Farm callbacks are the primary status-update path; this function
+    is the secondary path that processes Farm's batch response inline.
+    On any error, jobs stay "dispatched" and Farm callbacks handle terminal updates.
+    """
+    try:
+        batch_result = await dispatch_to_farm_batch(
+            manifests=[m.model_dump() for m in all_manifests],
+            batch_id=batch_id,
+            concurrency=5,
+            payloads=all_payloads,
+        )
+
+        # Batch-fetch current job statuses for all pipes in one query.
+        _all_task_pids = [m.source.pipe_id for _, m, _ in farm_tasks]
+        _current_jobs_map = get_runner_jobs_batch(_all_task_pids)
+        _terminal = ("completed", "failed", "timed_out")
+
+        if batch_result.get("status") == "batch_dispatched":
+            # Batch succeeded — update job statuses from Farm's batch response
+            farm_resp = batch_result.get("farm_response", {})
+            push_results_list = farm_resp.get("push_results", [])
+            push_by_pipe = {pr.get("pipe_id"): pr for pr in push_results_list}
+
+            for _, manifest_obj, _ in farm_tasks:
+                pid = manifest_obj.source.pipe_id
+                pr = push_by_pipe.get(pid, {})
+                pr_status = pr.get("status", "unknown")
+
+                current_job = _current_jobs_map.get(pid)
+                current_status = current_job.get("status") if current_job else None
+
+                if pr_status == "success":
+                    rows = pr.get("rows_accepted") or pr.get("rows_pushed") or 0
+                    dcl_resp = {
+                        "status": "ingested",
+                        "status_code": pr.get("status_code"),
+                        "rows_accepted": pr.get("rows_accepted"),
+                        "dcl_run_id": pr.get("dcl_run_id"),
+                        "error_type": pr.get("error_type"),
+                        "schema_drift": pr.get("schema_drift", False),
+                    }
+                    if current_status not in _terminal:
+                        update_runner_status(
+                            pid, "completed",
+                            rows_transferred=rows,
+                            dcl_response=dcl_resp,
+                        )
+                    else:
+                        _log.info(
+                            "BG: Skipping 'completed' write — job %s already %s (callback arrived first)",
+                            pid, current_status,
+                        )
+                elif pr_status == "rejected":
+                    if current_status not in _terminal:
+                        update_runner_status(pid, "failed", error_message=pr.get("error", ""))
+                elif pr_status in ("failed", "degraded"):
+                    if current_status not in _terminal:
+                        update_runner_status(pid, "failed", error_message=pr.get("error", ""))
+                else:
+                    if current_status not in _terminal:
+                        update_runner_status(pid, "dispatched")
+
+            _log.info(
+                "BG: Batch dispatch complete: %d manifests, Farm elapsed=%ss",
+                len(farm_tasks), farm_resp.get("elapsed_seconds"),
+            )
+        else:
+            # Batch failed — determine if timeout or explicit rejection.
+            batch_status = batch_result.get("status", "unknown")
+            is_timeout = "unreachable" in batch_status or "timeout" in batch_result.get("error", "").lower()
+
+            if is_timeout:
+                _log.error(
+                    "BG: [BATCH_TIMEOUT] Batch POST timed out (status=%s). "
+                    "Farm may still be processing — relying on Farm callbacks. error=%s",
+                    batch_status, batch_result.get("error", "")[:300],
+                )
+                # Jobs already marked "dispatched" — Farm callbacks will update to terminal.
+            else:
+                # NON-TIMEOUT failure — safe to fall back to individual dispatch.
+                _log.warning(
+                    "BG: [BATCH_FALLBACK] Batch dispatch rejected (status=%s), "
+                    "falling back to %d individual POSTs: %s",
+                    batch_status, len(farm_tasks),
+                    batch_result.get("error", "")[:200],
+                )
+
+                async def _dispatch_one_bg(manifest_obj, payload_dict: dict):
+                    try:
+                        farm_result = await dispatch_to_farm(manifest_obj, payload=payload_dict)
+                        status = farm_result.get("status", "dispatched")
+                        pid = manifest_obj.source.pipe_id
+                        if status in ("completed", "failed"):
+                            update_runner_status(pid, status)
+                    except Exception as exc:
+                        _log.warning("BG: Individual dispatch failed for %s: %s",
+                                     manifest_obj.source.pipe_id, exc)
+
+                _FARM_CONCURRENCY = 10
+                sem = asyncio.Semaphore(_FARM_CONCURRENCY)
+
+                async def _throttled(manifest_obj, payload_dict: dict):
+                    async with sem:
+                        await _dispatch_one_bg(manifest_obj, payload_dict)
+
+                await asyncio.gather(*[_throttled(m, p) for _, m, p in farm_tasks])
+
+    except Exception as exc:
+        _log.error(
+            "BG: Background batch dispatch failed (batch_id=%s): %s. "
+            "Jobs remain 'dispatched' — Farm callbacks will update terminal status.",
+            batch_id, exc,
+        )
+
+
 @router.post("/dispatch-batch")
 async def dispatch_multiple(req: RunnerBatchDispatchRequest):
     """Dispatch runner jobs for multiple pipes to Farm.
@@ -216,139 +340,21 @@ async def dispatch_multiple(req: RunnerBatchDispatchRequest):
             _log.warning("DCL dispatch signal did not succeed: %s", dcl_signal)
 
     if farm_tasks:
-        # Try batch dispatch first (single HTTP round-trip to Farm).
-        # Fall back to individual POSTs if batch fails.
+        # Fire-and-forget: dispatch to Farm in background task.
+        # Farm callbacks update job statuses to terminal on completion.
+        # This restores the <5s dispatch time (was ~60s when synchronous).
         all_payloads = [p for _, _, p in farm_tasks]
         all_manifests = [m for _, m, _ in farm_tasks]
         batch_id = all_manifests[0].run_id if all_manifests else "unknown"
 
-        batch_result = await dispatch_to_farm_batch(
-            manifests=[m.model_dump() for m in all_manifests],
-            batch_id=batch_id,
-            concurrency=5,
-            payloads=all_payloads,
-        )
+        # Mark all dispatched jobs as "dispatched" in the response
+        for result_dict, manifest_obj, _ in farm_tasks:
+            result_dict["status"] = "dispatched"
+            update_runner_status(manifest_obj.source.pipe_id, "dispatched")
 
-        # Batch-fetch current job statuses for all pipes in one query.
-        # Replaces N serial get_runner_job() calls (~75ms each to Supabase PG)
-        # with one WHERE job_id = ANY(%s) query (~75ms total for all pipes).
-        _all_task_pids = [m.source.pipe_id for _, m, _ in farm_tasks]
-        _current_jobs_map = get_runner_jobs_batch(_all_task_pids)
-        _terminal = ("completed", "failed", "timed_out")
-
-        if batch_result.get("status") == "batch_dispatched":
-            # Batch succeeded — update result dicts from Farm's batch response
-            farm_resp = batch_result.get("farm_response", {})
-            push_results_list = farm_resp.get("push_results", [])
-            # Build lookup from pipe_id → push_result for status mapping
-            push_by_pipe = {pr.get("pipe_id"): pr for pr in push_results_list}
-            for result_dict, manifest_obj, _ in farm_tasks:
-                pid = manifest_obj.source.pipe_id
-                pr = push_by_pipe.get(pid, {})
-                pr_status = pr.get("status", "unknown")
-
-                # Guard: Farm processes synchronously and fires callbacks
-                # before returning the batch response. Don't regress a
-                # terminal status that the callback already wrote.
-                current_job = _current_jobs_map.get(pid)
-                current_status = current_job.get("status") if current_job else None
-
-                if pr_status == "success":
-                    # Farm already pushed data to DCL — job is DONE.
-                    result_dict["status"] = "completed"
-                    rows = pr.get("rows_accepted") or pr.get("rows_pushed") or 0
-                    dcl_resp = {
-                        "status": "ingested",
-                        "status_code": pr.get("status_code"),
-                        "rows_accepted": pr.get("rows_accepted"),
-                        "dcl_run_id": pr.get("dcl_run_id"),
-                        "error_type": pr.get("error_type"),
-                        "schema_drift": pr.get("schema_drift", False),
-                    }
-                    if current_status not in _terminal:
-                        update_runner_status(
-                            pid, "completed",
-                            rows_transferred=rows,
-                            dcl_response=dcl_resp,
-                        )
-                    else:
-                        _log.info(
-                            "Skipping 'completed' write — job %s already %s (callback arrived first)",
-                            pid, current_status,
-                        )
-                elif pr_status == "rejected":
-                    result_dict["status"] = "failed"
-                    result_dict["error_class"] = pr.get("error_type", "")
-                    result_dict["farm_error"] = pr.get("error", "")
-                    if current_status not in _terminal:
-                        update_runner_status(pid, "failed", error_message=pr.get("error", ""))
-                elif pr_status in ("failed", "degraded"):
-                    result_dict["status"] = "failed"
-                    result_dict["farm_error"] = pr.get("error", "")
-                    if current_status not in _terminal:
-                        update_runner_status(pid, "failed", error_message=pr.get("error", ""))
-                else:
-                    # Unknown status — mark as dispatched conservatively;
-                    # the callback will update to terminal when Farm finishes.
-                    result_dict["status"] = "dispatched"
-                    if current_status not in _terminal:
-                        update_runner_status(pid, "dispatched")
-                    else:
-                        _log.info(
-                            "Skipping 'dispatched' write — job %s already %s (callback arrived first)",
-                            pid, current_status,
-                        )
-                result_dict["farm_response"] = pr
-            _log.info(
-                "Batch dispatch succeeded: %d manifests, Farm elapsed=%ss",
-                len(farm_tasks), farm_resp.get("elapsed_seconds"),
-            )
-        else:
-            # Batch failed — determine if timeout or explicit rejection.
-            batch_status = batch_result.get("status", "unknown")
-            is_timeout = "unreachable" in batch_status or "timeout" in batch_result.get("error", "").lower()
-
-            if is_timeout:
-                # TIMEOUT: Farm may still be processing the original batch.
-                # DO NOT re-dispatch — that creates guaranteed duplicates.
-                # Mark all jobs as "dispatched" (batch in-flight) and let
-                # Farm's callback path update to terminal status on completion.
-                _log.error(
-                    "[BATCH_TIMEOUT] Batch POST timed out (status=%s). "
-                    "Farm may still be processing — NOT falling back to "
-                    "individual dispatch (%d manifests). Marking as dispatched "
-                    "and relying on Farm callbacks. error=%s",
-                    batch_status, len(farm_tasks),
-                    batch_result.get("error", "")[:300],
-                )
-                for result_dict, manifest_obj, _ in farm_tasks:
-                    pid = manifest_obj.source.pipe_id
-                    result_dict["status"] = "dispatched"
-                    result_dict["farm_response"] = {
-                        "note": "batch_timeout_no_fallback",
-                        "batch_status": batch_status,
-                    }
-                    current_status = _current_jobs_map.get(pid, {}).get("status")
-                    if current_status not in _terminal:
-                        update_runner_status(pid, "dispatched")
-            else:
-                # NON-TIMEOUT failure (Farm explicitly rejected the batch
-                # with 4xx/5xx). Safe to fall back to individual dispatch
-                # because Farm definitively did NOT process those manifests.
-                _log.warning(
-                    "[BATCH_FALLBACK] Batch dispatch rejected (status=%s), "
-                    "falling back to %d individual POSTs: %s",
-                    batch_status, len(farm_tasks),
-                    batch_result.get("error", "")[:200],
-                )
-                _FARM_CONCURRENCY = 10
-                sem = asyncio.Semaphore(_FARM_CONCURRENCY)
-
-                async def _throttled(result_dict: dict, manifest_obj, payload_dict: dict):
-                    async with sem:
-                        await _dispatch_one(result_dict, manifest_obj, payload_dict)
-
-                await asyncio.gather(*[_throttled(r, m, p) for r, m, p in farm_tasks])
+        asyncio.create_task(_background_batch_dispatch(
+            farm_tasks, all_manifests, all_payloads, batch_id,
+        ))
 
     errors = [r for r in results if r.get("status") in ("error", "farm_error", "farm_unreachable", "failed")]
     sent_to_farm = [r for r in results if r.get("status") in ("dispatched", "completed", "running")]
