@@ -449,12 +449,13 @@ def dispatch_batch(
                 continue
             seen_pipe_ids.add(canonical_pid)
 
-            # Idempotency guard: skip if a job for this pipe is already active or completed.
+            # Idempotency guard: skip only if a job for this pipe is currently in-flight.
             # Uses batch-fetched map instead of per-pipe DB roundtrip.
-            # Adding "completed" prevents re-dispatching pipes that Farm already processed —
-            # in the failed run, 62/89 manifests were wasted idempotency hits on Farm.
+            # We do NOT skip "completed" — re-runs must re-dispatch previously completed
+            # pipes. Farm's own snapshot-aware idempotency guard (9a30bd9) handles
+            # true duplicate protection at the processing layer.
             existing_job = existing_jobs_map.get(canonical_pid)
-            _skip_statuses = ("queued", "dispatched", "running", "completed")
+            _skip_statuses = ("queued", "dispatched", "running")
             if existing_job and existing_job.get("status") in _skip_statuses:
                 _log.info(
                     "Pipe %s already has job (status=%s) — skipping",
