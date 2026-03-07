@@ -26,7 +26,7 @@ _log = get_logger("routers.export")
 
 router = APIRouter(tags=["Export"])
 
-_DCL_TIMEOUT = 120.0
+_DCL_TIMEOUT = None  # No timeout — DCL warmup can take minutes with large datasets
 
 _last_dcl_dispatch: dict | None = None
 
@@ -51,6 +51,7 @@ async def _deliver_to_dcl(export_payload: dict) -> dict:
 
     async with httpx.AsyncClient(timeout=_DCL_TIMEOUT) as client:
         if settings.DCL_EXPORT_PIPES_URL:
+            _log.info("DCL export-pipes POST starting — waiting for DCL to respond...")
             try:
                 resp = await client.post(
                     settings.DCL_EXPORT_PIPES_URL,
@@ -71,6 +72,31 @@ async def _deliver_to_dcl(export_payload: dict) -> dict:
                 }
                 _log.info("DCL export-pipes POST (bridge) %s → %d",
                           settings.DCL_EXPORT_PIPES_URL, resp.status_code)
+            except httpx.ConnectError as exc:
+                error_detail = str(exc) or f"{type(exc).__name__}: {repr(exc)}"
+                report["export_pipes"] = {
+                    "bridge": True,
+                    "url": settings.DCL_EXPORT_PIPES_URL,
+                    "ok": False,
+                    "status": None,
+                    "body": None,
+                    "error": error_detail,
+                    "skipped": False,
+                }
+                _log.warning("DCL not reachable at %s — is the backend running? %s",
+                             settings.DCL_EXPORT_PIPES_URL, exc)
+            except httpx.ReadTimeout as exc:
+                error_detail = str(exc) or f"{type(exc).__name__}: {repr(exc)}"
+                report["export_pipes"] = {
+                    "bridge": True,
+                    "url": settings.DCL_EXPORT_PIPES_URL,
+                    "ok": False,
+                    "status": None,
+                    "body": None,
+                    "error": error_detail,
+                    "skipped": False,
+                }
+                _log.warning("DCL export-pipes timed out — DCL may still be loading. Check DCL logs.")
             except Exception as exc:
                 error_detail = str(exc) or f"{type(exc).__name__}: {repr(exc)}"
                 report["export_pipes"] = {
@@ -132,7 +158,7 @@ async def _dispatch_to_dcl(aod_run_id: Optional[str] = None,
     async with httpx.AsyncClient(timeout=_DCL_TIMEOUT) as client:
         if settings.DCL_DISPATCH_URL:
             try:
-                _log.info("DCL dispatch POST %s body=%s",
+                _log.info("DCL dispatch POST starting %s — waiting for DCL to respond... body=%s",
                           settings.DCL_DISPATCH_URL, dispatch_body)
                 resp = await client.post(
                     settings.DCL_DISPATCH_URL,
@@ -163,12 +189,25 @@ async def _dispatch_to_dcl(aod_run_id: Optional[str] = None,
                     "ok": resp.is_success,
                     "timestamp": datetime.utcnow().isoformat() + "Z",
                 }
+            except httpx.ConnectError as exc:
+                report["dispatch"] = {
+                    "url": settings.DCL_DISPATCH_URL,
+                    "error": str(exc),
+                }
+                _log.warning("DCL not reachable at %s — is the backend running? %s",
+                             settings.DCL_DISPATCH_URL, exc)
+            except httpx.ReadTimeout as exc:
+                report["dispatch"] = {
+                    "url": settings.DCL_DISPATCH_URL,
+                    "error": str(exc),
+                }
+                _log.warning("DCL dispatch timed out — DCL may still be loading. Check DCL logs.")
             except Exception as exc:
                 report["dispatch"] = {
                     "url": settings.DCL_DISPATCH_URL,
                     "error": str(exc),
                 }
-                _log.warning("DCL dispatch POST failed: %s", exc)
+                _log.warning("DCL dispatch POST failed: %s: %s", type(exc).__name__, exc)
         else:
             report["dispatch"] = {"skipped": True, "reason": "DCL_URL not configured"}
 
