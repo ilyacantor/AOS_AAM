@@ -2551,6 +2551,20 @@ async def ui_topology():
                     network.fit({{ animation: false }});
                 }});
             }}
+            // When embedded in an iframe that starts hidden (display:none),
+            // the container has zero dimensions and fit() has no effect.
+            // Re-fit when the container first gets real dimensions.
+            var _hasFittedAfterResize = false;
+            var _resizeObserver = new ResizeObserver(function(entries) {{
+                if (_hasFittedAfterResize) return;
+                var entry = entries[0];
+                if (entry && entry.contentRect.width > 0 && entry.contentRect.height > 0) {{
+                    _hasFittedAfterResize = true;
+                    network.redraw();
+                    network.fit({{ animation: false }});
+                }}
+            }});
+            _resizeObserver.observe(container);
 
             network.on('click', function(params) {{
                 if (params.nodes.length > 0) {{
