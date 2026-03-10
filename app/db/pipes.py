@@ -116,12 +116,21 @@ def list_pipes(source_system: Optional[str] = None, fabric_plane: Optional[str] 
         plane_map = {p["plane_id"]: p.get("plane_type") for p in planes}
 
     results = []
+    seen_matched: set[str] = set()
     for r in rows:
         fp_id = r.get("fabric_plane_id")
         r["fabric_plane"] = plane_map.get(fp_id) if fp_id else None
         pipe = _candidate_to_pipe(r)
         if fabric_plane and pipe["fabric_plane"].upper() != fabric_plane.upper():
             continue
+        # Deduplicate by matched_pipe_id: multiple candidates can resolve to
+        # the same declared pipe. Only return the first candidate per declared
+        # pipe to prevent dispatch_batch from sending duplicate manifests.
+        mpid = pipe.get("matched_pipe_id")
+        if mpid:
+            if mpid in seen_matched:
+                continue
+            seen_matched.add(mpid)
         results.append(pipe)
 
     return results
