@@ -2541,6 +2541,17 @@ async def ui_topology():
 
             network = new vis.Network(container, data, options);
 
+            // Fit viewport once physics stabilization finishes
+            network.once('stabilizationIterationsDone', function() {{
+                network.fit({{ animation: {{ duration: 400, easingFunction: 'easeInOutQuad' }} }});
+            }});
+            // Fallback for layouts with physics disabled (hierarchical)
+            if (options.physics === false) {{
+                network.once('afterDrawing', function() {{
+                    network.fit({{ animation: false }});
+                }});
+            }}
+
             network.on('click', function(params) {{
                 if (params.nodes.length > 0) {{
                     const nodeId = params.nodes[0];
