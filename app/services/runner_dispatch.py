@@ -419,7 +419,7 @@ def dispatch_batch(
         try:
             pipe = pipe_map.get(pid)
             if not pipe:
-                errors.append({"pipe_id": pid, "status": "error", "error": f"Pipe {pid} not found"})
+                errors.append({"pipe_id": pid, "status": "error", "error": f"Pipe {pid} not found", "source_system": None, "category": None, "matched_pipe_id": None})
                 continue
             if not pipe.get("category"):
                 vendor = pipe.get("source_system", "?")
@@ -432,6 +432,9 @@ def dispatch_batch(
                     "pipe_id": pid,
                     "status": "skipped",
                     "error": f"Null/empty category from AOD (vendor={vendor}) — not dispatchable",
+                    "source_system": vendor,
+                    "category": None,
+                    "matched_pipe_id": pipe.get("matched_pipe_id"),
                 })
                 continue
 
@@ -449,6 +452,9 @@ def dispatch_batch(
                     "pipe_id": pid,
                     "status": "skipped",
                     "error": f"No matched_pipe_id — run Infer before dispatch (vendor={vendor})",
+                    "source_system": vendor,
+                    "category": pipe.get("category"),
+                    "matched_pipe_id": None,
                 })
                 continue
             if canonical_pid in seen_pipe_ids:
@@ -472,6 +478,9 @@ def dispatch_batch(
                     "pipe_id": pid,
                     "status": "skipped",
                     "error": f"Job already {existing_job['status']}",
+                    "source_system": pipe.get("source_system", "?"),
+                    "category": pipe.get("category"),
+                    "matched_pipe_id": canonical_pid,
                 })
                 continue
 
@@ -491,7 +500,7 @@ def dispatch_batch(
             })
         except Exception as exc:
             _log.warning("Failed to build manifest for pipe %s: %s", pid, exc)
-            errors.append({"pipe_id": pid, "status": "error", "error": str(exc)})
+            errors.append({"pipe_id": pid, "status": "error", "error": str(exc), "source_system": pipe.get("source_system") if pipe else None, "category": pipe.get("category") if pipe else None, "matched_pipe_id": pipe.get("matched_pipe_id") if pipe else None})
 
     if manifests_data:
         try:
@@ -508,7 +517,7 @@ def dispatch_batch(
     if skipped_errors:
         try:
             from ..db.runner_jobs import create_skipped_jobs_batch
-            create_skipped_jobs_batch(skipped_errors, run_id=batch_run_id)
+            create_skipped_jobs_batch(skipped_errors, run_id=batch_run_id, snapshot_name=current_snapshot)
         except Exception as exc:
             _log.warning("Failed to persist skipped jobs: %s", exc)
 

@@ -67,10 +67,13 @@ def create_runner_jobs_batch(manifests: list[dict]) -> list[str]:
     return job_ids
 
 
-def create_skipped_jobs_batch(skipped_entries: list[dict], run_id: str) -> list[str]:
+def create_skipped_jobs_batch(skipped_entries: list[dict], run_id: str, snapshot_name: Optional[str] = None) -> list[str]:
     """Bulk-insert runner_jobs rows with status='skipped' for pipes filtered out pre-dispatch.
 
     Each entry in skipped_entries must have 'pipe_id' and 'error' (skip reason).
+    Entries may also carry 'source_system', 'category', 'matched_pipe_id' for display.
+    A minimal manifest stub is stored so list_runner_jobs can extract source_system
+    and snapshot_name via the same JSON paths used for real jobs.
     Uses UPSERT so re-runs overwrite previous skip records.
     """
     if not skipped_entries:
@@ -79,12 +82,23 @@ def create_skipped_jobs_batch(skipped_entries: list[dict], run_id: str) -> list[
     rows = []
     for entry in skipped_entries:
         pid = entry["pipe_id"]
+        # Build minimal manifest stub for SQL extraction compatibility
+        manifest_stub = {
+            "source": {
+                "pipe_id": pid,
+                "system": entry.get("source_system"),
+            },
+            "snapshot_name": snapshot_name,
+            "run_id": run_id,
+            "category": entry.get("category"),
+            "matched_pipe_id": entry.get("matched_pipe_id"),
+        }
         rows.append({
             "job_id": pid,
             "pipe_id": pid,
             "run_id": run_id,
             "status": "skipped",
-            "manifest": None,
+            "manifest": json.dumps(manifest_stub, default=str),
             "dispatched_at": now,
             "started_at": None,
             "completed_at": now,
