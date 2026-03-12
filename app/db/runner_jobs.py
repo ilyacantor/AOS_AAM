@@ -94,7 +94,7 @@ def create_skipped_jobs_batch(skipped_entries: list[dict], run_id: str, snapshot
             "matched_pipe_id": entry.get("matched_pipe_id"),
         }
         rows.append({
-            "job_id": pid,
+            "job_id": f"skip_{pid}",
             "pipe_id": pid,
             "run_id": run_id,
             "status": "skipped",

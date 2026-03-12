@@ -462,27 +462,46 @@ def dispatch_batch(
                 continue
             seen_pipe_ids.add(canonical_pid)
 
-            # Idempotency guard: skip only if a job for this pipe is currently in-flight.
-            # Uses batch-fetched map instead of per-pipe DB roundtrip.
-            # We do NOT skip "completed" — re-runs must re-dispatch previously completed
-            # pipes. Farm's own snapshot-aware idempotency guard (9a30bd9) handles
+            # Idempotency guard: skip only if a job for this pipe is currently in-flight
+            # AND was dispatched recently (within 30 min).  Stale jobs from previous
+            # dispatch cycles (Farm callback lost, network error) must not block
+            # re-dispatch across successive snapshots.  Farm's own snapshot-aware
+            # idempotency guard (run_id, pipe_id, snapshot_name triple) handles
             # true duplicate protection at the processing layer.
             existing_job = existing_jobs_map.get(canonical_pid)
             _skip_statuses = ("queued", "dispatched", "running")
+            _STALE_JOB_SECONDS = 1800  # 30 minutes
             if existing_job and existing_job.get("status") in _skip_statuses:
-                _log.info(
-                    "Pipe %s already has job (status=%s) — skipping",
-                    canonical_pid, existing_job["status"],
-                )
-                errors.append({
-                    "pipe_id": pid,
-                    "status": "skipped",
-                    "error": f"Job already {existing_job['status']}",
-                    "source_system": pipe.get("source_system", "?"),
-                    "category": pipe.get("category"),
-                    "matched_pipe_id": canonical_pid,
-                })
-                continue
+                # Check if the job is stale — allow re-dispatch if it's older than 30 min
+                _is_stale = False
+                dispatched_at = existing_job.get("dispatched_at", "")
+                if dispatched_at:
+                    try:
+                        job_age = datetime.utcnow() - datetime.fromisoformat(dispatched_at)
+                        _is_stale = job_age.total_seconds() > _STALE_JOB_SECONDS
+                    except (ValueError, TypeError):
+                        pass
+                if _is_stale:
+                    _log.warning(
+                        "Stale in-flight job for pipe %s (status=%s, dispatched_at=%s, run_id=%s) "
+                        "— allowing re-dispatch",
+                        canonical_pid, existing_job["status"], dispatched_at,
+                        existing_job.get("run_id"),
+                    )
+                else:
+                    _log.info(
+                        "Pipe %s already has job (status=%s) — skipping",
+                        canonical_pid, existing_job["status"],
+                    )
+                    errors.append({
+                        "pipe_id": pid,
+                        "status": "skipped",
+                        "error": f"Job already {existing_job['status']}",
+                        "source_system": pipe.get("source_system", "?"),
+                        "category": pipe.get("category"),
+                        "matched_pipe_id": canonical_pid,
+                    })
+                    continue
 
             manifest = build_manifest(pipe, trigger, snapshot_name=current_snapshot, aod_run_id=current_aod_run_id, run_id=batch_run_id)
 
