@@ -204,6 +204,10 @@ async def _background_batch_dispatch(
                 elif pr_status in ("failed", "degraded"):
                     if current_status not in _terminal:
                         update_runner_status(pid, "failed", error_message=pr.get("error", ""))
+                elif pr_status == "skipped_duplicate":
+                    dcl_resp = {"skipped_duplicate": True, "note": "Farm idempotency skip"}
+                    if current_status not in _terminal:
+                        update_runner_status(pid, "completed", rows_transferred=0, dcl_response=dcl_resp)
                 else:
                     if current_status not in _terminal:
                         update_runner_status(pid, "dispatched")
@@ -452,12 +456,18 @@ async def runner_callback(pipe_id: str, req: RunnerCallbackRequest):
             detail=f"Job already in terminal state: {current}",
         )
 
+    dcl_response = req.dcl_response
+    if req.skipped_duplicate:
+        dcl_response = dcl_response or {}
+        dcl_response["skipped_duplicate"] = True
+        dcl_response["note"] = "Farm idempotency skip — no new DCL push"
+
     updated = update_runner_status(
         pipe_id,
         req.status.value,
         rows_transferred=req.rows_transferred,
         error_message=req.error_message,
-        dcl_response=req.dcl_response,
+        dcl_response=dcl_response,
     )
     if not updated:
         raise HTTPException(status_code=500, detail="Failed to update job")

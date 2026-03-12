@@ -33,9 +33,16 @@ _log = get_logger("services.runner_dispatch")
 
 
 def _generate_dispatch_id(aod_run_id: str) -> str:
-    """Unique per dispatch cycle. Farm groups all pipes by this shared ID."""
+    """Unique per dispatch cycle. Farm groups all pipes by this shared ID.
+
+    Includes a random nonce so that re-dispatches with the same aod_run_id
+    (e.g. pipeline rerun without new AOD discovery) always produce a distinct
+    run_id.  This prevents Farm's idempotency guard from matching a previous
+    completed run and silently skipping the DCL push.
+    """
     ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    return f"aam_{aod_run_id}_{ts}"
+    nonce = uuid.uuid4().hex[:8]
+    return f"aam_{aod_run_id}_{ts}_{nonce}"
 
 
 # Map fabric plane + transport kind to adapter type string
@@ -495,6 +502,15 @@ def dispatch_batch(
             for r in results:
                 r["status"] = "error"
                 r["error"] = f"Bulk insert failed: {exc}"
+
+    # Persist skipped/errored pipes so Dispatch Details modal can show them
+    skipped_errors = [e for e in errors if e.get("status") in ("skipped", "error")]
+    if skipped_errors:
+        try:
+            from ..db.runner_jobs import create_skipped_jobs_batch
+            create_skipped_jobs_batch(skipped_errors, run_id=batch_run_id)
+        except Exception as exc:
+            _log.warning("Failed to persist skipped jobs: %s", exc)
 
     return results + errors
 

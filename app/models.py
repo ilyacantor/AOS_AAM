@@ -629,3 +629,4 @@ class RunnerCallbackRequest(BaseModel):
     rows_transferred: Optional[int] = None
     error_message: Optional[str] = None
     dcl_response: Optional[dict] = None
+    skipped_duplicate: Optional[bool] = None

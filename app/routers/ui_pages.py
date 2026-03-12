@@ -1896,6 +1896,7 @@ async def ui_topology():
         .dp-stat.running .dp-val {{ color: #60a5fa; }}
         .dp-stat.queued .dp-val {{ color: #94a3b8; }}
         .dp-stat.total .dp-val {{ color: var(--cyan-400); }}
+        .dp-stat.skipped .dp-val {{ color: #fb923c; }}
         .dp-stat.rows .dp-val {{ color: #a78bfa; }}
         .dp-jobs {{
             flex: 1; overflow-y: auto; padding: 8px 18px 14px;
@@ -1925,6 +1926,8 @@ async def ui_topology():
         .dp-status.pushing {{ background: rgba(167,139,250,0.15); color: #a78bfa; }}
         .dp-status.dispatched {{ background: rgba(34,211,238,0.12); color: #22d3ee; }}
         .dp-status.queued {{ background: rgba(148,163,184,0.15); color: #94a3b8; }}
+        .dp-status.skipped {{ background: rgba(251,146,60,0.15); color: #fb923c; }}
+        .dp-status.idem-skip {{ background: rgba(251,146,60,0.15); color: #fb923c; }}
         .dp-error {{ color: #f87171; font-size: 0.6rem; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
         .dp-error:hover {{ white-space: normal; word-break: break-all; }}
         .dp-detail {{ background: rgba(15,23,42,0.9); }}
@@ -3181,7 +3184,7 @@ async def ui_topology():
         async function loadDispatchData() {{
             const body = document.getElementById('dp-body');
             if (!_dpData) {{
-                body.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--slate-500);">Loading...</td></tr>';
+                body.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--slate-500);">Loading...</td></tr>';
             }}
             try {{
                 let _djUrl = '/api/runners/jobs?limit=1000';
@@ -3193,23 +3196,31 @@ async def ui_topology():
                 renderDispatchJobs(_dpData);
             }} catch (e) {{
                 if (!_dpData) {{
-                    body.innerHTML = '<tr><td colspan="6" style="color:#f87171;">Error: ' + e.message + '</td></tr>';
+                    body.innerHTML = '<tr><td colspan="7" style="color:#f87171;">Error: ' + e.message + '</td></tr>';
                 }}
             }}
         }}
 
         function renderDispatchSummary(jobs) {{
-            const counts = {{ dispatched: 0, completed: 0, failed: 0, running: 0, queued: 0, pushing: 0, cancelled: 0 }};
+            const counts = {{ dispatched: 0, completed: 0, failed: 0, running: 0, queued: 0, pushing: 0, cancelled: 0, skipped: 0 }};
+            let idemSkips = 0;
             jobs.forEach(j => {{
                 const s = j.status || 'queued';
                 if (counts[s] !== undefined) counts[s]++;
+                // Count idempotency skips within completed jobs
+                if (s === 'completed') {{
+                    let dclR = j.dcl_response;
+                    if (typeof dclR === 'string') {{ try {{ dclR = JSON.parse(dclR); }} catch(e) {{ dclR = null; }} }}
+                    if (dclR && dclR.skipped_duplicate) idemSkips++;
+                }}
             }});
             document.getElementById('dp-total').textContent = jobs.length;
             document.getElementById('dp-dispatched').textContent = counts.dispatched;
             document.getElementById('dp-running').textContent = counts.running + counts.pushing;
-            document.getElementById('dp-completed').textContent = counts.completed;
+            document.getElementById('dp-completed').textContent = counts.completed + (idemSkips ? ' (' + idemSkips + ' idem)' : '');
             document.getElementById('dp-failed').textContent = counts.failed + counts.cancelled;
             document.getElementById('dp-queued').textContent = counts.queued;
+            document.getElementById('dp-skipped').textContent = counts.skipped;
             const hasActive = counts.queued > 0 || counts.running > 0 || counts.pushing > 0;
             document.getElementById('btn-stop-all').style.display = hasActive ? 'block' : 'none';
             // Show which run the results are scoped to
@@ -3233,11 +3244,21 @@ async def ui_topology():
                     const s = j.status || 'queued';
                     if (_dpFilter === 'running') return s === 'running' || s === 'pushing';
                     if (_dpFilter === 'failed') return s === 'failed' || s === 'cancelled';
+                    if (_dpFilter === 'skipped') {{
+                        if (s === 'skipped') return true;
+                        // Include idempotency-skipped completed jobs
+                        if (s === 'completed') {{
+                            let dclR = j.dcl_response;
+                            if (typeof dclR === 'string') {{ try {{ dclR = JSON.parse(dclR); }} catch(e) {{ dclR = null; }} }}
+                            return dclR && dclR.skipped_duplicate;
+                        }}
+                        return false;
+                    }}
                     return s === _dpFilter;
                 }});
             }}
             if (filtered.length === 0) {{
-                body.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:16px;color:var(--slate-500);">No jobs</td></tr>';
+                body.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:16px;color:var(--slate-500);">No jobs</td></tr>';
                 return;
             }}
             body.innerHTML = filtered.map((j, idx) => {{
@@ -3272,31 +3293,56 @@ async def ui_topology():
                 const label = src.length > 25 ? src.substring(0,22) + '...' : src;
                 const ts = j.completed_at || j.started_at || j.created_at || '';
                 const shortTs = ts ? new Date(ts).toLocaleTimeString() : '-';
+                // Parse dcl_response once for reuse
+                let dclParsed = j.dcl_response;
+                if (typeof dclParsed === 'string') {{ try {{ dclParsed = JSON.parse(dclParsed); }} catch(e) {{ dclParsed = null; }} }}
+                const isIdemSkip = dclParsed && dclParsed.skipped_duplicate;
+
+                // Status pill — override for idempotency skips
+                let statusPill;
+                if (isIdemSkip) {{
+                    statusPill = '<span class="dp-status idem-skip" title="Farm returned cached result — no new push to DCL">idem. skip</span>';
+                }} else {{
+                    statusPill = '<span class="dp-status ' + s + '">' + s + '</span>';
+                }}
+
                 // DCL POST result column
                 let dclHtml = '';
-                const dcl = j.dcl_response;
-                if (dcl) {{
-                    let parsed = dcl;
-                    if (typeof dcl === 'string') {{ try {{ parsed = JSON.parse(dcl); }} catch(e) {{ parsed = null; }} }}
-                    if (parsed && (parsed.status === 'ingested' || (parsed.status_code && parsed.status_code < 300 && !parsed.error_type))) {{
-                        const code = parsed.dcl_status_code || 200;
+                if (isIdemSkip) {{
+                    dclHtml = '<span style="color:#fb923c;font-weight:600;" title="Farm idempotency skip — cached result">cached</span>';
+                }} else if (dclParsed) {{
+                    if (dclParsed.status === 'ingested' || (dclParsed.status_code && dclParsed.status_code < 300 && !dclParsed.error_type)) {{
+                        const code = dclParsed.dcl_status_code || 200;
                         dclHtml = '<span style="color:#4ade80;font-weight:600;" title="DCL accepted (' + code + ')">' + code + ' ok</span>';
-                    }} else if (parsed) {{
-                        const code = parsed.dcl_status_code || parsed.status_code || '?';
-                        const reason = parsed.status || parsed.error || 'rejected';
-                        dclHtml = '<span style="color:#f87171;font-weight:600;" title="' + _escHtml(String(reason)) + '">' + code + ' fail</span>';
                     }} else {{
-                        dclHtml = '<span style="color:#f87171;">err</span>';
+                        const code = dclParsed.dcl_status_code || dclParsed.status_code || '?';
+                        const reason = dclParsed.status || dclParsed.error || 'rejected';
+                        dclHtml = '<span style="color:#f87171;font-weight:600;" title="' + _escHtml(String(reason)) + '">' + code + ' fail</span>';
                     }}
+                }} else if (j.dcl_response) {{
+                    dclHtml = '<span style="color:#f87171;">err</span>';
                 }} else if (s === 'failed' || s === 'timed_out' || s === 'cancelled') {{
                     dclHtml = '<span style="color:#f87171;">-</span>';
+                }} else if (s === 'skipped') {{
+                    dclHtml = '<span style="color:#fb923c;">-</span>';
                 }} else {{
                     dclHtml = '<span style="color:#94a3b8;">pending</span>';
                 }}
+
+                // Snapshot column
+                let snapshotHtml = '-';
+                if (isIdemSkip) {{
+                    snapshotHtml = '<span style="color:#fb923c;" title="Result from a previous snapshot">cached</span>';
+                }} else if (j.snapshot_name) {{
+                    const sn = j.snapshot_name;
+                    snapshotHtml = sn.length > 18 ? sn.substring(0,15) + '...' : sn;
+                }}
+
                 return '<tr class="dp-clickable" data-jobid="' + _escHtml(jobId) + '" title="Click for details">' +
                     '<td title="pipe: ' + pipeId + '">' + label + '</td>' +
-                    '<td><span class="dp-status ' + s + '">' + s + '</span></td>' +
+                    '<td>' + statusPill + '</td>' +
                     '<td>' + dclHtml + '</td>' +
+                    '<td style="font-size:0.78rem;color:var(--slate-400);">' + snapshotHtml + '</td>' +
                     '<td style="text-align:right;">' + rows + '</td>' +
                     '<td>' + shortTs + '</td>' +
                     '<td>' + err + '</td>' +
@@ -3464,10 +3510,11 @@ async def ui_topology():
                 <div class="dp-stat completed" onclick="setDpFilter('completed',this)" data-tooltip="Farm finished extraction AND DCL accepted the data. This pipe's data is fully landed and usable." data-testid="dp-filter-completed"><span class="dp-val" id="dp-completed">-</span><span class="dp-lbl">Completed</span></div>
                 <div class="dp-stat failed" onclick="setDpFilter('failed',this)" data-tooltip="Something went wrong -- Farm couldn't extract, DCL rejected the data, or the connection timed out. Check the error column for details." data-testid="dp-filter-failed"><span class="dp-val" id="dp-failed">-</span><span class="dp-lbl">Failed</span></div>
                 <div class="dp-stat queued" onclick="setDpFilter('queued',this)" data-tooltip="Job is created but hasn't been sent to Farm yet. Waiting in line to be dispatched." data-testid="dp-filter-queued"><span class="dp-val" id="dp-queued">-</span><span class="dp-lbl">Queued</span></div>
+                <div class="dp-stat skipped" onclick="setDpFilter('skipped',this)" data-tooltip="Pipe was filtered out before dispatch (null category, no matched_pipe_id, already in-flight) or Farm returned a cached result (idempotency skip)." data-testid="dp-filter-skipped"><span class="dp-val" id="dp-skipped">-</span><span class="dp-lbl">Skipped</span></div>
             </div>
             <div class="dp-jobs">
                 <table>
-                    <thead><tr><th>Pipe</th><th>Status</th><th>DCL</th><th style="text-align:right;">Rows</th><th>Time</th><th>Error</th></tr></thead>
+                    <thead><tr><th>Pipe</th><th>Status</th><th>DCL</th><th>Snapshot</th><th style="text-align:right;">Rows</th><th>Time</th><th>Error</th></tr></thead>
                     <tbody id="dp-body"></tbody>
                 </table>
             </div>

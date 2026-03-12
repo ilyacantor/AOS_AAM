@@ -67,6 +67,43 @@ def create_runner_jobs_batch(manifests: list[dict]) -> list[str]:
     return job_ids
 
 
+def create_skipped_jobs_batch(skipped_entries: list[dict], run_id: str) -> list[str]:
+    """Bulk-insert runner_jobs rows with status='skipped' for pipes filtered out pre-dispatch.
+
+    Each entry in skipped_entries must have 'pipe_id' and 'error' (skip reason).
+    Uses UPSERT so re-runs overwrite previous skip records.
+    """
+    if not skipped_entries:
+        return []
+    now = datetime.utcnow().isoformat()
+    rows = []
+    for entry in skipped_entries:
+        pid = entry["pipe_id"]
+        rows.append({
+            "job_id": pid,
+            "pipe_id": pid,
+            "run_id": run_id,
+            "status": "skipped",
+            "manifest": None,
+            "dispatched_at": now,
+            "started_at": None,
+            "completed_at": now,
+            "last_heartbeat": None,
+            "rows_transferred": 0,
+            "error_message": entry.get("error", "Skipped"),
+            "dcl_response": None,
+            "retry_count": 0,
+            "retry_after": None,
+        })
+    job_ids = [r["job_id"] for r in rows]
+    sb.insert_many("runner_jobs", rows, on_conflict="job_id")
+    from ..logger import get_logger
+    get_logger("db.runner_jobs").info(
+        "Upserted %d skipped runner jobs (pre-dispatch filter)", len(rows)
+    )
+    return job_ids
+
+
 def update_runner_status(
     job_id: str,
     status: str,
@@ -260,7 +297,8 @@ def list_runner_jobs(
     query = psql.SQL(
         "SELECT job_id, pipe_id, run_id, status, dispatched_at, started_at, completed_at, "
         "rows_transferred, error_message, last_heartbeat, dcl_response, "
-        "manifest::json->'source'->>'system' AS source_system "
+        "manifest::json->'source'->>'system' AS source_system, "
+        "manifest::json->>'snapshot_name' AS snapshot_name "
         "FROM {} " + where + " ORDER BY dispatched_at DESC NULLS LAST LIMIT %s"
     ).format(sb._ident("runner_jobs"))
     rows = sb._execute_composed(query, tuple(params) if params else None)
