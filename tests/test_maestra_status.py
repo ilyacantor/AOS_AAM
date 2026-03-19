@@ -7,21 +7,44 @@ import json
 import time
 from datetime import datetime
 
+import pytest
 from fastapi.testclient import TestClient
 
 
 def _seed_handoff(db, run_id: str, snapshot_name: str, candidates: list[dict]):
-    """Seed a handoff log and candidates for a tenant."""
-    from app.models import AODHandoffRequest
-    from app.services.handoff_service import process_handoff
+    """Seed handoff log and candidates directly via DB — never calls process_handoff
+    which runs reset_aod_state() and would nuke all live data."""
+    from app.db import supabase_client as sb
+    import uuid
 
-    request = AODHandoffRequest(
-        run_id=run_id,
-        snapshot_name=snapshot_name,
-        handoff_timestamp=datetime.utcnow(),
-        candidates=candidates,
-    )
-    return process_handoff(request)
+    now = datetime.utcnow().isoformat()
+    handoff_id = f"test-{uuid.uuid4().hex[:12]}"
+
+    sb.insert("aod_handoff_log", {
+        "handoff_id": handoff_id,
+        "aod_run_id": run_id,
+        "snapshot_name": snapshot_name,
+        "candidates_received": len(candidates),
+        "candidates_accepted": len(candidates),
+        "candidates_rejected": 0,
+        "handoff_timestamp": now,
+        "processed_at": now,
+    }, on_conflict="handoff_id")
+
+    for c in candidates:
+        cid = f"test-{uuid.uuid4().hex[:12]}"
+        sb.insert("connection_candidates", {
+            "candidate_id": cid,
+            "asset_key": c.get("asset_key", ""),
+            "vendor_name": c.get("vendor_name", ""),
+            "display_name": c.get("display_name", ""),
+            "category": c.get("category", ""),
+            "aod_run_id": run_id,
+            "execution_allowed": c.get("execution_allowed", True),
+            "action_type": c.get("action_type", "provision"),
+            "created_at": now,
+            "updated_at": now,
+        }, on_conflict="candidate_id")
 
 
 def _candidate(asset_key, vendor, display, category, aod_asset_id, run_id, execution_allowed=True):
@@ -84,13 +107,80 @@ def _seed_declared_pipe(pipe_id: str, source_system: str):
     }, on_conflict="pipe_id")
 
 
+_TEST_RUN_IDS = (
+    "maestra-test-run-001", "maestra-schema-run", "maestra-counts-run",
+    "maestra-sso-run", "maestra-conn-run", "maestra-exec-run",
+    "maestra-healthy-run", "maestra-unhealthy-run", "iso-run-a", "iso-run-b",
+)
+
+_TEST_PIPE_IDS = (
+    "pipe-1", "pipe-2", "pipe-3", "pipe-4", "pipe-5",
+    "pipe-done", "pipe-ok-1", "pipe-ok-2", "pipe-ok", "pipe-bad",
+    "pipe-a", "pipe-b", "pipe-sf-001",
+)
+
+
 def _cleanup_tables():
-    """Remove test data from all relevant tables."""
+    """Remove only test-seeded rows — never nuke the entire table."""
+    from psycopg2 import sql as psql
     from app.db import supabase_client as sb
-    for table in ("runner_jobs", "connection_candidates", "declared_pipes",
-                   "aod_handoff_log", "drift_events"):
+
+    run_ph = ", ".join(["%s"] * len(_TEST_RUN_IDS))
+    pipe_ph = ", ".join(["%s"] * len(_TEST_PIPE_IDS))
+
+    for table, col, ids in [
+        ("aod_handoff_log", "aod_run_id", _TEST_RUN_IDS),
+        ("connection_candidates", "aod_run_id", _TEST_RUN_IDS),
+        ("runner_jobs", "run_id", _TEST_RUN_IDS),
+    ]:
+        ph = ", ".join(["%s"] * len(ids))
         try:
-            sb.delete(table, delete_all=True)
+            sb._execute_composed(
+                psql.SQL("DELETE FROM {} WHERE {} IN ({})").format(
+                    psql.Identifier(table),
+                    psql.Identifier(col),
+                    psql.SQL(ph),
+                ),
+                tuple(ids),
+            )
+        except Exception:
+            pass
+
+    # runner_jobs also keyed by job_id (pipe IDs)
+    try:
+        sb._execute_composed(
+            psql.SQL("DELETE FROM {} WHERE {} IN ({})").format(
+                psql.Identifier("runner_jobs"),
+                psql.Identifier("job_id"),
+                psql.SQL(pipe_ph),
+            ),
+            tuple(_TEST_PIPE_IDS),
+        )
+    except Exception:
+        pass
+
+    # declared_pipes by pipe_id
+    try:
+        sb._execute_composed(
+            psql.SQL("DELETE FROM {} WHERE {} IN ({})").format(
+                psql.Identifier("declared_pipes"),
+                psql.Identifier("pipe_id"),
+                psql.SQL(pipe_ph),
+            ),
+            tuple(_TEST_PIPE_IDS),
+        )
+    except Exception:
+        pass
+
+    # Clean any test- prefixed rows from _seed_handoff direct seeding
+    for table, col in [("aod_handoff_log", "handoff_id"),
+                       ("connection_candidates", "candidate_id")]:
+        try:
+            sb._execute_composed(
+                psql.SQL("DELETE FROM {} WHERE {} LIKE %s").format(
+                    psql.Identifier(table), psql.Identifier(col)),
+                ("test-%",),
+            )
         except Exception:
             pass
 
@@ -100,6 +190,14 @@ def _get_client():
     return TestClient(app)
 
 
+@pytest.fixture(autouse=True)
+def _scoped_cleanup():
+    """Clean test rows before AND after each test so live data is never contaminated."""
+    _cleanup_tables()
+    yield
+    _cleanup_tables()
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -107,8 +205,7 @@ def _get_client():
 
 def test_maestra_status_returns_200(db):
     """GET /maestra/status with a valid tenant_id returns 200."""
-    _cleanup_tables()
-    run_id = "maestra-test-run-001"
+    run_id ="maestra-test-run-001"
     _seed_handoff(db, run_id, "test-tenant", [
         _candidate("sf.com", "Salesforce", "Salesforce", "crm", "a1", run_id),
     ])
@@ -120,8 +217,7 @@ def test_maestra_status_returns_200(db):
 
 def test_maestra_status_valid_json_schema(db):
     """Response matches the Maestra contract schema — all required fields present."""
-    _cleanup_tables()
-    run_id = "maestra-schema-run"
+    run_id ="maestra-schema-run"
     _seed_handoff(db, run_id, "schema-tenant", [
         _candidate("sf.com", "Salesforce", "Salesforce", "crm", "a1", run_id),
     ])
@@ -144,7 +240,6 @@ def test_maestra_status_valid_json_schema(db):
 
 def test_maestra_status_module_field(db):
     """The module field must be 'aam'."""
-    _cleanup_tables()
     client = _get_client()
     resp = client.get("/maestra/status", params={"tenant_id": "any-tenant"})
     assert resp.json()["module"] == "aam"
@@ -152,7 +247,6 @@ def test_maestra_status_module_field(db):
 
 def test_maestra_status_healthy_is_boolean(db):
     """The healthy field must be a boolean."""
-    _cleanup_tables()
     client = _get_client()
     resp = client.get("/maestra/status", params={"tenant_id": "any-tenant"})
     assert isinstance(resp.json()["healthy"], bool)
@@ -160,7 +254,6 @@ def test_maestra_status_healthy_is_boolean(db):
 
 def test_maestra_status_tenant_id_matches_request(db):
     """The tenant_id in the response must match what was requested."""
-    _cleanup_tables()
     client = _get_client()
     resp = client.get("/maestra/status", params={"tenant_id": "my-tenant-123"})
     assert resp.json()["tenant_id"] == "my-tenant-123"
@@ -168,7 +261,6 @@ def test_maestra_status_tenant_id_matches_request(db):
 
 def test_maestra_status_response_time(db):
     """Response time must be under 500ms."""
-    _cleanup_tables()
     client = _get_client()
     start = time.monotonic()
     resp = client.get("/maestra/status", params={"tenant_id": "perf-tenant"})
@@ -179,8 +271,7 @@ def test_maestra_status_response_time(db):
 
 def test_maestra_status_manifest_counts(db):
     """Manifest counts reflect actual runner_jobs state."""
-    _cleanup_tables()
-    run_id = "maestra-counts-run"
+    run_id ="maestra-counts-run"
     _seed_handoff(db, run_id, "counts-tenant", [
         _candidate("sf.com", "Salesforce", "Salesforce", "crm", "a1", run_id),
     ])
@@ -204,8 +295,7 @@ def test_maestra_status_manifest_counts(db):
 
 def test_maestra_status_sso_pending(db):
     """SSO pending reflects candidates with execution_allowed=false."""
-    _cleanup_tables()
-    run_id = "maestra-sso-run"
+    run_id ="maestra-sso-run"
     _seed_handoff(db, run_id, "sso-tenant", [
         _candidate("sf.com", "Salesforce", "Salesforce", "crm", "a1", run_id, execution_allowed=True),
         _candidate("okta.com", "Okta", "Okta IdP", "identity", "a2", run_id, execution_allowed=False),
@@ -225,8 +315,7 @@ def test_maestra_status_sso_pending(db):
 
 def test_maestra_status_connections(db):
     """Connections lists declared pipes linked to tenant's candidates."""
-    _cleanup_tables()
-    run_id = "maestra-conn-run"
+    run_id ="maestra-conn-run"
     _seed_handoff(db, run_id, "conn-tenant", [
         _candidate("sf.com", "Salesforce", "Salesforce", "crm", "a1", run_id),
     ])
@@ -243,8 +332,7 @@ def test_maestra_status_connections(db):
 
 def test_maestra_status_last_execution_at(db):
     """last_execution_at reflects the latest completed runner job."""
-    _cleanup_tables()
-    run_id = "maestra-exec-run"
+    run_id ="maestra-exec-run"
     _seed_handoff(db, run_id, "exec-tenant", [
         _candidate("sf.com", "Salesforce", "Salesforce", "crm", "a1", run_id),
     ])
@@ -257,8 +345,7 @@ def test_maestra_status_last_execution_at(db):
 
 def test_maestra_status_healthy_true_when_no_failures(db):
     """Healthy is true when all jobs succeeded and no drift."""
-    _cleanup_tables()
-    run_id = "maestra-healthy-run"
+    run_id ="maestra-healthy-run"
     _seed_handoff(db, run_id, "healthy-tenant", [
         _candidate("sf.com", "Salesforce", "Salesforce", "crm", "a1", run_id),
     ])
@@ -274,8 +361,7 @@ def test_maestra_status_healthy_true_when_no_failures(db):
 
 def test_maestra_status_healthy_false_when_failures(db):
     """Healthy is false when there are failed jobs."""
-    _cleanup_tables()
-    run_id = "maestra-unhealthy-run"
+    run_id ="maestra-unhealthy-run"
     _seed_handoff(db, run_id, "unhealthy-tenant", [
         _candidate("sf.com", "Salesforce", "Salesforce", "crm", "a1", run_id),
     ])
@@ -291,7 +377,6 @@ def test_maestra_status_healthy_false_when_failures(db):
 
 def test_maestra_status_unknown_tenant_returns_empty(db):
     """An unknown tenant returns zeroed-out response, not an error."""
-    _cleanup_tables()
     client = _get_client()
     resp = client.get("/maestra/status", params={"tenant_id": "nonexistent-tenant"})
     assert resp.status_code == 200
@@ -312,8 +397,6 @@ def test_maestra_status_requires_tenant_id(db):
 
 def test_maestra_status_tenant_isolation(db):
     """Data from one tenant does not leak into another tenant's response."""
-    _cleanup_tables()
-
     # Seed directly via DB to avoid process_handoff clearing state between tenants.
     from app.db import supabase_client as sb
 
