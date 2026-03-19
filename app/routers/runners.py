@@ -248,7 +248,7 @@ async def _background_batch_dispatch(
                         _log.warning("BG: Individual dispatch failed for %s: %s",
                                      manifest_obj.source.pipe_id, exc)
 
-                _FARM_CONCURRENCY = 10
+                _FARM_CONCURRENCY = 5
                 sem = asyncio.Semaphore(_FARM_CONCURRENCY)
 
                 async def _throttled(manifest_obj, payload_dict: dict):

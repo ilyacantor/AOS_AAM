@@ -7,6 +7,7 @@ Farm dispatch.  AAM never executes data extraction — Farm does.
 """
 import asyncio
 import os
+import random
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -18,6 +19,7 @@ from ..models import JobManifest
 _log = get_logger("services.runner_worker")
 
 POLL_INTERVAL_S = float(os.environ.get("RUNNER_POLL_INTERVAL_S", "0.5"))
+_WORKER_CONCURRENCY = 5  # Cap parallel Farm dispatches — matches batch concurrency
 
 _worker_task: Optional[asyncio.Task] = None
 _running = False
@@ -36,17 +38,13 @@ def _claim_queued_jobs() -> list[str]:
         "UPDATE {} SET status = 'running', started_at = NOW(), last_heartbeat = NOW() "
         "WHERE job_id IN ("
         "  SELECT job_id FROM {} WHERE status = 'queued'"
-        "  AND (retry_after IS NULL OR retry_after <= NOW()::text)"
+        "  AND (retry_after IS NULL OR retry_after::timestamptz <= NOW())"
         "  ORDER BY dispatched_at"
         ") RETURNING job_id"
     ).format(sb._ident("runner_jobs"), sb._ident("runner_jobs"))
 
-    try:
-        rows = sb._execute_composed(query)
-        return [r["job_id"] for r in rows]
-    except Exception as exc:
-        _log.error("Failed to claim queued jobs: %s", exc)
-        return []
+    rows = sb._execute_composed(query)
+    return [r["job_id"] for r in rows]
 
 
 async def start_worker():
@@ -56,7 +54,7 @@ async def start_worker():
         return
     _running = True
     _worker_task = asyncio.create_task(_worker_loop())
-    _log.info("Background runner worker started (poll=%.1fs, unlimited concurrency)", POLL_INTERVAL_S)
+    _log.info("Background runner worker started (poll=%.1fs, concurrency=%d)", POLL_INTERVAL_S, _WORKER_CONCURRENCY)
 
 
 async def stop_worker():
@@ -74,19 +72,25 @@ async def stop_worker():
 
 
 async def _worker_loop():
-    """Main loop: poll for queued jobs and dispatch ALL to Farm in parallel.
+    """Main loop: poll for queued jobs and dispatch to Farm with bounded concurrency.
 
     Claims every queued job each cycle and dispatches them concurrently
-    via asyncio.gather. Farm handles its own concurrency/backpressure.
+    via asyncio.gather, throttled by _WORKER_CONCURRENCY semaphore.
     """
+    sem = asyncio.Semaphore(_WORKER_CONCURRENCY)
+
+    async def _throttled(job_id: str):
+        async with sem:
+            await _dispatch_job_to_farm(job_id)
+
     while _running:
         try:
             claimed_ids = await asyncio.to_thread(_claim_queued_jobs)
 
             if claimed_ids:
-                _log.info("Worker claimed %d jobs, dispatching in parallel", len(claimed_ids))
+                _log.info("Worker claimed %d jobs, dispatching (max %d concurrent)", len(claimed_ids), _WORKER_CONCURRENCY)
                 await asyncio.gather(
-                    *[_dispatch_job_to_farm(job_id) for job_id in claimed_ids]
+                    *[_throttled(job_id) for job_id in claimed_ids]
                 )
 
             await asyncio.sleep(POLL_INTERVAL_S)
@@ -156,8 +160,10 @@ async def _dispatch_job_to_farm(job_id: str):
                     error_message=exhaust_msg,
                 )
             else:
-                # Exponential backoff: base * 2^(attempt-1), capped at 5 min
+                # Exponential backoff: base * 2^(attempt-1), capped at 5 min, plus jitter
                 backoff_s = min(settings.FARM_RETRY_BACKOFF_S * (2 ** (new_count - 1)), 300)
+                jitter_s = random.uniform(0, backoff_s * 0.3)
+                backoff_s = backoff_s + jitter_s
                 retry_at = (datetime.utcnow() + timedelta(seconds=backoff_s)).isoformat()
                 _log.warning(
                     "Worker: Farm unreachable for job %s (attempt %d/%d), "
