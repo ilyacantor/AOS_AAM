@@ -3,6 +3,7 @@ Collectors Router — collector execution and observation processing.
 """
 import json
 import logging
+import time
 import uuid
 from datetime import datetime
 
@@ -53,11 +54,13 @@ async def infer_pipes():
     Performance: pre-fetches all data upfront (2-3 HTTP calls total),
     runs inference in-memory, then batch-writes results.
     """
+    _t_start = time.perf_counter()
     pipes_from_obs = 0
     pipes_from_candidates = 0
     match_failures = []
 
     # ---- Path 1: adapter observations (legacy) ----
+    _t0 = time.perf_counter()
     observations = get_unprocessed_observations()
     if observations:
         redacted_observations = []
@@ -72,8 +75,11 @@ async def infer_pipes():
         for obs in observations:
             mark_observation_processed(obs["observation_id"])
 
+    _t_fetch_obs = time.perf_counter() - _t0
+
     # ---- Path 2: unmatched AOD candidates (batch-optimized) ----
     # Pre-fetch ALL data in 2 HTTP calls instead of ~10 per candidate
+    _t0 = time.perf_counter()
     all_candidates = list_candidates()
     planes = sb.select("fabric_planes")
     plane_type_to_id = {}
@@ -107,12 +113,16 @@ async def infer_pipes():
             vendor_to_pipe[c["vendor_name"].lower()] = c["matched_pipe_id"]
 
     # Pre-fetch existing pipes so we can detect which ones need schema enrichment
+    _t_fetch_cands = time.perf_counter() - _t0
+    _t0 = time.perf_counter()
     existing_pipes_rows = sb.select("declared_pipes")
     existing_pipes_by_id: dict[str, dict] = {
         p["pipe_id"]: p for p in existing_pipes_rows if p.get("pipe_id")
     }
 
     # Run inference in-memory for all unmatched candidates
+    _t_fetch_pipes = time.perf_counter() - _t0
+    _t0 = time.perf_counter()
     now = datetime.utcnow().isoformat()
     new_pipes: list[dict] = []
     new_versions: list[dict] = []
@@ -298,6 +308,8 @@ async def infer_pipes():
             _log.debug("Candidate %s not matched: %s", cid, exc)
 
     # Batch-write: pipes, versions, candidate updates, pipe enrichments
+    _t_inference = time.perf_counter() - _t0
+    _t0 = time.perf_counter()
     if new_pipes:
         sb.insert_many("declared_pipes", new_pipes)
     if new_versions:
@@ -313,7 +325,71 @@ async def infer_pipes():
         update_pairs.append(({"candidate_id": cid}, upd))
     sb.update_many_concurrent("connection_candidates", update_pairs)
 
+    _t_batch_write = time.perf_counter() - _t0
+
     total_pipes = pipes_from_obs + pipes_from_candidates
+
+    # --- EAV triple conversion (non-fatal) ---
+    _t0 = time.perf_counter()
+    _t_handoff = 0.0
+    _t_convert = 0.0
+    _t_write = 0.0
+    try:
+        from ..converters.triple_converter import (
+            convert_inference_batch, generate_run_id, resolve_entity_id,
+        )
+        from ..db.triple_writer import write_triples
+
+        # Resolve entity_id from most recent AOD handoff
+        _th = time.perf_counter()
+        handoffs = sb.select("aod_handoff_log", order="processed_at.desc", limit=1)
+        _t_handoff = time.perf_counter() - _th
+        snapshot_name = handoffs[0].get("snapshot_name") if handoffs else None
+        aod_rid = handoffs[0].get("aod_run_id") if handoffs else None
+        entity_id = resolve_entity_id(snapshot_name, aod_rid)
+
+        if entity_id and (new_pipes or update_pairs):
+            run_uuid, run_tag = generate_run_id()
+            # Build connection data for triple conversion from update_pairs + original candidates
+            cid_to_candidate = {c["candidate_id"]: c for c in unmatched}
+            connection_data = []
+            for filter_d, update_d in update_pairs:
+                cid = filter_d["candidate_id"]
+                orig = cid_to_candidate.get(cid, {})
+                connection_data.append({
+                    **update_d,
+                    "vendor_name": orig.get("vendor_name"),
+                    "category": orig.get("category"),
+                })
+            _tc = time.perf_counter()
+            triple_dicts = convert_inference_batch(
+                new_pipes, connection_data, planes, entity_id, run_uuid, run_tag,
+            )
+            _t_convert = time.perf_counter() - _tc
+            if triple_dicts:
+                _tw = time.perf_counter()
+                count = write_triples(triple_dicts)
+                _t_write = time.perf_counter() - _tw
+                _log.info("AAM_TRIPLE_WRITE: %d triples written (run=%s)", count, run_tag)
+        elif not entity_id and (new_pipes or update_pairs):
+            _log.warning(
+                "AAM_TRIPLE_SKIP: entity_id not resolved — no AOD handoff snapshot_name. "
+                "%d pipes and %d connections will NOT produce triples.",
+                len(new_pipes), len(update_pairs),
+            )
+    except Exception as exc:
+        _log.error("AAM_TRIPLE_ERROR: pipe inference triple conversion failed (non-fatal): %s", exc)
+    _t_triples = time.perf_counter() - _t0
+
+    _t_total = time.perf_counter() - _t_start
+    _log.info(
+        "INFER_TIMING: total=%.1fs | fetch_obs=%.1fs fetch_cands=%.1fs "
+        "fetch_pipes=%.1fs inference=%.1fs batch_write=%.1fs triples=%.1fs "
+        "(handoff=%.2fs convert=%.4fs write=%.2fs)",
+        _t_total, _t_fetch_obs, _t_fetch_cands, _t_fetch_pipes,
+        _t_inference, _t_batch_write, _t_triples,
+        _t_handoff, _t_convert, _t_write,
+    )
 
     return {
         "message": "Inference complete",

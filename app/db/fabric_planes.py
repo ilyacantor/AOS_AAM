@@ -33,6 +33,27 @@ def store_fabric_plane(plane_data: dict, aod_run_id: str) -> dict:
         "updated_at": now,
     })
 
+    # --- EAV triple for fabric plane (non-fatal) ---
+    try:
+        from ..converters.triple_converter import (
+            convert_fabric_plane_to_triples, generate_run_id, resolve_entity_id,
+        )
+        from .triple_writer import write_triples
+
+        _eid = resolve_entity_id(None, aod_run_id)
+        if _eid:
+            _ruuid, _rtag = generate_run_id()
+            _ptriples = convert_fabric_plane_to_triples(
+                {"plane_type": plane_data["plane_type"], "vendor": plane_data["vendor"],
+                 "is_healthy": is_healthy},
+                _eid, _ruuid, _rtag,
+            )
+            if _ptriples:
+                write_triples(_ptriples)
+    except Exception as _exc:
+        from ..logger import get_logger as _gl
+        _gl("db.fabric_planes").error("Fabric plane triple failed (non-fatal): %s", _exc)
+
     return {"plane_id": plane_id, "stored_at": now}
 
 
