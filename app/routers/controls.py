@@ -33,6 +33,7 @@ def get_drift_orchestrator() -> DriftOrchestrator:
 # ---------------------------------------------------------------------------
 
 @router.get("/api/aam/mode")
+@router.get("/api/aam/operating-mode")
 def get_mode():
     """Return the current operating mode."""
     mode = get_operating_mode()
@@ -92,49 +93,43 @@ def get_ledger_for_run(run_id: str):
 
 @router.get("/api/aam/triple-health")
 def get_triple_health(entity_id: Optional[str] = Query(None)):
-    """Triple health: count, coverage, freshness, run comparison."""
+    """Triple health: count, coverage, freshness, run comparison.
+
+    When entity_id is not provided, queries ALL AAM triples across all entities.
+    This is the health/observability view — it must see everything AAM has written.
+    """
     try:
-        # Resolve entity_id if not provided
-        if not entity_id:
-            handoffs = sb.select("aod_handoff_log", order="processed_at.desc", limit=1)
-            if handoffs:
-                from ..converters.triple_converter import resolve_entity_id
-                entity_id = resolve_entity_id(
-                    handoffs[0].get("snapshot_name"),
-                    handoffs[0].get("aod_run_id"),
-                )
-            if not entity_id:
-                return {
-                    "entity_id": None,
-                    "total_count": 0,
-                    "coverage": {},
-                    "freshness": {"status": "unknown", "latest_write": None},
-                    "run_comparison": None,
-                    "message": "No entity_id resolved — no AOD handoff snapshot found",
-                }
+        # Build query fragments — with or without entity_id filter
+        if entity_id:
+            where_clause = psql.SQL("WHERE {source} = %s AND {eid} = %s").format(
+                source=sb._ident("source_system"),
+                eid=sb._ident("entity_id"),
+            )
+            query_params: tuple = ("AAM", entity_id)
+        else:
+            where_clause = psql.SQL("WHERE {source} = %s").format(
+                source=sb._ident("source_system"),
+            )
+            query_params = ("AAM",)
 
         # Total AAM triple count
         count_query = psql.SQL(
-            "SELECT COUNT(*) as cnt FROM {table} WHERE {source} = %s AND {eid} = %s"
+            "SELECT COUNT(*) as cnt FROM {table} "
         ).format(
             table=sb._ident("semantic_triples"),
-            source=sb._ident("source_system"),
-            eid=sb._ident("entity_id"),
-        )
-        count_rows = sb._execute_composed(count_query, ("AAM", entity_id))
+        ) + where_clause
+        count_rows = sb._execute_composed(count_query, query_params)
         total_count = count_rows[0]["cnt"] if count_rows else 0
 
         # Concept coverage
         coverage_query = psql.SQL(
             "SELECT DISTINCT split_part({concept}, '.', 1) || '.' || split_part({concept}, '.', 2) "
-            "as prefix FROM {table} WHERE {source} = %s AND {eid} = %s"
+            "as prefix FROM {table} "
         ).format(
             concept=sb._ident("concept"),
             table=sb._ident("semantic_triples"),
-            source=sb._ident("source_system"),
-            eid=sb._ident("entity_id"),
-        )
-        coverage_rows = sb._execute_composed(coverage_query, ("AAM", entity_id))
+        ) + where_clause
+        coverage_rows = sb._execute_composed(coverage_query, query_params)
         present_prefixes = {r["prefix"] for r in coverage_rows if r.get("prefix")}
         expected_prefixes = ["mapping.pipe", "mapping.connection", "mapping.drift", "mapping.fabric"]
         coverage = {
@@ -144,14 +139,12 @@ def get_triple_health(entity_id: Optional[str] = Query(None)):
 
         # Freshness
         fresh_query = psql.SQL(
-            "SELECT MAX({created}) as latest FROM {table} WHERE {source} = %s AND {eid} = %s"
+            "SELECT MAX({created}) as latest FROM {table} "
         ).format(
             created=sb._ident("created_at"),
             table=sb._ident("semantic_triples"),
-            source=sb._ident("source_system"),
-            eid=sb._ident("entity_id"),
-        )
-        fresh_rows = sb._execute_composed(fresh_query, ("AAM", entity_id))
+        ) + where_clause
+        fresh_rows = sb._execute_composed(fresh_query, query_params)
         latest_write = fresh_rows[0]["latest"] if fresh_rows and fresh_rows[0]["latest"] else None
 
         freshness_status = "unknown"
@@ -173,16 +166,16 @@ def get_triple_health(entity_id: Optional[str] = Query(None)):
         # Run comparison (latest vs previous)
         run_query = psql.SQL(
             "SELECT {run_id}, COUNT(*) as cnt FROM {table} "
-            "WHERE {source} = %s AND {eid} = %s "
-            "GROUP BY {run_id} ORDER BY MAX({created}) DESC LIMIT 2"
         ).format(
             run_id=sb._ident("run_id"),
             table=sb._ident("semantic_triples"),
-            source=sb._ident("source_system"),
-            eid=sb._ident("entity_id"),
+        ) + where_clause + psql.SQL(
+            " GROUP BY {run_id} ORDER BY MAX({created}) DESC LIMIT 2"
+        ).format(
+            run_id=sb._ident("run_id"),
             created=sb._ident("created_at"),
         )
-        run_rows = sb._execute_composed(run_query, ("AAM", entity_id))
+        run_rows = sb._execute_composed(run_query, query_params)
         run_comparison = None
         if len(run_rows) >= 2:
             run_comparison = {
@@ -304,29 +297,34 @@ def trigger_drift_check(entity_id: Optional[str] = Query(None)):
     latest_run_id = run_rows[0]["run_id"]
     events = orch.detect_all(entity_id, latest_run_id)
 
-    # Write drift events as mapping.drift.* triples
+    # Write drift events as mapping.drift.* triples — through ledger
+    triple_write_result = None
     if events:
-        try:
-            from ..converters.triple_converter import convert_drift_to_triples, generate_run_id
-            from ..db.triple_writer import write_triples
+        from ..converters.triple_converter import convert_drift_to_triples, generate_run_id
+        from ..db.triple_writer import write_triples_with_ledger
 
-            drift_run_uuid, drift_run_tag = generate_run_id()
-            all_triples = []
-            for evt in events:
-                drift_dict = {
-                    "drift_type": evt.drift_type,
-                    "severity": evt.severity,
-                    "pipe_id": None,
-                    "detected_at": evt.detection_timestamp.isoformat(),
-                }
-                all_triples.extend(convert_drift_to_triples(
-                    drift_dict, entity_id, drift_run_uuid, drift_run_tag,
-                ))
-            if all_triples:
-                write_triples(all_triples)
-                _log.info("Wrote %d drift triples for %d events", len(all_triples), len(events))
-        except Exception as exc:
-            _log.error("Drift triple write failed (non-fatal): %s", exc)
+        drift_run_uuid, drift_run_tag = generate_run_id()
+        all_triples = []
+        for evt in events:
+            drift_dict = {
+                "drift_type": evt.drift_type,
+                "severity": evt.severity,
+                "pipe_id": None,
+                "detected_at": evt.detection_timestamp.isoformat(),
+            }
+            all_triples.extend(convert_drift_to_triples(
+                drift_dict, entity_id, drift_run_uuid, drift_run_tag,
+            ))
+        if all_triples:
+            triple_write_result = write_triples_with_ledger(
+                all_triples,
+                run_id=drift_run_uuid,
+                entity_id=entity_id,
+                trigger="drift_detection",
+                write_path="direct_execute",
+            )
+            _log.info("Wrote %d drift triples for %d events (ledger=%s)",
+                       len(all_triples), len(events), triple_write_result["ledger_id"])
 
     return {
         "entity_id": entity_id,
@@ -344,4 +342,5 @@ def trigger_drift_check(entity_id: Optional[str] = Query(None)):
         ],
         "event_count": len(events),
         "last_check_times": orch.get_last_check_times(),
+        "triple_write": triple_write_result,
     }

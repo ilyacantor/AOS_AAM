@@ -330,8 +330,21 @@ async def ui_pipes_list(
     </div>
     
     <script>
+        // --- Mode-aware button gating ---
+        (async function applyModeGating() {{
+            try {{
+                var res = await fetch('/api/aam/mode');
+                var data = await res.json();
+                if (data.mode === 'SYNTHETIC') {{
+                    document.querySelectorAll('.btn-run').forEach(function(el) {{ el.style.display = 'none'; }});
+                }}
+            }} catch(e) {{
+                console.error('Mode gating failed — buttons remain visible:', e);
+            }}
+        }})();
+
         let modalResolve = null;
-        
+
         function showConfirmModal(title, message) {{
             return new Promise((resolve) => {{
                 modalResolve = resolve;
@@ -649,6 +662,20 @@ async def ui_pipe_detail(pipe_id: str):
     </div>
     <div id="toast" class="toast"></div>
     <script>
+        // --- Mode-aware button gating ---
+        (async function applyModeGating() {{
+            try {{
+                var res = await fetch('/api/aam/mode');
+                var data = await res.json();
+                if (data.mode === 'SYNTHETIC') {{
+                    var el = document.getElementById('btn-dispatch');
+                    if (el) el.style.display = 'none';
+                }}
+            }} catch(e) {{
+                console.error('Mode gating failed — buttons remain visible:', e);
+            }}
+        }})();
+
         function showToast(message, type) {{
             const toast = document.getElementById('toast');
             toast.textContent = message;
@@ -656,7 +683,7 @@ async def ui_pipe_detail(pipe_id: str):
             toast.style.display = 'block';
             setTimeout(() => toast.style.display = 'none', 3000);
         }}
-        
+
         document.getElementById('btn-recompute').addEventListener('click', async function() {{
             this.disabled = true;
             this.textContent = 'Recomputing...';
@@ -2056,6 +2083,23 @@ async def ui_topology():
     <div id="toast" class="toast"></div>
 
     <script>
+        // --- Mode-aware button gating ---
+        (async function applyModeGating() {{
+            try {{
+                var res = await fetch('/api/aam/mode');
+                var data = await res.json();
+                if (data.mode === 'SYNTHETIC') {{
+                    var hideIds = ['btn-export-dcl', 'btn-dispatch-all', 'btn-stop-all', 'btn-view-dispatch'];
+                    hideIds.forEach(function(id) {{
+                        var el = document.getElementById(id);
+                        if (el) el.style.display = 'none';
+                    }});
+                }}
+            }} catch(e) {{
+                console.error('Mode gating failed — buttons remain visible:', e);
+            }}
+        }})();
+
         var _fetchRunning = false;
         var _fetchTimer = null;
         var _fetchStart = 0;

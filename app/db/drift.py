@@ -41,24 +41,28 @@ def create_drift_event(pipe_id: str, drift_type: str, old_value: str, new_value:
 
     sb.insert("drift_events", data)
 
-    # --- EAV triple for drift event (non-fatal) ---
-    try:
-        from ..converters.triple_converter import (
-            convert_drift_to_triples, generate_run_id, resolve_entity_id,
-        )
-        from .triple_writer import write_triples
+    # --- EAV triple for drift event — through ledger ---
+    from ..converters.triple_converter import (
+        convert_drift_to_triples, generate_run_id, resolve_entity_id,
+    )
+    from .triple_writer import write_triples_with_ledger
 
-        handoffs = sb.select("aod_handoff_log", order="processed_at.desc", limit=1)
-        _snap = handoffs[0].get("snapshot_name") if handoffs else None
-        _aod = handoffs[0].get("aod_run_id") if handoffs else None
-        _eid = resolve_entity_id(_snap, _aod)
-        if _eid:
-            _ruuid, _rtag = generate_run_id()
-            _dtriples = convert_drift_to_triples(data, _eid, _ruuid, _rtag)
-            if _dtriples:
-                write_triples(_dtriples)
-    except Exception as _exc:
-        _log.error("Drift triple conversion failed (non-fatal): %s", _exc)
+    handoffs = sb.select("aod_handoff_log", order="processed_at.desc", limit=1)
+    _snap = handoffs[0].get("snapshot_name") if handoffs else None
+    _aod = handoffs[0].get("aod_run_id") if handoffs else None
+    _eid = resolve_entity_id(_snap, _aod)
+    if _eid:
+        _ruuid, _rtag = generate_run_id()
+        _dtriples = convert_drift_to_triples(data, _eid, _ruuid, _rtag)
+        if _dtriples:
+            write_triples_with_ledger(
+                _dtriples,
+                run_id=_ruuid,
+                entity_id=_eid,
+                trigger="drift_event",
+                write_path="direct_execute",
+                pipe_id=pipe_id,
+            )
 
     return drift_id
 

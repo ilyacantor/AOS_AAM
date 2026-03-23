@@ -96,15 +96,25 @@ async def infer_pipes():
 
     if not unmatched:
         total_pipes = pipes_from_obs
+        mode = get_operating_mode()
         if total_pipes == 0 and not observations:
-            return {"message": "Nothing to process — no observations or unmatched candidates", "pipes_created": 0}
+            return {
+                "message": "Nothing to process — no observations or unmatched candidates",
+                "mode": mode.value,
+                "pipes_created": 0,
+                "triple_write": None,
+                "dispatch": None,
+            }
         return {
             "message": "Inference complete",
+            "mode": mode.value,
             "pipes_created": total_pipes,
             "from_observations": pipes_from_obs,
             "from_candidates": 0,
             "candidates_unmatched": 0,
             "unmatched_reasons": [],
+            "triple_write": None,
+            "dispatch": None,
         }
 
     # Build vendor→existing_candidate lookup from already-matched candidates
