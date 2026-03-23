@@ -20,7 +20,7 @@ All rules in this file are non-negotiable. Rules agents violate most often:
 
 **Canonical governing document:** `maestra_platform_spec_v7.1.docx` — single source of truth for all AOS architecture. Pull it when: (a) scoping a new capability, (b) decision could contradict a locked ruling, (c) multi-repo build.
 
-**RACI:** `ONGOING_PROMPTS/AOS_MASTER_RACIv7.csv` (289 rows, 8 modules, 218 Live). The RACI table in this file is a summary — the CSV is authoritative.
+**RACI:** `ONGOING_PROMPTS/AOS_MASTER_RACIv8.csv` (289 rows, 8 modules, 218 Live). The RACI table in this file is a summary — the CSV is authoritative.
 
 ---
 
@@ -57,7 +57,7 @@ All data flows through semantic triples stored in Postgres. The pipeline is: AOD
 ---
 
 ## MODULE RACI — SUMMARY
-**The authoritative RACI is `ONGOING_PROMPTS/AOS_MASTER_RACIv7.csv` (289 rows, 8 modules).** This table is a quick reference only.
+**The authoritative RACI is `ONGOING_PROMPTS/AOS_MASTER_RACIv8.csv` (289 rows, 8 modules).** This table is a quick reference only.
 
 | Module | Owns | Does NOT own |
 |--------|------|-------------|
