@@ -7,15 +7,20 @@ DCL's triple_store.py (dcl/backend/db/triple_store.py:17-55).
 The semantic_triples table lives in the shared Supabase Postgres instance.
 Column schema defined in dcl/migrations/001_semantic_triple_store.sql with
 source_run_tag added in 004_source_run_tag.sql.
+
+Ledger integration: every write creates a ledger entry (pending → committed/failed)
+in AAM's local SQLite ledger. See app/db/ledger.py.
 """
 
 import json
 import logging
+import time
 import uuid
 
 from psycopg2.extras import execute_values
 
 from . import supabase_client as _sb
+from . import ledger as _ledger
 
 _log = logging.getLogger("aam.db.triple_writer")
 
@@ -107,5 +112,67 @@ def write_triples(triples: list[dict]) -> int:
         except Exception:
             pass
         _sb._put_conn(conn)
+
+
+def write_triples_with_ledger(
+    triples: list[dict],
+    *,
+    run_id: str,
+    entity_id: str,
+    trigger: str,
+    write_path: str = "direct_execute",
+    pipe_id: str | None = None,
+) -> dict:
+    """Batch-insert triples with ledger tracking.
+
+    1. Creates a pending ledger entry.
+    2. Executes the PG write.
+    3. Updates ledger to committed or failed.
+
+    Returns a dict with ledger entry details for the infer response.
+    """
+    # Extract concept prefixes from triples
+    prefixes: set[str] = set()
+    for t in triples:
+        concept = t.get("concept", "")
+        if "." in concept:
+            parts = concept.split(".")
+            prefixes.add(f"{parts[0]}.{parts[1]}")
+        elif concept:
+            prefixes.add(concept)
+    concept_prefixes = sorted(prefixes)
+
+    # 1. Create pending ledger entry
+    entry_id = _ledger.create_pending_entry(
+        run_id=run_id,
+        entity_id=entity_id,
+        trigger=trigger,
+        write_path=write_path,
+        concept_prefixes=concept_prefixes,
+        pipe_id=pipe_id,
+    )
+
+    # 2. Execute the PG write
+    t_start = time.perf_counter()
+    try:
+        count = write_triples(triples)
+        duration_ms = int((time.perf_counter() - t_start) * 1000)
+
+        # 3. Mark committed
+        _ledger.mark_committed(entry_id, count, duration_ms, concept_prefixes)
+
+        return {
+            "ledger_id": entry_id,
+            "triple_count": count,
+            "concept_prefixes": concept_prefixes,
+            "write_path": write_path,
+            "status": "committed",
+            "duration_ms": duration_ms,
+        }
+
+    except Exception as exc:
+        duration_ms = int((time.perf_counter() - t_start) * 1000)
+        _ledger.mark_failed(entry_id, str(exc), duration_ms)
+        raise
 
 

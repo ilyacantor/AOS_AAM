@@ -30,6 +30,7 @@ from ..services.matching_service import (
     infer_fabric_plane_for_candidate,
 )
 from ..constants import CATEGORY_STANDARD_FIELDS, PLANE_STANDARD_FIELDS, INFRA_VENDOR_PLANE
+from ..utils.operating_mode import get_operating_mode, OperatingMode
 
 _log = logging.getLogger("aam.infer")
 
@@ -334,11 +335,13 @@ async def infer_pipes():
     _t_handoff = 0.0
     _t_convert = 0.0
     _t_write = 0.0
+    triple_write_result = None
+    mode = get_operating_mode()
     try:
         from ..converters.triple_converter import (
             convert_inference_batch, generate_run_id, resolve_entity_id,
         )
-        from ..db.triple_writer import write_triples
+        from ..db.triple_writer import write_triples_with_ledger
 
         # Resolve entity_id from most recent AOD handoff
         _th = time.perf_counter()
@@ -368,9 +371,14 @@ async def infer_pipes():
             _t_convert = time.perf_counter() - _tc
             if triple_dicts:
                 _tw = time.perf_counter()
-                count = write_triples(triple_dicts)
+                triple_write_result = write_triples_with_ledger(
+                    triple_dicts,
+                    run_id=run_uuid,
+                    entity_id=entity_id,
+                    trigger="pipe_inference",
+                )
                 _t_write = time.perf_counter() - _tw
-                _log.info("AAM_TRIPLE_WRITE: %d triples written (run=%s)", count, run_tag)
+                _log.info("AAM_TRIPLE_WRITE: %d triples written (run=%s)", triple_write_result["triple_count"], run_tag)
         elif not entity_id and (new_pipes or update_pairs):
             _log.warning(
                 "AAM_TRIPLE_SKIP: entity_id not resolved — no AOD handoff snapshot_name. "
@@ -391,19 +399,31 @@ async def infer_pipes():
         _t_handoff, _t_convert, _t_write,
     )
 
-    return {
+    # Build response — includes triple write ledger entry and mode
+    response = {
         "message": "Inference complete",
+        "mode": mode.value,
+        "run_id": triple_write_result["ledger_id"] if triple_write_result else None,
         "pipes_created": total_pipes,
         "from_observations": pipes_from_obs,
         "from_candidates": pipes_from_candidates,
         "candidates_unmatched": len(match_failures),
         "unmatched_reasons": match_failures[:10],
+        "triple_write": triple_write_result,
+        "dispatch": None,  # No dispatch in SYNTHETIC mode
     }
+
+    return response
 
 
 @router.post("/api/collect/adapter/run")
 async def run_adapter(request=None):
     """Run adapter collector against connected fabric planes."""
+    mode = get_operating_mode()
+    if mode == OperatingMode.SYNTHETIC:
+        _log.info("Skipping collector run: superseded by MCP discovery in PRODUCTION_SE")
+        return {"message": "Collectors superseded in SYNTHETIC mode", "mode": mode.value}
+
     from ..main import adapter_registry
 
     collector_id = "adapter-collector-001"

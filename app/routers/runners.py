@@ -31,6 +31,7 @@ from ..config import settings
 from ..logger import get_logger
 from ..db.dcl_pushes import has_dcl_push_for_run, get_exported_pipe_ids
 from ..db.handoff import list_handoff_logs
+from ..utils.operating_mode import get_operating_mode, OperatingMode
 
 _log = get_logger("routers.runners")
 
@@ -99,6 +100,11 @@ async def dispatch_single(req: RunnerDispatchRequest):
     Builds a JobManifest, stores it, and POSTs it to Farm's intake
     endpoint.  AAM does NOT execute the job — Farm does.
     """
+    mode = get_operating_mode()
+    if mode == OperatingMode.SYNTHETIC:
+        _log.info("Skipping JobManifest dispatch: superseded by MCP discovery in PRODUCTION_SE")
+        return {"message": "Dispatch superseded in SYNTHETIC mode", "mode": mode.value, "status": "skipped"}
+
     exported_ids = _require_dcl_export()
     try:
         result = dispatch_pipe(
@@ -272,6 +278,11 @@ async def dispatch_multiple(req: RunnerBatchDispatchRequest):
     Builds manifests, stores them, and POSTs each to Farm's intake
     endpoint in parallel.  Pings Farm health first to wake cold instances.
     """
+    mode = get_operating_mode()
+    if mode == OperatingMode.SYNTHETIC:
+        _log.info("Skipping batch JobManifest dispatch: superseded by MCP discovery in PRODUCTION_SE")
+        return {"message": "Dispatch superseded in SYNTHETIC mode", "mode": mode.value, "status": "skipped", "dispatched": 0}
+
     exported_ids = _require_dcl_export()
     if not req.pipe_ids:
         raise HTTPException(status_code=400, detail="pipe_ids is required")

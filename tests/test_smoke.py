@@ -81,6 +81,8 @@ def test_create_pipe_and_get(db):
 
 def test_list_pipes_returns_candidates_as_pipes(db):
     """list_pipes() reads from connection_candidates (pipes = candidates)."""
+    pipes_before = db.list_pipes()
+    count_before = len(pipes_before)
     db.create_candidate({
         "asset_key": "salesforce.com",
         "vendor_name": "salesforce",
@@ -88,10 +90,11 @@ def test_list_pipes_returns_candidates_as_pipes(db):
         "category": "crm",
     })
     pipes = db.list_pipes()
-    assert len(pipes) == 1
-    assert pipes[0]["source_system"] == "salesforce"
+    assert len(pipes) == count_before + 1
+    sf_pipes = [p for p in pipes if p.get("source_system") == "salesforce"]
+    assert len(sf_pipes) >= 1
     # Strict mode: no plane linkage → UNMAPPED, not API_GATEWAY
-    assert pipes[0]["fabric_plane"] == "UNMAPPED"
+    assert sf_pipes[0]["fabric_plane"] == "UNMAPPED"
 
 
 def test_strict_defaults_no_hallucination(db):

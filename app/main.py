@@ -94,6 +94,13 @@ from .pii_redaction import redact_pii_from_observation
 @asynccontextmanager
 async def lifespan(app):
     init_db()
+    # Initialize the triple write ledger (SQLite, AAM-local)
+    from .db.ledger import init_ledger_db
+    init_ledger_db()
+    # Log operating mode at startup
+    from .utils.operating_mode import get_operating_mode
+    mode = get_operating_mode()
+    _log.info("AAM operating mode: %s", mode.value)
     from .services.runner_worker import start_worker, stop_worker
     await start_worker()
     yield
@@ -135,6 +142,8 @@ from .routers.ui_pages import router as ui_pages_router
 from .routers.runners import router as runners_router
 from .routers.dcl_ingest import router as dcl_ingest_router
 from .routers.maestra import router as maestra_router
+from .routers.controls import router as controls_router
+from .routers.controls_ui import router as controls_ui_router
 
 app.include_router(handoff_router)
 app.include_router(fabric_router)
@@ -151,6 +160,8 @@ app.include_router(admin_router)
 app.include_router(runners_router)
 app.include_router(dcl_ingest_router)
 app.include_router(maestra_router)
+app.include_router(controls_router)
+app.include_router(controls_ui_router)
 app.include_router(ui_pages_router)
 
 
