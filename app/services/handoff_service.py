@@ -189,15 +189,11 @@ def save_aod_payload(request: AODHandoffRequest):
 
 
 def load_aod_payload() -> Optional[dict]:
-    """Load last saved AOD payload from file."""
-    try:
-        with open(AOD_PAYLOAD_FILE, "r") as f:
-            return json.load(f)
-    except FileNotFoundError:
+    """Load last saved AOD payload from file.  Returns None only if file doesn't exist."""
+    if not AOD_PAYLOAD_FILE.exists():
         return None
-    except Exception as e:
-        _log.error("Failed to load AOD payload from %s: %s", AOD_PAYLOAD_FILE, e)
-        return None
+    with open(AOD_PAYLOAD_FILE, "r") as f:
+        return json.load(f)
 
 
 
@@ -545,6 +541,8 @@ def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
     rejected_dicts = [r.to_dict() for r in rejected]
     handoff_log = create_handoff_log({
         "aod_run_id": request.run_id,
+        "tenant_id": request.tenant_id,
+        "entity_id": request.entity_id,
         "snapshot_name": request.snapshot_name,
         "candidates_received": len(request.candidates),
         "candidates_accepted": aod_accepted_count,

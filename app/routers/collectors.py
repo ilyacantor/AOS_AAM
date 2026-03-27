@@ -349,17 +349,17 @@ async def infer_pipes():
     mode = get_operating_mode()
     try:
         from ..converters.triple_converter import (
-            convert_inference_batch, generate_run_id, resolve_entity_id,
+            convert_inference_batch, generate_run_id,
         )
         from ..db.triple_writer import write_triples_with_ledger
 
-        # Resolve entity_id from most recent AOD handoff
+        # Read identity from most recent AOD handoff — no derivation
         _th = time.perf_counter()
         handoffs = sb.select("aod_handoff_log", order="processed_at.desc", limit=1)
         _t_handoff = time.perf_counter() - _th
-        snapshot_name = handoffs[0].get("snapshot_name") if handoffs else None
-        aod_rid = handoffs[0].get("aod_run_id") if handoffs else None
-        entity_id = resolve_entity_id(snapshot_name, aod_rid)
+        _handoff = handoffs[0] if handoffs else {}
+        entity_id = _handoff.get("entity_id") or _handoff.get("snapshot_name")
+        tenant_id = _handoff.get("tenant_id")
 
         if entity_id and (new_pipes or update_pairs):
             run_uuid, run_tag = generate_run_id()
@@ -377,6 +377,7 @@ async def infer_pipes():
             _tc = time.perf_counter()
             triple_dicts = convert_inference_batch(
                 new_pipes, connection_data, planes, entity_id, run_uuid, run_tag,
+                tenant_id=tenant_id,
             )
             _t_convert = time.perf_counter() - _tc
             if triple_dicts:

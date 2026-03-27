@@ -35,17 +35,21 @@ def store_fabric_plane(plane_data: dict, aod_run_id: str) -> dict:
 
     # --- EAV triple for fabric plane — through ledger ---
     from ..converters.triple_converter import (
-        convert_fabric_plane_to_triples, generate_run_id, resolve_entity_id,
+        convert_fabric_plane_to_triples, generate_run_id,
     )
     from .triple_writer import write_triples_with_ledger
 
-    _eid = resolve_entity_id(None, aod_run_id)
+    # Read identity from handoff log — no derivation
+    _handoffs = sb.select("aod_handoff_log", order="processed_at.desc", limit=1)
+    _handoff = _handoffs[0] if _handoffs else {}
+    _eid = _handoff.get("entity_id") or _handoff.get("snapshot_name") or aod_run_id
+    _tid = _handoff.get("tenant_id")
     if _eid:
         _ruuid, _rtag = generate_run_id()
         _ptriples = convert_fabric_plane_to_triples(
             {"plane_type": plane_data["plane_type"], "vendor": plane_data["vendor"],
              "is_healthy": is_healthy},
-            _eid, _ruuid, _rtag,
+            _eid, _ruuid, _rtag, tenant_id=_tid,
         )
         if _ptriples:
             write_triples_with_ledger(

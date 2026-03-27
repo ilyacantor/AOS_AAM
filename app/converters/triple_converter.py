@@ -135,9 +135,24 @@ def _make_triple(
     confidence_score: float = 0.85,
     confidence_tier: str = "high",
     period: Optional[str] = None,
+    tenant_id: Optional[str] = None,
 ) -> dict:
-    """Build one triple dict matching the semantic_triples column layout."""
-    tenant_uuid = _to_tenant_uuid(entity_id)
+    """Build one triple dict matching the semantic_triples column layout.
+
+    tenant_id: explicit UUID from the handoff payload.  If not provided,
+    falls back to _to_tenant_uuid(entity_id) for transition compatibility
+    but logs a deprecation warning — callers should always pass tenant_id.
+    """
+    if tenant_id:
+        tenant_uuid = tenant_id
+    else:
+        _log.warning(
+            "AAM_IDENTITY_DEPRECATED: _make_triple called without explicit tenant_id "
+            "(entity_id=%s) — deriving via _to_tenant_uuid. "
+            "Callers should pass tenant_id from the handoff payload.",
+            entity_id,
+        )
+        tenant_uuid = _to_tenant_uuid(entity_id)
     return {
         "tenant_id": tenant_uuid,
         "entity_id": entity_id,
@@ -182,6 +197,7 @@ def convert_pipe_to_triples(
     entity_id: str,
     run_id: str,
     source_run_tag: str,
+    tenant_id: Optional[str] = None,
 ) -> list[dict]:
     """Convert a DeclaredPipe dict to semantic triples."""
     triples = []
@@ -199,6 +215,7 @@ def convert_pipe_to_triples(
             continue
         triples.append(_make_triple(
             entity_id=entity_id,
+            tenant_id=tenant_id,
             concept="mapping.pipe",
             prop=prop_name,
             value=raw,
@@ -223,6 +240,7 @@ def convert_pipe_to_triples(
         if not _should_skip(sh):
             triples.append(_make_triple(
                 entity_id=entity_id,
+                tenant_id=tenant_id,
                 concept="mapping.pipe",
                 prop="schema_hash",
                 value=sh,
@@ -247,6 +265,7 @@ def convert_connection_to_triples(
     entity_id: str,
     run_id: str,
     source_run_tag: str,
+    tenant_id: Optional[str] = None,
 ) -> list[dict]:
     """Convert a matched connection candidate to semantic triples."""
     triples = []
@@ -271,6 +290,7 @@ def convert_connection_to_triples(
             continue
         triples.append(_make_triple(
             entity_id=entity_id,
+            tenant_id=tenant_id,
             concept="mapping.connection",
             prop=prop_name,
             value=value,
@@ -295,6 +315,7 @@ def convert_drift_to_triples(
     entity_id: str,
     run_id: str,
     source_run_tag: str,
+    tenant_id: Optional[str] = None,
 ) -> list[dict]:
     """Convert a drift event to semantic triples."""
     triples = []
@@ -321,6 +342,7 @@ def convert_drift_to_triples(
             continue
         triples.append(_make_triple(
             entity_id=entity_id,
+            tenant_id=tenant_id,
             concept="mapping.drift",
             prop=prop_name,
             value=value,
@@ -346,6 +368,7 @@ def convert_fabric_plane_to_triples(
     entity_id: str,
     run_id: str,
     source_run_tag: str,
+    tenant_id: Optional[str] = None,
 ) -> list[dict]:
     """Convert a fabric plane record to semantic triples."""
     triples = []
@@ -361,6 +384,7 @@ def convert_fabric_plane_to_triples(
             continue
         triples.append(_make_triple(
             entity_id=entity_id,
+            tenant_id=tenant_id,
             concept="mapping.fabric",
             prop=prop_name,
             value=value,
@@ -386,6 +410,7 @@ def convert_inference_batch(
     entity_id: str,
     run_id: str,
     source_run_tag: str,
+    tenant_id: Optional[str] = None,
 ) -> list[dict]:
     """Convert all post-inference data to triples in one call.
 
@@ -395,13 +420,13 @@ def convert_inference_batch(
     all_triples: list[dict] = []
 
     for pipe in new_pipes:
-        all_triples.extend(convert_pipe_to_triples(pipe, entity_id, run_id, source_run_tag))
+        all_triples.extend(convert_pipe_to_triples(pipe, entity_id, run_id, source_run_tag, tenant_id=tenant_id))
 
     for candidate in candidate_updates:
-        all_triples.extend(convert_connection_to_triples(candidate, entity_id, run_id, source_run_tag))
+        all_triples.extend(convert_connection_to_triples(candidate, entity_id, run_id, source_run_tag, tenant_id=tenant_id))
 
     for plane in planes:
-        all_triples.extend(convert_fabric_plane_to_triples(plane, entity_id, run_id, source_run_tag))
+        all_triples.extend(convert_fabric_plane_to_triples(plane, entity_id, run_id, source_run_tag, tenant_id=tenant_id))
 
     _log.info(
         "convert_inference_batch: pipes=%d connections=%d planes=%d → %d triples",

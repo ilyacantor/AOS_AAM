@@ -191,6 +191,8 @@ def build_manifest(
     aod_run_id: Optional[str] = None,
     farm_verification: bool = False,
     run_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+    entity_id: Optional[str] = None,
 ) -> JobManifest:
     """Build an immutable Job Manifest from a pipe definition.
 
@@ -249,7 +251,9 @@ def build_manifest(
         if candidate:
             category = candidate.get("category") or None
 
-    tenant_id = snapshot_name or aod_run_id or "default"
+    # Use explicit identity from handoff log. Fall back to snapshot_name for transition.
+    _tenant_id = tenant_id or snapshot_name or aod_run_id or "default"
+    _entity_id = entity_id or snapshot_name
 
     return JobManifest(
         run_id=run_id,
@@ -265,12 +269,13 @@ def build_manifest(
             dcl_url=settings.DCL_INGEST_URL,
             auth_token_ref=settings.DCL_API_KEY or None,
             snapshot_name=snapshot_name,
-            tenant_id=tenant_id,
+            tenant_id=_tenant_id,
             callback_url=f"{settings.BASE_URL}/api/runners/callback",
         ),
         provenance={
             "aod_run_id": aod_run_id,
             "snapshot_name": snapshot_name,
+            "entity_id": _entity_id,
             "run_timestamp": datetime.utcnow().isoformat(),
             "triggered_by": trigger,
         },
@@ -314,8 +319,11 @@ def dispatch_pipe(
                 "No AOD handoff found. Run AOD handoff first before dispatching pipes."
             )
 
-        aod_run_id = handoffs[0].get("aod_run_id")
-        snapshot_name = snapshot_name or handoffs[0].get("snapshot_name")
+        _handoff = handoffs[0]
+        aod_run_id = _handoff.get("aod_run_id")
+        snapshot_name = snapshot_name or _handoff.get("snapshot_name")
+        _tenant_id = _handoff.get("tenant_id")
+        _entity_id = _handoff.get("entity_id")
 
         if not aod_run_id:
             raise ValueError(
@@ -336,6 +344,8 @@ def dispatch_pipe(
         aod_run_id=aod_run_id,
         farm_verification=farm_verification,
         run_id=_generate_dispatch_id(aod_run_id),
+        tenant_id=_tenant_id,
+        entity_id=_entity_id,
     )
     job_id = dispatch_job(manifest)
 
@@ -380,8 +390,11 @@ def dispatch_batch(
                 "No AOD handoff found. Run AOD handoff first before dispatching pipes."
             )
 
-        current_aod_run_id = handoffs[0].get("aod_run_id")
-        current_snapshot = handoffs[0].get("snapshot_name")
+        _handoff = handoffs[0]
+        current_aod_run_id = _handoff.get("aod_run_id")
+        current_snapshot = _handoff.get("snapshot_name")
+        current_tenant_id = _handoff.get("tenant_id")
+        current_entity_id = _handoff.get("entity_id")
 
         if not current_aod_run_id:
             raise ValueError(
@@ -503,7 +516,7 @@ def dispatch_batch(
                     })
                     continue
 
-            manifest = build_manifest(pipe, trigger, snapshot_name=current_snapshot, aod_run_id=current_aod_run_id, run_id=batch_run_id)
+            manifest = build_manifest(pipe, trigger, snapshot_name=current_snapshot, aod_run_id=current_aod_run_id, run_id=batch_run_id, tenant_id=current_tenant_id, entity_id=current_entity_id)
 
             manifest_payload = manifest.model_dump()
             manifests_data.append(manifest_payload)

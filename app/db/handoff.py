@@ -17,6 +17,8 @@ def create_handoff_log(handoff_data: dict) -> dict:
     data = {
         "handoff_id": handoff_id,
         "aod_run_id": handoff_data["aod_run_id"],
+        "tenant_id": handoff_data.get("tenant_id"),
+        "entity_id": handoff_data.get("entity_id"),
         "snapshot_name": handoff_data.get("snapshot_name"),
         "candidates_received": handoff_data["candidates_received"],
         "candidates_accepted": handoff_data["candidates_accepted"],
@@ -52,6 +54,8 @@ def get_handoff_log(handoff_id: str) -> Optional[dict]:
         return {
             "handoff_id": row["handoff_id"],
             "aod_run_id": row["aod_run_id"],
+            "tenant_id": row.get("tenant_id"),
+            "entity_id": row.get("entity_id"),
             "snapshot_name": row.get("snapshot_name"),
             "candidates_received": row["candidates_received"],
             "candidates_accepted": row["candidates_accepted"],
@@ -80,6 +84,8 @@ def list_handoff_logs(aod_run_id: Optional[str] = None, limit: Optional[int] = N
     return [{
         "handoff_id": row["handoff_id"],
         "aod_run_id": row["aod_run_id"],
+        "tenant_id": row.get("tenant_id"),
+        "entity_id": row.get("entity_id"),
         "snapshot_name": row.get("snapshot_name"),
         "candidates_received": row["candidates_received"],
         "candidates_accepted": row["candidates_accepted"],

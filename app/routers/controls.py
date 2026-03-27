@@ -227,11 +227,7 @@ def get_drift_status(entity_id: Optional[str] = Query(None)):
         if not entity_id:
             handoffs = sb.select("aod_handoff_log", order="processed_at.desc", limit=1)
             if handoffs:
-                from ..converters.triple_converter import resolve_entity_id
-                entity_id = resolve_entity_id(
-                    handoffs[0].get("snapshot_name"),
-                    handoffs[0].get("aod_run_id"),
-                )
+                entity_id = handoffs[0].get("entity_id") or handoffs[0].get("snapshot_name")
 
         if entity_id:
             drift_query = psql.SQL(
@@ -271,11 +267,7 @@ def trigger_drift_check(entity_id: Optional[str] = Query(None)):
     if not entity_id:
         handoffs = sb.select("aod_handoff_log", order="processed_at.desc", limit=1)
         if handoffs:
-            from ..converters.triple_converter import resolve_entity_id
-            entity_id = resolve_entity_id(
-                handoffs[0].get("snapshot_name"),
-                handoffs[0].get("aod_run_id"),
-            )
+            entity_id = handoffs[0].get("entity_id") or handoffs[0].get("snapshot_name")
     if not entity_id:
         raise HTTPException(status_code=400, detail="Cannot resolve entity_id — no AOD handoff found")
 

@@ -1679,7 +1679,7 @@ async def ui_topology():
     """Topology Visualization Screen"""
     latest_run = get_latest_aod_run()
     if latest_run:
-        _snap = latest_run.get("snapshot_name") or "Unnamed"
+        _snap = latest_run.get("entity_id") or latest_run.get("snapshot_name") or "Unnamed"
         _pipes = latest_run.get("candidates_accepted", 0)
         _ts = (latest_run.get("handoff_timestamp") or "")[:10]
         _rid = latest_run.get("aod_run_id", "")
@@ -2154,8 +2154,8 @@ async def ui_topology():
                 if (!res.ok) return;
                 var run = await res.json();
                 var el = document.getElementById('sb-run-info');
-                if (el && run && run.snapshot_name) {{
-                    var snap = run.snapshot_name || 'Unnamed';
+                if (el && run && (run.entity_id || run.snapshot_name)) {{
+                    var snap = run.entity_id || run.snapshot_name || 'Unnamed';
                     var pipes = run.candidates_accepted || 0;
                     var ts = (run.handoff_timestamp || '').substring(0, 10);
                     el.innerHTML = '<div class="sb-val" style="color:#f0abfc;">' + snap + '</div>' +
@@ -3168,7 +3168,7 @@ async def ui_topology():
                     (d.dispatch_id ? '<span style="color:var(--slate-400,#94a3b8);">' + d.dispatch_id + '</span>' : '') +
                     '</div>' +
                     '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:4px;color:var(--slate-400,#94a3b8);">' +
-                    (d.snapshot_name ? '<span>Snapshot: <span style="color:var(--slate-200,#e2e8f0);">' + d.snapshot_name + '</span></span>' : '') +
+                    ((d.entity_id || d.snapshot_name) ? '<span>Entity: <span style="color:var(--slate-200,#e2e8f0);">' + (d.entity_id || d.snapshot_name) + '</span></span>' : '') +
                     (d.aod_run_id ? '<span>Run: <span style="color:var(--slate-200,#e2e8f0);">' + d.aod_run_id + '</span></span>' : '') +
                     (d.pipe_count != null ? '<span>Pipes: <span style="color:var(--slate-200,#e2e8f0);">' + d.pipe_count + '</span></span>' : '') +
                     (ts ? '<span>At: ' + ts + '</span>' : '') +
@@ -3619,7 +3619,7 @@ async def ui_reconcile(aod_run_id: str):
     aod_sent = data["aod_sent"]
     aam = data["aam_stored"]
     recon = data["reconciliation"]
-    snapshot = data.get("snapshot_name") or ""
+    snapshot = data.get("entity_id") or data.get("snapshot_name") or ""
     timestamp = data.get("handoff_timestamp", "")[:19] if data.get("handoff_timestamp") else "N/A"
     
     # Overall status

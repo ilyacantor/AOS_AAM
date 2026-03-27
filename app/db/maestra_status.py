@@ -55,15 +55,17 @@ def get_maestra_status(tenant_id: str) -> dict:
 
 
 def _get_aod_run_ids_for_tenant(tenant_id: str) -> list[str]:
-    """Find all aod_run_ids where snapshot_name matches tenant_id."""
+    """Find all aod_run_ids for a tenant — matches entity_id (authoritative) or snapshot_name (transition)."""
     query = psql.SQL(
-        "SELECT DISTINCT {aod_run_id} FROM {table} WHERE {snapshot_name} = %s"
+        "SELECT DISTINCT {aod_run_id} FROM {table} "
+        "WHERE {entity_id} = %s OR {snapshot_name} = %s"
     ).format(
         aod_run_id=sb._ident("aod_run_id"),
         table=sb._ident("aod_handoff_log"),
+        entity_id=sb._ident("entity_id"),
         snapshot_name=sb._ident("snapshot_name"),
     )
-    rows = sb._execute_composed(query, (tenant_id,))
+    rows = sb._execute_composed(query, (tenant_id, tenant_id))
     return [r["aod_run_id"] for r in rows if r.get("aod_run_id")]
 
 

@@ -200,7 +200,9 @@ class SORDeclaration(BaseModel):
 class AODHandoffRequest(BaseModel):
     """Batch handoff request from AOD"""
     run_id: str = Field(..., description="AOD discovery run ID")
-    snapshot_name: Optional[str] = Field(None, description="Human-readable snapshot name (e.g., Networks-5OS6)")
+    tenant_id: Optional[str] = Field(None, description="Tenant UUID — DB isolation key")
+    entity_id: Optional[str] = Field(None, description="Business entity key (e.g. 'meridian')")
+    snapshot_name: Optional[str] = Field(None, description="Deprecated: use entity_id. Kept for transition.")
     candidates: list[AODHandoffCandidate] = Field(..., description="Candidates to hand off")
     fabric_planes: list[FabricPlaneSummary] = Field(default_factory=list, description="Detected fabric planes")
     sors: list[SORDeclaration] = Field(default_factory=list, description="Authoritative SOR declarations from Farm")

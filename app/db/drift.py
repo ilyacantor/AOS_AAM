@@ -43,17 +43,18 @@ def create_drift_event(pipe_id: str, drift_type: str, old_value: str, new_value:
 
     # --- EAV triple for drift event — through ledger ---
     from ..converters.triple_converter import (
-        convert_drift_to_triples, generate_run_id, resolve_entity_id,
+        convert_drift_to_triples, generate_run_id,
     )
     from .triple_writer import write_triples_with_ledger
 
+    # Read identity from handoff log — no derivation
     handoffs = sb.select("aod_handoff_log", order="processed_at.desc", limit=1)
-    _snap = handoffs[0].get("snapshot_name") if handoffs else None
-    _aod = handoffs[0].get("aod_run_id") if handoffs else None
-    _eid = resolve_entity_id(_snap, _aod)
+    _handoff = handoffs[0] if handoffs else {}
+    _eid = _handoff.get("entity_id") or _handoff.get("snapshot_name")
+    _tid = _handoff.get("tenant_id")
     if _eid:
         _ruuid, _rtag = generate_run_id()
-        _dtriples = convert_drift_to_triples(data, _eid, _ruuid, _rtag)
+        _dtriples = convert_drift_to_triples(data, _eid, _ruuid, _rtag, tenant_id=_tid)
         if _dtriples:
             write_triples_with_ledger(
                 _dtriples,
