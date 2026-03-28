@@ -139,20 +139,16 @@ def _make_triple(
 ) -> dict:
     """Build one triple dict matching the semantic_triples column layout.
 
-    tenant_id: explicit UUID from the handoff payload.  If not provided,
-    falls back to _to_tenant_uuid(entity_id) for transition compatibility
-    but logs a deprecation warning — callers should always pass tenant_id.
+    tenant_id: explicit UUID from the handoff payload. Required — raises
+    ValueError if not provided.
     """
-    if tenant_id:
-        tenant_uuid = tenant_id
-    else:
-        _log.warning(
-            "AAM_IDENTITY_DEPRECATED: _make_triple called without explicit tenant_id "
-            "(entity_id=%s) — deriving via _to_tenant_uuid. "
-            "Callers should pass tenant_id from the handoff payload.",
-            entity_id,
+    if not tenant_id:
+        raise ValueError(
+            f"_make_triple requires explicit tenant_id (entity_id={entity_id}). "
+            "Silent derivation via _to_tenant_uuid is prohibited — callers must "
+            "pass tenant_id from the handoff payload."
         )
-        tenant_uuid = _to_tenant_uuid(entity_id)
+    tenant_uuid = tenant_id
     return {
         "tenant_id": tenant_uuid,
         "entity_id": entity_id,

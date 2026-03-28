@@ -71,6 +71,8 @@ CREATE TABLE IF NOT EXISTS declared_pipes (
 CREATE TABLE IF NOT EXISTS aod_handoff_log (
     handoff_id TEXT PRIMARY KEY,
     aod_run_id TEXT NOT NULL,
+    tenant_id TEXT,
+    entity_id TEXT,
     snapshot_name TEXT,
     candidates_received INTEGER NOT NULL,
     candidates_accepted INTEGER NOT NULL,

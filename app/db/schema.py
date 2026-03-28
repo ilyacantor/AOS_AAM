@@ -68,6 +68,9 @@ def _run_migrations():
         ),
         # Migration 2026-03-03: Store AOD reconciliation manifest in handoff log
         ("ALTER TABLE aod_handoff_log ADD COLUMN IF NOT EXISTS reconciliation_manifest TEXT", "add_reconciliation_manifest_column"),
+        # Migration 2026-03-27: Add tenant_id and entity_id to handoff log
+        ("ALTER TABLE aod_handoff_log ADD COLUMN IF NOT EXISTS tenant_id TEXT", "add_handoff_tenant_id_column"),
+        ("ALTER TABLE aod_handoff_log ADD COLUMN IF NOT EXISTS entity_id TEXT", "add_handoff_entity_id_column"),
     ]
 
     for sql_stmt, migration_name in migrations:
