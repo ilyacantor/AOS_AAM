@@ -104,7 +104,8 @@ class SORDeclarationExport(BaseModel):
 class DCLExportResponse(BaseModel):
     """Response for DCL export endpoint"""
     aod_run_id: Optional[str] = None
-    snapshot_name: Optional[str] = None
+    entity_id: Optional[str] = None
+    snapshot_name: Optional[str] = None  # Deprecated: use entity_id. Kept for transition.
     timestamp: str
     fabric_planes: List[DCLFabricPlane]
     total_connections: int                             # Count of exported pipes only
@@ -261,15 +262,18 @@ def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
     Groups candidates by fabric plane and formats for DCL consumption.
     If aod_run_id is provided, filters to that run. Otherwise, uses all candidates.
     """
-    # Resolve snapshot_name from handoff log
+    # Resolve entity_id (authoritative) and snapshot_name (deprecated) from handoff log
+    entity_id: Optional[str] = None
     snapshot_name: Optional[str] = None
     if aod_run_id:
         handoffs = list_handoff_logs(aod_run_id=aod_run_id, limit=1)
         if handoffs:
+            entity_id = handoffs[0].get("entity_id") or handoffs[0].get("snapshot_name")
             snapshot_name = handoffs[0].get("snapshot_name")
     else:
         handoffs = list_handoff_logs(limit=1)
         if handoffs:
+            entity_id = handoffs[0].get("entity_id") or handoffs[0].get("snapshot_name")
             snapshot_name = handoffs[0].get("snapshot_name")
             if not aod_run_id:
                 aod_run_id = handoffs[0].get("aod_run_id")
@@ -451,6 +455,7 @@ def build_dcl_export(aod_run_id: Optional[str] = None) -> DCLExportResponse:
 
     return DCLExportResponse(
         aod_run_id=aod_run_id,
+        entity_id=entity_id,
         snapshot_name=snapshot_name,
         timestamp=datetime.utcnow().isoformat() + "Z",
         fabric_planes=fabric_planes_output,

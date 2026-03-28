@@ -2206,7 +2206,7 @@ async def ui_topology():
                 }}
                 var fetchData = await res.json();
                 var candCount = fetchData.candidates_accepted || fetchData.candidates || 0;
-                var snap = fetchData.snapshot_name || '';
+                var snap = fetchData.entity_id || fetchData.snapshot_name || '';
                 logStep('1', 'Fetch: ' + candCount + ' candidates' + (snap ? ' (' + snap + ')' : ''), true);
 
                 // Step 2: Run inference
@@ -2267,7 +2267,7 @@ async def ui_topology():
                     var dispatchBody = {{}};
                     if (exportData.export) {{
                         dispatchBody.aod_run_id = exportData.export.aod_run_id || null;
-                        dispatchBody.snapshot_name = exportData.export.snapshot_name || null;
+                        dispatchBody.snapshot_name = exportData.export.entity_id || exportData.export.snapshot_name || null;
                         dispatchBody.pipe_count = exportData.export.total_connections || 0;
                     }}
                     res = await fetch('/api/export/dcl/dispatch', {{
@@ -3141,7 +3141,7 @@ async def ui_topology():
                             if (run && run.aod_run_id) {{
                                 d = {{
                                     aod_run_id: run.aod_run_id,
-                                    snapshot_name: run.snapshot_name,
+                                    snapshot_name: run.entity_id || run.snapshot_name,
                                     pipe_count: run.candidates_accepted,
                                     ok: true,
                                     timestamp: run.handoff_timestamp,
@@ -3377,8 +3377,8 @@ async def ui_topology():
                 let snapshotHtml = '-';
                 if (isIdemSkip) {{
                     snapshotHtml = '<span style="color:#fb923c;" title="Result from a previous snapshot">cached</span>';
-                }} else if (j.snapshot_name) {{
-                    const sn = j.snapshot_name;
+                }} else if (j.entity_id || j.snapshot_name) {{
+                    const sn = j.entity_id || j.snapshot_name;
                     snapshotHtml = sn.length > 18 ? sn.substring(0,15) + '...' : sn;
                 }}
 
@@ -3434,7 +3434,7 @@ async def ui_topology():
                 html += kv('System', src.system);
                 html += kv('Adapter', src.adapter);
                 html += kv('Category', src.category);
-                html += kv('Snapshot', tgt.snapshot_name);
+                html += kv('Entity', tgt.entity_id || tgt.snapshot_name);
                 html += kv('DCL URL', tgt.dcl_url);
                 html += kv('Tenant', tgt.tenant_id);
                 html += kv('Trigger', prov.triggered_by);
@@ -4177,7 +4177,7 @@ async def ui_reconcile(aod_run_id: str):
         dcl_exported = dcl_export.total_connections
         dcl_skipped = dcl_export.skipped_connections
         dcl_skipped_count = dcl_export.skipped_count
-        dcl_snapshot = dcl_export.snapshot_name
+        dcl_snapshot = dcl_export.entity_id or dcl_export.snapshot_name
         dcl_aod_run = dcl_export.aod_run_id
     except Exception as exc:
         _log.error("Failed to build DCL export for deep check: %s", exc)
