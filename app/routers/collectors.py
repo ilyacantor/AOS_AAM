@@ -112,7 +112,6 @@ async def infer_pipes():
                 "message": "Nothing to process — no observations or unmatched candidates",
                 "mode": mode.value,
                 "aam_inference_id": aam_inference_id,
-                "run_id": aam_inference_id,
                 "source_handoff_id": source_handoff_id,
                 "tenant_id": tenant_id,
                 "entity_id": entity_id,
@@ -124,7 +123,6 @@ async def infer_pipes():
             "message": "Inference complete",
             "mode": mode.value,
             "aam_inference_id": aam_inference_id,
-            "run_id": aam_inference_id,
             "source_handoff_id": source_handoff_id,
             "tenant_id": tenant_id,
             "entity_id": entity_id,
@@ -426,7 +424,6 @@ async def infer_pipes():
         "message": "Inference complete",
         "mode": mode.value,
         "aam_inference_id": aam_inference_id,
-        "run_id": aam_inference_id,
         "source_handoff_id": source_handoff_id,
         "tenant_id": tenant_id,
         "entity_id": entity_id,
@@ -463,7 +460,7 @@ async def run_adapter(request=None):
                 detail="No adapters connected. Connect adapters first via /api/adapters/{plane_type}/connect",
             )
         result = await run_adapter_collector(collector_id, run_id, adapter_registry)
-        return {"run_id": run_id, "collector": "adapter", **result}
+        return {"aam_inference_id": run_id, "collector": "adapter", **result}
     except HTTPException:
         raise
     except Exception as e:

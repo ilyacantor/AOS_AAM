@@ -84,7 +84,7 @@ def get_ledger_summary():
 def get_ledger_for_run(run_id: str):
     """All entries for a specific run."""
     entries = get_entries_for_run(run_id)
-    return {"entries": entries, "count": len(entries), "run_id": run_id}
+    return {"entries": entries, "count": len(entries), "aam_inference_id": run_id}
 
 
 # ---------------------------------------------------------------------------
@@ -179,17 +179,17 @@ def get_triple_health(entity_id: Optional[str] = Query(None)):
         run_comparison = None
         if len(run_rows) >= 2:
             run_comparison = {
-                "latest_run_id": run_rows[0]["run_id"],
+                "latest_aam_inference_id": run_rows[0]["run_id"],
                 "latest_count": run_rows[0]["cnt"],
-                "previous_run_id": run_rows[1]["run_id"],
+                "previous_aam_inference_id": run_rows[1]["run_id"],
                 "previous_count": run_rows[1]["cnt"],
                 "delta": run_rows[0]["cnt"] - run_rows[1]["cnt"],
             }
         elif len(run_rows) == 1:
             run_comparison = {
-                "latest_run_id": run_rows[0]["run_id"],
+                "latest_aam_inference_id": run_rows[0]["run_id"],
                 "latest_count": run_rows[0]["cnt"],
-                "previous_run_id": None,
+                "previous_aam_inference_id": None,
                 "previous_count": 0,
                 "delta": run_rows[0]["cnt"],
             }
@@ -320,7 +320,7 @@ def trigger_drift_check(entity_id: Optional[str] = Query(None)):
 
     return {
         "entity_id": entity_id,
-        "run_id": latest_run_id,
+        "aam_inference_id": latest_run_id,
         "events": [
             {
                 "drift_type": e.drift_type,

@@ -29,8 +29,7 @@ def _build_vendor_candidate_map() -> dict[str, str]:
                 mapping[vendor] = c["candidate_id"]
         return mapping
     except Exception as exc:
-        _log.warning("Could not build vendor→candidate map: %s", exc)
-        return {}
+        raise RuntimeError(f"Could not build vendor→candidate map: {exc}") from exc
 
 
 async def run_adapter_collector(
@@ -93,7 +92,7 @@ async def run_adapter_collector(
 
     complete_collector_run(run_id, "completed", len(all_observations))
     return {
-        "run_id": run_id,
+        "aam_inference_id": run_id,
         "status": "completed",
         "observations_created": len(all_observations),
         "adapters_collected": adapters_collected,

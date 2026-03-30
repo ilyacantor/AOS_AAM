@@ -351,7 +351,7 @@ def dispatch_pipe(
 
     return {
         "job_id": job_id,
-        "run_id": manifest.run_id,
+        "aam_inference_id": manifest.run_id,
         "pipe_id": manifest.source.pipe_id,
         "status": "queued",
         "trigger": trigger,
@@ -523,7 +523,7 @@ def dispatch_batch(
             manifest_objects.append(manifest)
             results.append({
                 "job_id": manifest.source.pipe_id,
-                "run_id": manifest.run_id,
+                "aam_inference_id": manifest.run_id,
                 "pipe_id": manifest.source.pipe_id,
                 "status": "queued",
                 "trigger": trigger,

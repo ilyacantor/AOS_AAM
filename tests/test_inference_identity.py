@@ -59,8 +59,8 @@ def test_infer_response_has_identity_fields(db):
     assert "entity_id" in result, "entity_id missing from inference response"
     assert result["entity_id"] == "test-entity"
 
-    # run_id still present (backward compat) — matches aam_inference_id, not ledger_id
-    assert result["run_id"] == result["aam_inference_id"]
+    # Bare run_id removed per I1 — only aam_inference_id is present
+    assert "run_id" not in result, "bare run_id must not appear in inference response (I1)"
 
 
 def test_infer_empty_response_has_identity_fields(db):

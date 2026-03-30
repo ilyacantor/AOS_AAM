@@ -34,7 +34,7 @@ def create_collector_run(collector_id: str) -> str:
     now = datetime.utcnow().isoformat()
 
     sb.insert("collector_runs", {
-        "run_id": run_id,
+        "run_id": run_id,  # DB column
         "collector_id": collector_id,
         "status": "running",
         "started_at": now,
@@ -52,18 +52,18 @@ def complete_collector_run(run_id: str, status: str, observations_count: int, er
         "completed_at": now,
         "observations_count": observations_count,
         "error_message": error_message,
-    }, filters={"run_id": run_id})
+    }, filters={"run_id": run_id})  # DB column
 
     return len(result) > 0
 
 
 def get_collector_run(run_id: str) -> Optional[dict]:
     """Get a collector run by ID"""
-    row = sb.select("collector_runs", filters={"run_id": run_id}, single=True)
+    row = sb.select("collector_runs", filters={"run_id": run_id}, single=True)  # DB column
 
     if row:
         return {
-            "run_id": row.get("run_id"),
+            "aam_inference_id": row.get("run_id"),
             "collector_id": row.get("collector_id"),
             "status": row.get("status"),
             "started_at": row.get("started_at"),
@@ -89,7 +89,7 @@ def list_collector_runs(collector_id: Optional[str] = None, limit: Optional[int]
     rows = sb.select("collector_runs", **kwargs)
 
     return [{
-        "run_id": row.get("run_id"),
+        "aam_inference_id": row.get("run_id"),
         "collector_id": row.get("collector_id"),
         "status": row.get("status"),
         "started_at": row.get("started_at"),
