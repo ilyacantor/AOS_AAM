@@ -56,6 +56,7 @@ async def infer_pipes():
     runs inference in-memory, then batch-writes results.
     """
     _t_start = time.perf_counter()
+    aam_inference_id = str(uuid.uuid4())
     pipes_from_obs = 0
     pipes_from_candidates = 0
     match_failures = []
@@ -89,6 +90,15 @@ async def infer_pipes():
         if pt and p.get("plane_id"):
             plane_type_to_id[pt] = p["plane_id"]
 
+    # Fetch identity from most recent AOD handoff — needed for all response paths
+    _th = time.perf_counter()
+    _handoff_rows = sb.select("aod_handoff_log", order="processed_at.desc", limit=1)
+    _t_handoff = time.perf_counter() - _th
+    _handoff = _handoff_rows[0] if _handoff_rows else {}
+    source_handoff_id = _handoff.get("handoff_id")
+    entity_id = _handoff.get("entity_id") or _handoff.get("snapshot_name")
+    tenant_id = _handoff.get("tenant_id")
+
     unmatched = [
         c for c in all_candidates
         if not c.get("matched_pipe_id") and c.get("status") not in ("deferred",)
@@ -101,6 +111,11 @@ async def infer_pipes():
             return {
                 "message": "Nothing to process — no observations or unmatched candidates",
                 "mode": mode.value,
+                "aam_inference_id": aam_inference_id,
+                "run_id": aam_inference_id,
+                "source_handoff_id": source_handoff_id,
+                "tenant_id": tenant_id,
+                "entity_id": entity_id,
                 "pipes_created": 0,
                 "triple_write": None,
                 "dispatch": None,
@@ -108,6 +123,11 @@ async def infer_pipes():
         return {
             "message": "Inference complete",
             "mode": mode.value,
+            "aam_inference_id": aam_inference_id,
+            "run_id": aam_inference_id,
+            "source_handoff_id": source_handoff_id,
+            "tenant_id": tenant_id,
+            "entity_id": entity_id,
             "pipes_created": total_pipes,
             "from_observations": pipes_from_obs,
             "from_candidates": 0,
@@ -342,7 +362,6 @@ async def infer_pipes():
 
     # --- EAV triple conversion (non-fatal) ---
     _t0 = time.perf_counter()
-    _t_handoff = 0.0
     _t_convert = 0.0
     _t_write = 0.0
     triple_write_result = None
@@ -352,14 +371,6 @@ async def infer_pipes():
             convert_inference_batch, generate_run_id,
         )
         from ..db.triple_writer import write_triples_with_ledger
-
-        # Read identity from most recent AOD handoff — no derivation
-        _th = time.perf_counter()
-        handoffs = sb.select("aod_handoff_log", order="processed_at.desc", limit=1)
-        _t_handoff = time.perf_counter() - _th
-        _handoff = handoffs[0] if handoffs else {}
-        entity_id = _handoff.get("entity_id") or _handoff.get("snapshot_name")
-        tenant_id = _handoff.get("tenant_id")
 
         if entity_id and (new_pipes or update_pairs):
             run_uuid, run_tag = generate_run_id()
@@ -414,7 +425,11 @@ async def infer_pipes():
     response = {
         "message": "Inference complete",
         "mode": mode.value,
-        "run_id": triple_write_result["ledger_id"] if triple_write_result else None,
+        "aam_inference_id": aam_inference_id,
+        "run_id": aam_inference_id,
+        "source_handoff_id": source_handoff_id,
+        "tenant_id": tenant_id,
+        "entity_id": entity_id,
         "pipes_created": total_pipes,
         "from_observations": pipes_from_obs,
         "from_candidates": pipes_from_candidates,

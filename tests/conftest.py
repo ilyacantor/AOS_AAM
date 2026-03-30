@@ -40,10 +40,69 @@ def db():
 
 
 @pytest.fixture
-def run_id():
-    """Provide run_id for integration tests that need a running server.
+def run_id(db, monkeypatch):
+    """Provide a real run_id with test data routed through TestClient.
 
-    These tests (test_harness.py) hit HTTP endpoints, so they only work when
-    a server is running with ingested data.  Skip automatically in unit-test runs.
+    Seeds an AOD handoff (candidates + planes + SORs) so that every harness
+    test has data to work with, and monkey-patches test_harness.api() to route
+    through FastAPI TestClient — no external server needed.
     """
-    pytest.skip("Integration test — requires a running server with ingested AOD data")
+    import uuid as _uuid
+    from datetime import datetime as _dt
+    from fastapi.testclient import TestClient
+    from app.main import app as fastapi_app
+    from app.models import AODHandoffRequest, FabricPlaneSummary, SORDeclaration
+    from app.services.handoff_service import process_handoff
+    from app.db.ledger import init_ledger_db
+
+    init_ledger_db()
+
+    aod_run_id = f"harness-{_uuid.uuid4().hex[:8]}"
+    request = AODHandoffRequest(
+        run_id=aod_run_id,
+        tenant_id=str(_uuid.uuid4()),
+        entity_id="harness-entity",
+        snapshot_name="harness-entity",
+        handoff_timestamp=_dt.utcnow(),
+        candidates=[
+            {"asset_key": "salesforce.com", "vendor_name": "Salesforce",
+             "display_name": "Salesforce CRM", "category": "crm",
+             "aod_asset_id": "sf-1", "aod_run_id": aod_run_id,
+             "execution_allowed": True, "action_type": "provision"},
+            {"asset_key": "workday.com", "vendor_name": "Workday",
+             "display_name": "Workday HCM", "category": "hcm",
+             "aod_asset_id": "wd-1", "aod_run_id": aod_run_id,
+             "execution_allowed": True, "action_type": "provision"},
+            {"asset_key": "netsuite.com", "vendor_name": "NetSuite",
+             "display_name": "NetSuite ERP", "category": "erp",
+             "aod_asset_id": "ns-1", "aod_run_id": aod_run_id,
+             "execution_allowed": True, "action_type": "provision"},
+            {"asset_key": "servicenow.com", "vendor_name": "ServiceNow",
+             "display_name": "ServiceNow ITSM", "category": "itsm",
+             "aod_asset_id": "sn-1", "aod_run_id": aod_run_id,
+             "execution_allowed": True, "action_type": "provision"},
+        ],
+        fabric_planes=[
+            FabricPlaneSummary(plane_type="API_GATEWAY", vendor="kong",
+                               is_healthy=True),
+            FabricPlaneSummary(plane_type="IPAAS", vendor="mulesoft",
+                               is_healthy=True),
+        ],
+        sors=[
+            SORDeclaration(domain="CRM", vendor="Salesforce",
+                           category="crm", confidence="high", source="farm"),
+            SORDeclaration(domain="ERP", vendor="NetSuite",
+                           category="erp", confidence="high", source="farm"),
+        ],
+    )
+    process_handoff(request)
+
+    with TestClient(fastapi_app, raise_server_exceptions=False) as client:
+        import tests.test_harness as harness_mod
+
+        def _patched_api(method, path, **kwargs):
+            kwargs.pop("timeout", None)
+            return getattr(client, method)(path, **kwargs)
+
+        monkeypatch.setattr(harness_mod, "api", _patched_api)
+        yield aod_run_id
