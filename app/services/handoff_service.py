@@ -190,7 +190,8 @@ def save_aod_payload(request: AODHandoffRequest):
 
 def load_aod_payload() -> Optional[dict]:
     """Load last saved AOD payload from file.  Returns None only if file doesn't exist."""
-    if not AOD_PAYLOAD_FILE.exists():
+    import os
+    if not os.path.exists(AOD_PAYLOAD_FILE):
         return None
     with open(AOD_PAYLOAD_FILE, "r") as f:
         return json.load(f)
@@ -528,7 +529,13 @@ def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
     aod_accepted_count = sum(
         1 for a in accepted if a["aod_asset_id"] and not str(a["aod_asset_id"]).startswith("infra-")
     )
-    results = create_candidates_batch(batch)
+    try:
+        results = create_candidates_batch(batch)
+    except Exception as e:
+        raise RuntimeError(
+            f"Failed to store candidates for run_id={request.run_id}: {e}. "
+            "Handoff aborted — candidate batch insert failed."
+        ) from e
     for i, result in enumerate(results):
         accepted[i]["candidate_id"] = result["candidate_id"]
     _log.info("Candidates processed: %d accepted (%d batch-inserted), %d rejected",
@@ -539,21 +546,27 @@ def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
 
     # 4. Create handoff log
     rejected_dicts = [r.to_dict() for r in rejected]
-    handoff_log = create_handoff_log({
-        "aod_run_id": request.run_id,
-        "tenant_id": request.tenant_id,
-        "entity_id": request.entity_id,
-        "snapshot_name": request.snapshot_name,
-        "candidates_received": len(request.candidates),
-        "candidates_accepted": aod_accepted_count,
-        "candidates_rejected": len(rejected),
-        "rejected_reasons": rejected_dicts,
-        "policy_version": request.policy_version,
-        "handoff_timestamp": request.handoff_timestamp.isoformat() if request.handoff_timestamp else None,
-        "aod_fabric_planes": aod_fabric_planes_data,
-        "aod_sor_vendors": aod_sor_vendors,
-        "reconciliation_manifest": request.reconciliation_manifest,
-    })
+    try:
+        handoff_log = create_handoff_log({
+            "aod_run_id": request.run_id,
+            "tenant_id": request.tenant_id,
+            "entity_id": request.entity_id,
+            "snapshot_name": request.snapshot_name,
+            "candidates_received": len(request.candidates),
+            "candidates_accepted": aod_accepted_count,
+            "candidates_rejected": len(rejected),
+            "rejected_reasons": rejected_dicts,
+            "policy_version": request.policy_version,
+            "handoff_timestamp": request.handoff_timestamp.isoformat() if request.handoff_timestamp else None,
+            "aod_fabric_planes": aod_fabric_planes_data,
+            "aod_sor_vendors": aod_sor_vendors,
+            "reconciliation_manifest": request.reconciliation_manifest,
+        })
+    except Exception as e:
+        raise RuntimeError(
+            f"Failed to create handoff log for run_id={request.run_id}: {e}. "
+            "Candidates were stored but handoff log creation failed."
+        ) from e
 
     return AODHandoffResponse(
         run_id=request.run_id,

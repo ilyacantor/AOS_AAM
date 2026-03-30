@@ -121,7 +121,28 @@ async def fetch_aod_data():
     if not payload:
         raise HTTPException(status_code=404, detail="No AOD data stored. Run AOD handoff first.")
 
-    request = AODHandoffRequest(**payload)
+    # Apply the same normalization that /receive does — guards against
+    # payloads saved by older code or edge-case serialization.
+    raw_planes = payload.get("fabric_planes", [])
+    if raw_planes:
+        payload["fabric_planes"] = normalize_fabric_planes(raw_planes)
+
+    raw_sors = payload.get("sors", [])
+    if raw_sors:
+        payload["sors"] = normalize_sors(raw_sors)
+
+    raw_candidates = payload.get("candidates", [])
+    if raw_candidates:
+        payload["candidates"] = normalize_candidates(raw_candidates)
+
+    try:
+        request = AODHandoffRequest(**payload)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Saved AOD payload failed validation: {exc}",
+        )
+
     reset_aod_state()
     try:
         return process_handoff(request)
