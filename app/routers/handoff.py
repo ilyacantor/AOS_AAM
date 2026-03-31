@@ -40,7 +40,7 @@ def _save_raw_aod_body(body: dict):
     """Save the exact raw JSON body AOD sent, before any normalization."""
     try:
         summary = {
-            "run_id": body.get("run_id"),
+            "aod_discovery_id": body.get("aod_discovery_id"),
             "snapshot_name": body.get("snapshot_name"),
             "top_level_keys": list(body.keys()),
             "candidates_count": len(body.get("candidates", [])),
@@ -103,8 +103,8 @@ async def receive_aod_handoff(raw_request: Request):
 
     request = AODHandoffRequest(**body)
     _log.info(
-        "Receive endpoint: run_id=%s, candidates=%d, fabric_planes=%d, sors=%d",
-        request.run_id, len(request.candidates), len(request.fabric_planes), len(request.sors),
+        "Receive endpoint: aod_discovery_id=%s, candidates=%d, fabric_planes=%d, sors=%d",
+        request.aod_discovery_id, len(request.candidates), len(request.fabric_planes), len(request.sors),
     )
     try:
         return process_handoff(request)

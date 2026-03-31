@@ -199,7 +199,7 @@ class SORDeclaration(BaseModel):
 
 class AODHandoffRequest(BaseModel):
     """Batch handoff request from AOD"""
-    run_id: str = Field(..., description="AOD discovery run ID")
+    aod_discovery_id: str = Field(..., description="AOD discovery run ID (namespaced per I1)")
     tenant_id: Optional[str] = Field(None, description="Tenant UUID — DB isolation key")
     entity_id: Optional[str] = Field(None, description="Business entity key (e.g. 'meridian')")
     snapshot_name: Optional[str] = Field(None, description="Deprecated: use entity_id. Kept for transition.")
@@ -213,7 +213,7 @@ class AODHandoffRequest(BaseModel):
 
 class AODHandoffResponse(BaseModel):
     """Response to AOD handoff request"""
-    run_id: str
+    aod_discovery_id: str
     candidates_received: int
     candidates_accepted: int
     candidates_rejected: int
@@ -607,7 +607,7 @@ class DCLIngestResponse(BaseModel):
     """Response from DCL after ingesting a payload"""
     status: str = "ingested"
     ingest_id: str
-    run_id: str
+    aam_inference_id: str
     rows_stored: int
     schema_hash: Optional[str] = None
     schema_drift_detected: bool = False

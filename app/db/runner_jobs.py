@@ -21,7 +21,7 @@ def _build_job_row(manifest_dict: dict) -> dict:
     return {
         "job_id": manifest_dict["source"]["pipe_id"],
         "pipe_id": manifest_dict["source"]["pipe_id"],
-        "run_id": manifest_dict["run_id"],
+        "run_id": manifest_dict["run_id"],  # DB column
         "status": "queued",
         "manifest": json.dumps(manifest_dict, default=str),
         "dispatched_at": now,
@@ -89,14 +89,14 @@ def create_skipped_jobs_batch(skipped_entries: list[dict], run_id: str, snapshot
                 "system": entry.get("source_system"),
             },
             "snapshot_name": snapshot_name,
-            "run_id": run_id,
+            "run_id": run_id,  # meta mapping — manifest schema field stored as JSON in DB
             "category": entry.get("category"),
             "matched_pipe_id": entry.get("matched_pipe_id"),
         }
         rows.append({
             "job_id": f"skip_{pid}",
             "pipe_id": pid,
-            "run_id": run_id,
+            "run_id": run_id,  # DB column
             "status": "skipped",
             "manifest": json.dumps(manifest_stub, default=str),
             "dispatched_at": now,
@@ -177,6 +177,8 @@ def get_runner_job(job_id: str) -> Optional[dict]:
         row["manifest"] = json.loads(row["manifest"])
     if row.get("dcl_response") and isinstance(row["dcl_response"], str):
         row["dcl_response"] = json.loads(row["dcl_response"])
+    if "run_id" in row:
+        row["aam_inference_id"] = row.pop("run_id")
     return row
 
 
@@ -309,7 +311,7 @@ def list_runner_jobs(
     params.append(limit)
 
     query = psql.SQL(
-        "SELECT job_id, pipe_id, run_id, status, dispatched_at, started_at, completed_at, "
+        "SELECT job_id, pipe_id, run_id AS aam_inference_id, status, dispatched_at, started_at, completed_at, "
         "rows_transferred, error_message, last_heartbeat, dcl_response, "
         "manifest::json->'source'->>'system' AS source_system, "
         "manifest::json->>'snapshot_name' AS snapshot_name "

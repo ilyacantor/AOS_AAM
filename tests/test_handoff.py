@@ -23,7 +23,7 @@ def test_handoff_basic_flow(db):
 
     run_id = "test-run-001"
     request = AODHandoffRequest(
-        run_id=run_id,
+        aod_discovery_id=run_id,
         snapshot_name="test-snapshot",
         handoff_timestamp=datetime.utcnow(),
         candidates=[
@@ -34,7 +34,7 @@ def test_handoff_basic_flow(db):
 
     result = process_handoff(request)
 
-    assert result.run_id == run_id
+    assert result.aod_discovery_id == run_id
     assert result.candidates_received == 2
     assert result.candidates_accepted == 2
     assert result.candidates_rejected == 0
@@ -51,7 +51,7 @@ def test_handoff_idempotency(db):
 
     run_id = "idempotent-run-001"
     request = AODHandoffRequest(
-        run_id=run_id,
+        aod_discovery_id=run_id,
         snapshot_name="snap",
         handoff_timestamp=datetime.utcnow(),
         candidates=[
@@ -79,7 +79,7 @@ def test_handoff_does_not_infer_planes_from_categories(db):
 
     run_id = "sor-run-001"
     request = AODHandoffRequest(
-        run_id=run_id,
+        aod_discovery_id=run_id,
         snapshot_name="sor-snap",
         handoff_timestamp=datetime.utcnow(),
         candidates=[
@@ -104,7 +104,7 @@ def test_handoff_explicit_planes_stored_and_vendor_linked(db):
 
     run_id = "planes-run-001"
     request = AODHandoffRequest(
-        run_id=run_id,
+        aod_discovery_id=run_id,
         snapshot_name="planes-snap",
         handoff_timestamp=datetime.utcnow(),
         candidates=[
@@ -144,7 +144,7 @@ def test_handoff_no_planes_when_aod_sends_none(db):
 
     run_id = "no-planes-run-001"
     request = AODHandoffRequest(
-        run_id=run_id,
+        aod_discovery_id=run_id,
         snapshot_name="hint-snap",
         handoff_timestamp=datetime.utcnow(),
         candidates=[

@@ -46,7 +46,7 @@ def store_ingest(
 
     sb.insert("dcl_ingested", {
         "ingest_id": ingest_id,
-        "run_id": run_id,
+        "run_id": run_id,  # DB column
         "pipe_id": pipe_id,
         "source_system": source_system,
         "row_count": len(data),
@@ -59,7 +59,7 @@ def store_ingest(
 
     return {
         "ingest_id": ingest_id,
-        "run_id": run_id,
+        "aam_inference_id": run_id,
         "pipe_id": pipe_id,
         "row_count": len(data),
         "payload_hash": payload_hash,
@@ -101,11 +101,15 @@ def list_ingests(
     if filters:
         kwargs["filters"] = filters
 
-    return sb.select(
+    rows = sb.select(
         "dcl_ingested",
         columns="ingest_id,run_id,pipe_id,source_system,row_count,payload_hash,schema_hash,ingested_at,schema_version",
         **kwargs,
     )
+    for row in rows:
+        if "run_id" in row:
+            row["aam_inference_id"] = row.pop("run_id")
+    return rows
 
 
 def get_ingest(ingest_id: str) -> Optional[dict]:
@@ -115,4 +119,6 @@ def get_ingest(ingest_id: str) -> Optional[dict]:
         return None
     if row.get("payload") and isinstance(row["payload"], str):
         row["payload"] = json.loads(row["payload"])
+    if "run_id" in row:
+        row["aam_inference_id"] = row.pop("run_id")
     return row

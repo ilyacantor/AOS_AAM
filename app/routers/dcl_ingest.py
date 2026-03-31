@@ -114,7 +114,7 @@ async def ingest_data(
     return DCLIngestResponse(
         status="ingested",
         ingest_id=record["ingest_id"],
-        run_id=x_run_id,
+        aam_inference_id=x_run_id,
         rows_stored=record["row_count"],
         schema_hash=final_hash,
         schema_drift_detected=drift_detected,

@@ -17,7 +17,7 @@ def _do_handoff(db, entity_id="test-entity", tenant_id=None):
         tenant_id = str(uuid.uuid4())
     run_id = f"identity-run-{uuid.uuid4().hex[:8]}"
     request = AODHandoffRequest(
-        run_id=run_id,
+        aod_discovery_id=run_id,
         tenant_id=tenant_id,
         entity_id=entity_id,
         snapshot_name=entity_id,

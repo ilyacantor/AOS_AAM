@@ -311,7 +311,7 @@ def _check_idempotency(run_id: str, candidate_count: int) -> Optional[AODHandoff
 
     _log.info("Idempotent replay: run_id=%s already processed (handoff_id=%s)", run_id, log["handoff_id"])
     return AODHandoffResponse(
-        run_id=run_id,
+        aod_discovery_id=run_id,
         candidates_received=log["candidates_received"],
         candidates_accepted=log["candidates_accepted"],
         candidates_rejected=log["candidates_rejected"],
@@ -346,7 +346,7 @@ def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
       - Structured logging at every stage
     """
     # 0. Idempotency check
-    cached = _check_idempotency(request.run_id, len(request.candidates))
+    cached = _check_idempotency(request.aod_discovery_id, len(request.candidates))
     if cached:
         return cached
 
@@ -354,7 +354,7 @@ def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
 
     _log.info(
         "AOD handoff received: run_id=%s, snapshot=%s, candidates=%d",
-        request.run_id, request.snapshot_name, len(request.candidates),
+        request.aod_discovery_id, request.snapshot_name, len(request.candidates),
     )
 
     # 0b. Clear stale state from previous runs
@@ -378,7 +378,7 @@ def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
                 "category": (sor.category or "").lower(),
                 "confidence": (sor.confidence or "high").lower(),
                 "source": (sor.source or "farm").lower(),
-                "aod_run_id": request.run_id,
+                "aod_run_id": request.aod_discovery_id,
                 "created_at": now,
                 "updated_at": now,
             })
@@ -387,7 +387,7 @@ def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
             sors_stored = len(sor_rows)
         except Exception as e:
             raise RuntimeError(
-                f"Failed to store SOR declarations for run_id={request.run_id}: {e}. "
+                f"Failed to store SOR declarations for run_id={request.aod_discovery_id}: {e}. "
                 "Handoff aborted — cannot accept candidates against unrecorded SOR context."
             ) from e
         _log.info("SOR declarations stored: %d", sors_stored)
@@ -414,7 +414,7 @@ def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
                 "domain": None,
                 "managed_asset_count": 0,
                 "is_healthy": is_healthy,
-                "aod_run_id": request.run_id,
+                "aod_run_id": request.aod_discovery_id,
                 "created_at": now,
                 "updated_at": now,
             })
@@ -424,7 +424,7 @@ def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
             fabric_planes_stored = len(plane_rows)
         except Exception as e:
             raise RuntimeError(
-                f"Failed to store fabric planes for run_id={request.run_id}: {e}. "
+                f"Failed to store fabric planes for run_id={request.aod_discovery_id}: {e}. "
                 "Handoff aborted — cannot accept candidates linked to unrecorded planes."
             ) from e
     _log.info("Fabric planes resolved: %d stored", fabric_planes_stored)
@@ -510,7 +510,7 @@ def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
             "action_type": "provision",
             "blocking_findings": [],
             "connected_via_plane": plane.plane_type.upper(),
-            "aod_run_id": request.run_id,
+            "aod_run_id": request.aod_discovery_id,
             "aod_asset_id": f"infra-{plane.vendor.lower()}",
             "fabric_plane_id": plane_id,
             "status": CandidateStatus.NEW.value,
@@ -533,7 +533,7 @@ def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
         results = create_candidates_batch(batch)
     except Exception as e:
         raise RuntimeError(
-            f"Failed to store candidates for run_id={request.run_id}: {e}. "
+            f"Failed to store candidates for run_id={request.aod_discovery_id}: {e}. "
             "Handoff aborted — candidate batch insert failed."
         ) from e
     for i, result in enumerate(results):
@@ -548,7 +548,7 @@ def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
     rejected_dicts = [r.to_dict() for r in rejected]
     try:
         handoff_log = create_handoff_log({
-            "aod_run_id": request.run_id,
+            "aod_run_id": request.aod_discovery_id,
             "tenant_id": request.tenant_id,
             "entity_id": request.entity_id,
             "snapshot_name": request.snapshot_name,
@@ -564,12 +564,12 @@ def process_handoff(request: AODHandoffRequest) -> AODHandoffResponse:
         })
     except Exception as e:
         raise RuntimeError(
-            f"Failed to create handoff log for run_id={request.run_id}: {e}. "
+            f"Failed to create handoff log for run_id={request.aod_discovery_id}: {e}. "
             "Candidates were stored but handoff log creation failed."
         ) from e
 
     return AODHandoffResponse(
-        run_id=request.run_id,
+        aod_discovery_id=request.aod_discovery_id,
         candidates_received=len(request.candidates),
         candidates_accepted=aod_accepted_count,
         candidates_rejected=len(rejected),

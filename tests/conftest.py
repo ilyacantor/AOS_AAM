@@ -59,7 +59,7 @@ def run_id(db, monkeypatch):
 
     aod_run_id = f"harness-{_uuid.uuid4().hex[:8]}"
     request = AODHandoffRequest(
-        run_id=aod_run_id,
+        aod_discovery_id=aod_run_id,
         tenant_id=str(_uuid.uuid4()),
         entity_id="harness-entity",
         snapshot_name="harness-entity",

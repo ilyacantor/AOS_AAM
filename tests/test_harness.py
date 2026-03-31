@@ -81,9 +81,9 @@ def test_retention_fetch_aod(run_id):
 
     data = resp.json()
     result.check(
-        "run_id" in data and data["run_id"],
-        "Fetch returns a run_id",
-        f"run_id={data.get('run_id')}"
+        "aod_discovery_id" in data and data["aod_discovery_id"],
+        "Fetch returns an aod_discovery_id",
+        f"aod_discovery_id={data.get('aod_discovery_id')}"
     )
     result.check(
         data.get("candidates_accepted", 0) > 0,
@@ -656,7 +656,7 @@ def run_phase_tests(phase, run_id, fetch_data):
     # Re-fetch to get fresh run_id
     fetch_resp = api("post", "/api/handoff/aod/fetch")
     fresh_data = fetch_resp.json()
-    fresh_run_id = fresh_data.get("run_id", run_id)
+    fresh_run_id = fresh_data.get("aod_discovery_id", run_id)
 
     print("\n--- Run Inference ---")
     _, r = test_retention_run_inference(fresh_run_id)
@@ -730,9 +730,9 @@ def run_all_tests(phase=4):
         log(f"Failed to fetch AOD data: {e}", "FAIL")
         return False
 
-    run_id = fetch_data.get("run_id")
+    run_id = fetch_data.get("aod_discovery_id")
     accepted = fetch_data.get("candidates_accepted", 0)
-    log(f"Fetched run_id={run_id}, accepted={accepted}")
+    log(f"Fetched aod_discovery_id={run_id}, accepted={accepted}")
 
     if not run_id or accepted == 0:
         log("No data fetched — cannot proceed", "FAIL")
