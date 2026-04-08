@@ -108,6 +108,13 @@ async def infer_pipes():
         total_pipes = pipes_from_obs
         mode = get_operating_mode()
         if total_pipes == 0 and not observations:
+            # Refresh freshness — inference was explicitly invoked but no
+            # new work to do. Touch the latest run's triples so the
+            # freshness query reflects 'just re-confirmed by inference'.
+            touched = 0
+            if entity_id:
+                from ..db.triple_writer import touch_latest_run
+                touched = touch_latest_run(entity_id)
             return {
                 "message": "Nothing to process — no observations or unmatched candidates",
                 "mode": mode.value,
@@ -116,6 +123,7 @@ async def infer_pipes():
                 "tenant_id": tenant_id,
                 "entity_id": entity_id,
                 "pipes_created": 0,
+                "triples_refreshed": touched,
                 "triple_write": None,
                 "dispatch": None,
             }

@@ -35,20 +35,44 @@ router = APIRouter(include_in_schema=False)
 async def ui_pipes_list(
     filter: Optional[str] = Query("all")
 ):
-    """Pipes Inventory Screen"""
+    """Pipes Inventory Screen.
+
+    Plane filter normalization (audit fix #2):
+      Current predicate (BEFORE):
+        pipes = [p for p in all_pipes if p.get("fabric_plane") == filter]
+        # filter values were uppercase canonical (IPAAS, API_GATEWAY, EVENT_BUS, DATA_WAREHOUSE)
+      Corrected predicate (AFTER):
+        pipes = [p for p in all_pipes if _ui_plane(p.get("fabric_plane")) == filter]
+        # filter values are lowercase canonical (ipaas, api_gateway, event_bus, warehouse)
+        # _ui_plane normalizes pipe.fabric_plane (uppercase canonical in DB) to the UI form
+    """
     all_pipes = list_pipes(limit=200)
 
-    # Single filter for asset classes
+    # Map DB-side canonical (uppercase) to the UI's lowercase plane keys.
+    # 'warehouse' is the audit-spec key for what the DB stores as DATA_WAREHOUSE.
+    _DB_TO_UI_PLANE = {
+        "IPAAS": "ipaas",
+        "API_GATEWAY": "api_gateway",
+        "EVENT_BUS": "event_bus",
+        "DATA_WAREHOUSE": "warehouse",
+    }
+    UI_PLANE_KEYS = ["ipaas", "api_gateway", "event_bus", "warehouse"]
+
+    def _ui_plane(fp: Optional[str]) -> Optional[str]:
+        if not fp:
+            return None
+        return _DB_TO_UI_PLANE.get(fp.upper())
+
+    # Single filter for asset classes — uses pipe.fabric_plane normalized to UI keys
     if filter == "all":
         pipes = all_pipes
-    elif filter in ALL_PLANE_TYPES:
-        pipes = [p for p in all_pipes if p.get("fabric_plane") == filter]
+    elif filter in UI_PLANE_KEYS:
+        pipes = [p for p in all_pipes if _ui_plane(p.get("fabric_plane")) == filter]
     else:
         # Filter by source system
         pipes = [p for p in all_pipes if p.get("source_system") == filter]
-    
+
     source_systems = sorted(set(p.get("source_system", "") for p in all_pipes if p.get("source_system")))
-    fabric_planes = ALL_PLANE_TYPES
     
     all_drift = list_all_drift_events(limit=200)
     drift_by_pipe = {}
@@ -128,14 +152,19 @@ async def ui_pipes_list(
         """
     
     if not pipes:
-        rows_html = '<tr><td colspan="8" class="empty-state">No pipes found. Fetch AOD data and run inference to create pipes from candidates.</td></tr>'
-    
-    # Build single combined filter dropdown
+        rows_html = '<tr><td colspan="8" class="empty-state">No pipes in registry yet. Run discovery from the Topology page to populate.</td></tr>'
+
+    # Build single combined filter dropdown — uses lowercase canonical UI keys
+    _UI_PLANE_LABELS = {
+        "ipaas": "iPaaS",
+        "api_gateway": "API Gateway",
+        "event_bus": "Event Bus",
+        "warehouse": "Warehouse",
+    }
     filter_options = '<option value="all"' + (' selected' if filter == "all" else '') + '>All</option>'
-    # Add fabric types
-    for f in fabric_planes:
-        filter_options += f'<option value="{f}"' + (' selected' if filter == f else '') + f'>{f.replace("_", " ").title()}</option>'
-    # Add source systems
+    for f in UI_PLANE_KEYS:
+        label = _UI_PLANE_LABELS[f]
+        filter_options += f'<option value="{f}"' + (' selected' if filter == f else '') + f'>{label}</option>'
     if source_systems:
         filter_options += '<optgroup label="Sources">'
         for s in source_systems:
@@ -801,17 +830,31 @@ async def ui_pipe_detail(pipe_id: str):
 
 @router.get("/ui/candidates", response_class=HTMLResponse, include_in_schema=False)
 async def ui_candidates_list(
-    view: Optional[str] = Query("sors_fabrics", description="View filter: all, sors, fabrics, sors_fabrics, ipaas, warehouse, gateway, eventbus")
+    view: Optional[str] = Query("sors_fabrics", description="View filter: all, sors, fabrics, sors_fabrics, ipaas, api_gateway, event_bus, warehouse")
 ):
-    """Candidates Screen"""
+    """Candidates Screen.
+
+    Plane filter normalization (audit fix #2):
+      Current predicate (BEFORE):
+        _plane_view_map = {"ipaas": "IPAAS", "warehouse": "DATA_WAREHOUSE",
+                           "gateway": "API_GATEWAY", "eventbus": "EVENT_BUS"}
+      Corrected predicate (AFTER):
+        _plane_view_map = {"ipaas": "IPAAS", "api_gateway": "API_GATEWAY",
+                           "event_bus": "EVENT_BUS", "warehouse": "DATA_WAREHOUSE"}
+      Field unchanged — still filters via _plane_type(c) which derives from
+      candidate.fabric_plane_id / connected_via_plane (the candidate-side
+      equivalent of pipe.fabric_plane).
+    """
     all_candidates = list_candidates(limit=200)
 
     from ..db.stats import _is_aod_sor
 
     # Resolve a candidate's fabric plane TYPE from its linkage or routing hint
     _plane_view_map = {
-        "ipaas": "IPAAS", "warehouse": "DATA_WAREHOUSE",
-        "gateway": "API_GATEWAY", "eventbus": "EVENT_BUS",
+        "ipaas": "IPAAS",
+        "api_gateway": "API_GATEWAY",
+        "event_bus": "EVENT_BUS",
+        "warehouse": "DATA_WAREHOUSE",
     }
 
     def _plane_type(c: dict):
@@ -889,9 +932,9 @@ async def ui_candidates_list(
                 <option value="fabrics"{" selected" if view == "fabrics" else ""}>Fabrics</option>
                 <option value="sors_fabrics"{" selected" if view == "sors_fabrics" else ""}>SORs + Fabrics</option>
                 <option value="ipaas"{" selected" if view == "ipaas" else ""}>iPaaS</option>
+                <option value="api_gateway"{" selected" if view == "api_gateway" else ""}>API Gateway</option>
+                <option value="event_bus"{" selected" if view == "event_bus" else ""}>Event Bus</option>
                 <option value="warehouse"{" selected" if view == "warehouse" else ""}>Warehouse</option>
-                <option value="gateway"{" selected" if view == "gateway" else ""}>API Gateway</option>
-                <option value="eventbus"{" selected" if view == "eventbus" else ""}>Event Bus</option>
             </select>
         </div>
         <table data-testid="candidates-table">
@@ -1730,8 +1773,26 @@ async def ui_topology():
         .sb-dim {{ font-size: 0.62rem; color: var(--slate-500); margin-top: 2px; }}
         .sb-link {{ font-size: 0.68rem; color: var(--slate-400); display: inline-block; margin-top: 4px; }}
         .sb-stats {{ display: flex; flex-direction: column; gap: 2px; }}
-        .sb-stat {{ font-size: 0.7rem; color: var(--slate-400); display: flex; justify-content: space-between; }}
+        .sb-stat {{ font-size: 0.7rem; color: var(--slate-400); display: flex; justify-content: space-between; align-items: center; }}
         .sb-stat span:last-child {{ color: var(--cyan-400); font-weight: 600; }}
+        .sb-stat-health {{ flex-direction: column; align-items: stretch; gap: 2px; }}
+        .sb-stat-health > span:first-child {{ color: var(--slate-400); }}
+        .sb-health-grid {{
+            display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px;
+            font-size: 0.62rem; color: var(--slate-500);
+        }}
+        .sb-health-grid b {{ color: var(--cyan-400); font-weight: 600; }}
+        .sb-cred-results {{
+            display: flex; flex-direction: column; gap: 2px;
+            margin: 2px 0 4px; font-size: 0.62rem; color: var(--slate-400);
+        }}
+        .sb-cred-results .cred-row {{ display: flex; justify-content: space-between; }}
+        .sb-cred-results .cred-status.connected {{ color: #4ade80; }}
+        .sb-cred-results .cred-status.failed {{ color: #f87171; }}
+        .sb-cred-results .cred-status.pending {{ color: #fbbf24; }}
+        .sb-stop-link {{
+            font-size: 0.65rem; color: #f87171; text-decoration: underline; margin-top: 2px;
+        }}
         .sb-btn {{
             width: 100%; padding: 4px 8px; border-radius: 4px;
             font-size: 0.7rem; font-weight: 500; cursor: pointer;
@@ -1992,35 +2053,30 @@ async def ui_topology():
                 <div id="sb-recon-link">{_recon_html}</div>
             </div>
             <div class="sb-section">
-                <div class="sb-title">Topology</div>
+                <div class="sb-title">Instrumentation</div>
                 <div class="sb-stats">
-                    <div class="sb-stat"><span>Fabrics</span> <span id="stat-fabrics">-</span></div>
-                    <div class="sb-stat"><span>SORs</span> <span id="stat-sors">-</span></div>
-                    <div class="sb-stat"><span>Drift</span> <span id="stat-drift">-</span></div>
-                    <div class="sb-stat"><span>Exported</span> <span id="stat-exported">-</span></div>
+                    <div class="sb-stat" data-testid="stat-planes"><span>Planes</span> <span id="stat-planes">-</span></div>
+                    <div class="sb-stat" data-testid="stat-sors"><span>SORs</span> <span id="stat-sors">-</span></div>
+                    <div class="sb-stat" data-testid="stat-pipes"><span>Pipes</span> <span id="stat-pipes">-</span></div>
+                    <div class="sb-stat" data-testid="stat-drift"><span>Drift</span> <span id="stat-drift">-</span></div>
+                    <div class="sb-stat sb-stat-health" data-testid="stat-health">
+                        <span>Health</span>
+                        <span class="sb-health-grid">
+                            <span title="Reachable">R:<b id="health-reachable" data-testid="health-reachable">-</b></span>
+                            <span title="Degraded">D:<b id="health-degraded" data-testid="health-degraded">-</b></span>
+                            <span title="Unreachable">U:<b id="health-unreachable" data-testid="health-unreachable">-</b></span>
+                            <span title="Auth expired">A:<b id="health-auth-expired" data-testid="health-auth-expired">-</b></span>
+                        </span>
+                    </div>
                 </div>
             </div>
             <div class="sb-section">
                 <div class="sb-title">Actions</div>
-                <button class="sb-btn" onclick="fetchAodData()" id="fetch-aod-btn">Fetch AOD Data</button>
-                <button class="sb-btn" id="btn-run-inference">Run Inference</button>
-                <button class="sb-btn" id="btn-export-dcl">Export to DCL</button>
-                <button class="sb-btn sb-btn-primary" onclick="runFullPipeline()" id="btn-full-pipeline" data-testid="btn-full-pipeline" style="margin-top:4px;">Full Pipeline</button>
-                <div class="sb-badge" id="pipeline-result-badge"></div>
-                <button class="sb-btn sb-btn-runner" onclick="dispatchAllRunners()" id="btn-dispatch-all" data-testid="btn-dispatch-all">Dispatch Runner</button>
-                <button class="sb-btn sb-btn-stop" onclick="cancelAllJobs()" id="btn-stop-all" data-testid="btn-stop-all" style="display:none;">Stop All</button>
-                <button class="sb-btn" onclick="openDispatchPanel()" id="btn-view-dispatch" data-testid="btn-view-dispatch" style="font-size:0.72rem;">View Dispatch</button>
-                <span id="dispatch-all-status" style="display:none;font-size:0.68rem;margin-top:2px;"></span>
-            </div>
-            <div class="sb-section" id="pipeline-log-section" style="display:none;">
-                <div class="sb-accordion-hdr" id="pipeline-log-toggle" onclick="togglePipelineLog()">
-                    <span class="sb-accordion-chev">&#9654;</span>
-                    <span class="sb-title">Pipeline Log</span>
-                    <span class="sb-accordion-count" id="pipeline-log-count"></span>
-                </div>
-                <div class="sb-accordion-body" id="pipeline-log-body">
-                    <div id="pipeline-log" data-testid="pipeline-log" style="font-size:0.72rem;line-height:1.6;margin-top:5px;"></div>
-                </div>
+                <button class="sb-btn sb-btn-primary" id="btn-run-discovery" data-testid="btn-run-discovery" disabled>Run Discovery</button>
+                <button class="sb-btn" id="btn-validate-credentials" data-testid="btn-validate-credentials" disabled>Validate Credentials</button>
+                <div id="cred-results" class="sb-cred-results" style="display:none;"></div>
+                <button class="sb-btn" id="btn-start-ingest" data-testid="btn-start-ingest" disabled>Start Ingest</button>
+                <a class="sb-link sb-stop-link" id="ingest-stop-link" data-testid="ingest-stop-link" href="#" style="display:none;">Stop ingest</a>
             </div>
             <div class="sb-section">
                 <div class="sb-title">View</div>
@@ -2028,10 +2084,10 @@ async def ui_topology():
                     <option value="all" selected>All Assets</option>
                     <option value="sors">SORs Only</option>
                     <option value="fabrics">Fabrics Only</option>
-                    <option value="API_GATEWAY">API Gateway</option>
-                    <option value="IPAAS">iPaaS</option>
-                    <option value="EVENT_BUS">Event Bus</option>
-                    <option value="DATA_WAREHOUSE">Data Warehouse</option>
+                    <option value="api_gateway">API Gateway</option>
+                    <option value="ipaas">iPaaS</option>
+                    <option value="event_bus">Event Bus</option>
+                    <option value="warehouse">Warehouse</option>
                 </select>
                 <select class="sb-select" id="detail-filter" onchange="applyTopologyFilters()">
                     <option value="summary" selected>Summary</option>
@@ -2083,69 +2139,27 @@ async def ui_topology():
     <div id="toast" class="toast"></div>
 
     <script>
-        // --- Mode-aware button gating ---
-        (async function applyModeGating() {{
-            try {{
-                var res = await fetch('/api/aam/mode');
-                var data = await res.json();
-                if (data.mode === 'SYNTHETIC') {{
-                    var hideIds = ['btn-export-dcl', 'btn-dispatch-all', 'btn-stop-all', 'btn-view-dispatch'];
-                    hideIds.forEach(function(id) {{
-                        var el = document.getElementById(id);
-                        if (el) el.style.display = 'none';
-                    }});
-                }}
-            }} catch(e) {{
-                console.error('Mode gating failed — buttons remain visible:', e);
-            }}
-        }})();
-
-        var _fetchRunning = false;
-        var _fetchTimer = null;
-        var _fetchStart = 0;
-        async function fetchAodData() {{
-            if (_fetchRunning) return;
-            _fetchRunning = true;
-            var btn = document.getElementById('fetch-aod-btn');
-            _fetchStart = Date.now();
-            if (_fetchTimer) clearInterval(_fetchTimer);
-            _fetchTimer = setInterval(function() {{
-                var s = Math.floor((Date.now() - _fetchStart) / 1000);
-                btn.textContent = 'Fetching... ' + s + 's';
-            }}, 500);
-            btn.textContent = 'Fetching... 0s';
-            btn.disabled = true;
-            btn.classList.add('sb-btn-loading');
-            try {{
-                var res = await fetch('/api/handoff/aod/fetch', {{ method: 'POST' }});
-                var data = await res.json();
-                clearInterval(_fetchTimer);
-                _fetchTimer = null;
-                var elapsed = Math.floor((Date.now() - _fetchStart) / 1000);
-                if (res.ok) {{
-                    btn.classList.remove('sb-btn-loading');
-                    btn.textContent = 'Fetched (' + elapsed + 's)';
-                    btn.disabled = false;
-                    _fetchRunning = false;
-                    showToast('Fetch complete in ' + elapsed + 's', 'success');
-                    setTimeout(() => location.reload(), 1200);
-                }} else {{
-                    btn.classList.remove('sb-btn-loading');
-                    showToast(data.detail || 'Fetch failed', 'error');
-                    btn.textContent = 'Failed (' + elapsed + 's)';
-                    btn.disabled = false;
-                    _fetchRunning = false;
-                }}
-            }} catch(e) {{
-                clearInterval(_fetchTimer);
-                _fetchTimer = null;
-                var elapsed = Math.floor((Date.now() - _fetchStart) / 1000);
-                btn.classList.remove('sb-btn-loading');
-                showToast('Fetch failed: ' + e.message, 'error');
-                btn.textContent = 'Failed (' + elapsed + 's)';
-                btn.disabled = false;
-                _fetchRunning = false;
-            }}
+        // --- View state (Fix 1): URL params are the source of truth ---
+        // Persist asset-filter, detail-filter, layout selections in
+        // ?view=...&detail=...&layout=... so they survive data re-fetches
+        // and navigation away/back. The dropdowns are mirrors of the URL.
+        var VALID_VIEWS = ['all','sors','fabrics','ipaas','api_gateway','event_bus','warehouse'];
+        var VALID_DETAILS = ['summary','all'];
+        var VALID_LAYOUTS = ['physics','hierarchical','circular'];
+        function getViewState() {{
+            var p = new URLSearchParams(window.location.search);
+            var v = p.get('view'); var d = p.get('detail'); var l = p.get('layout');
+            return {{
+                view: VALID_VIEWS.indexOf(v) >= 0 ? v : 'all',
+                detail: VALID_DETAILS.indexOf(d) >= 0 ? d : 'summary',
+                layout: VALID_LAYOUTS.indexOf(l) >= 0 ? l : 'physics',
+            }};
+        }}
+        function setViewState(partial) {{
+            var p = new URLSearchParams(window.location.search);
+            for (var k in partial) {{ if (partial[k] != null) p.set(k, partial[k]); }}
+            var qs = p.toString();
+            history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : ''));
         }}
 
         async function refreshSidebarRun() {{
@@ -2172,202 +2186,6 @@ async def ui_topology():
             }} catch(e) {{}}
         }}
 
-        async function runFullPipeline() {{
-            var btn = document.getElementById('btn-full-pipeline');
-            btn.disabled = true;
-            btn.classList.add('sb-btn-loading');
-            localStorage.removeItem('aam_full_cycle');
-            var badge = document.getElementById('pipeline-result-badge');
-            badge.style.display = 'none';
-            badge.textContent = '';
-            var start = Date.now();
-            var timer = setInterval(function() {{
-                var s = Math.floor((Date.now() - start) / 1000);
-                btn.textContent = btn._step + '... ' + s + 's';
-            }}, 500);
-
-            function setStep(label) {{
-                btn._step = label;
-                btn.textContent = label + '... 0s';
-            }}
-
-            var pipelineLog = [];
-            function logStep(icon, text, ok) {{
-                pipelineLog.push({{ icon: icon, text: text, ok: ok }});
-            }}
-
-            try {{
-                // Step 1: Fetch AOD data
-                setStep('1/5 Fetching');
-                var res = await fetch('/api/handoff/aod/fetch', {{ method: 'POST' }});
-                if (!res.ok) {{
-                    var d = await res.json().catch(function() {{ return {{}}; }});
-                    throw new Error('Fetch failed: ' + (d.detail || res.status));
-                }}
-                var fetchData = await res.json();
-                var candCount = fetchData.candidates_accepted || fetchData.candidates || 0;
-                var snap = fetchData.entity_id || fetchData.snapshot_name || '';
-                logStep('1', 'Fetch: ' + candCount + ' candidates' + (snap ? ' (' + snap + ')' : ''), true);
-
-                // Step 2: Run inference
-                setStep('2/5 Inferring');
-                res = await fetch('/api/aam/infer', {{ method: 'POST' }});
-                if (!res.ok) {{
-                    var d = await res.json().catch(function() {{ return {{}}; }});
-                    throw new Error('Inference failed: ' + (d.detail || res.status));
-                }}
-                var inferData = await res.json();
-                logStep('2', 'Infer: ' + (inferData.pipes_created || 0) + ' pipes created', true);
-
-                // Step 3: Export to DCL (structure)
-                setStep('3/5 Exporting');
-                res = await fetch('/api/export/dcl/push', {{ method: 'POST', headers: {{'Content-Type': 'application/json'}}, body: '{{}}' }});
-                if (!res.ok) {{
-                    var d = await res.json().catch(function() {{ return {{}}; }});
-                    throw new Error('Export failed: ' + (d.detail || res.status));
-                }}
-                var exportData = await res.json();
-                var dclOkExport = exportData.delivery && exportData.delivery.export_pipes && exportData.delivery.export_pipes.ok;
-                var expCount = exportData.export ? exportData.export.total_connections : 0;
-
-                // Extract DCL error detail for operator visibility
-                var exportErrorDetail = '';
-                if (!dclOkExport && exportData.delivery && exportData.delivery.export_pipes) {{
-                    var ep = exportData.delivery.export_pipes;
-                    if (ep.error) {{
-                        exportErrorDetail = ep.error;
-                    }} else if (ep.status) {{
-                        exportErrorDetail = 'HTTP ' + ep.status;
-                        if (ep.body && typeof ep.body === 'string') exportErrorDetail += ' — ' + ep.body.substring(0, 200);
-                    }} else if (ep.skipped) {{
-                        exportErrorDetail = 'DCL_URL not configured';
-                    }}
-                }}
-
-                if (dclOkExport) {{
-                    logStep('3', 'Export: ' + expCount + ' pipes to DCL (accepted)', true);
-                }} else {{
-                    logStep('3', 'Export: ' + expCount + ' pipes to DCL (failed' + (exportErrorDetail ? ': ' + exportErrorDetail : '') + ')', false);
-                }}
-                checkDispatchReady();
-
-                var dispatchOk = false;
-                var runnerDispatched = 0;
-                var runnerSkipped = 0;
-
-                // Short-circuit: skip Steps 4+5 if export failed — they cannot
-                // succeed without DCL having the pipe blueprints, and attempting
-                // them burns 45+s of timeout each.
-                if (!dclOkExport) {{
-                    logStep('4', 'Dispatch: skipped (export failed)', false);
-                    logStep('5', 'Runners: skipped (export failed)', false);
-                }} else {{
-                    // Step 4: Dispatch to DCL (creates dispatch row)
-                    setStep('4/5 Dispatching');
-                    var dispatchBody = {{}};
-                    if (exportData.export) {{
-                        dispatchBody.aod_run_id = exportData.export.aod_run_id || null;
-                        dispatchBody.snapshot_name = exportData.export.entity_id || exportData.export.snapshot_name || null;
-                        dispatchBody.pipe_count = exportData.export.total_connections || 0;
-                    }}
-                    res = await fetch('/api/export/dcl/dispatch', {{
-                        method: 'POST',
-                        headers: {{'Content-Type': 'application/json'}},
-                        body: JSON.stringify(dispatchBody)
-                    }});
-                    var dispatchData = {{}};
-                    if (res.ok) {{
-                        dispatchData = await res.json();
-                        dispatchOk = dispatchData.dispatch && dispatchData.dispatch.ok;
-                    }}
-                    var dBody = (dispatchData.dispatch && dispatchData.dispatch.body) || {{}};
-                    var dStatus = dBody.status || (dispatchOk ? 'ok' : 'failed');
-                    var dId = dBody.dispatch_id || '';
-                    logStep('4', 'Dispatch: ' + dStatus + (dId ? ' (' + dId + ')' : ''), dispatchOk);
-
-                    // Step 5: Dispatch Farm runners for all pipes
-                    setStep('5/5 Runners');
-                    try {{
-                        var pipesRes = await fetch('/api/pipes');
-                        var pipesJson = await pipesRes.json();
-                        var pipeIds = (pipesJson.pipes || []).map(function(p) {{ return p.pipe_id; }}).filter(Boolean);
-                        if (pipeIds.length > 0) {{
-                            var batchRes = await fetch('/api/runners/dispatch-batch', {{
-                                method: 'POST',
-                                headers: {{ 'Content-Type': 'application/json' }},
-                                body: JSON.stringify({{ pipe_ids: pipeIds, trigger: 'pipeline' }})
-                            }});
-                            if (batchRes.ok) {{
-                                var batchData = await batchRes.json();
-                                runnerDispatched = batchData.dispatched || 0;
-                                runnerSkipped = batchData.skipped || 0;
-                                if (batchData.jobs && batchData.jobs.length > 0) _dpRunId = batchData.jobs[0].run_id;
-                            }}
-                        }}
-                    }} catch (re) {{}}
-                    var runnerMsg = 'Runners: ' + runnerDispatched + ' dispatched to Farm';
-                    if (runnerSkipped > 0) runnerMsg += ', ' + runnerSkipped + ' already complete';
-                    logStep('5', runnerMsg, (runnerDispatched + runnerSkipped) > 0);
-                }}
-
-                clearInterval(timer);
-                var elapsed = Math.floor((Date.now() - start) / 1000);
-
-                var pipesCreated = inferData.pipes_created || 0;
-                var pipeCount = exportData.export ? exportData.export.total_connections : 0;
-                var dclOk = dclOkExport;
-
-                logStep('done', 'Complete in ' + elapsed + 's', dclOk && dispatchOk);
-
-                localStorage.setItem('aam_pipeline_log', JSON.stringify({{
-                    steps: pipelineLog,
-                    timestamp: new Date().toISOString(),
-                }}));
-                renderPipelineLog(pipelineLog);
-
-                var msg = 'Pipeline complete (' + elapsed + 's): ' + pipesCreated + ' pipes inferred, ' + pipeCount + ' exported';
-                if (dclOk && dispatchOk) {{
-                    msg += ' — DCL accepted + dispatched';
-                }} else if (dclOk) {{
-                    msg += ' — DCL accepted (dispatch skipped)';
-                }} else {{
-                    msg += ' — DCL export failed' + (exportErrorDetail ? ': ' + exportErrorDetail.substring(0, 100) : '');
-                }}
-                showToast(msg, (dclOk && dispatchOk) ? 'success' : 'warning');
-                var cycleLabel = pipesCreated + ' pipes, ' + pipeCount + ' exported (' + elapsed + 's)';
-                btn.classList.remove('sb-btn-loading');
-                btn.textContent = 'Full Pipeline';
-                btn.disabled = false;
-                var badge = document.getElementById('pipeline-result-badge');
-                badge.textContent = cycleLabel;
-                badge.style.display = 'block';
-                localStorage.setItem('aam_full_cycle', JSON.stringify({{
-                    label: cycleLabel,
-                    timestamp: new Date().toISOString(),
-                }}));
-                refreshSidebarRun();
-                if (runnerDispatched > 0) {{
-                    openDispatchPanel();
-                    startDispatchPolling();
-                }}
-            }} catch (e) {{
-                clearInterval(timer);
-                var elapsed = Math.floor((Date.now() - start) / 1000);
-                showToast('Pipeline failed: ' + e.message, 'error');
-                var failLabel = 'Failed (' + elapsed + 's)';
-                btn.classList.remove('sb-btn-loading');
-                btn.textContent = 'Full Pipeline';
-                btn.disabled = false;
-                var badge = document.getElementById('pipeline-result-badge');
-                badge.textContent = failLabel;
-                badge.style.display = 'block';
-                localStorage.setItem('aam_full_cycle', JSON.stringify({{
-                    label: failLabel,
-                    timestamp: new Date().toISOString(),
-                }}));
-            }}
-        }}
-
         let network = null;
         let allNodes = [];
         let allEdges = [];
@@ -2392,9 +2210,25 @@ async def ui_topology():
             candidate: 'triangle'
         }};
 
-        async function loadTopology(fabricFilter = 'all', sorFilter = 'all', detailLevel = 'summary') {{
+        async function loadTopology() {{
+            // Source of truth: URL params via getViewState(). The dropdowns
+            // are mirrors that this function reads from indirectly.
+            var state = getViewState();
+            var view = state.view;
+            var detailLevel = state.detail;
+
+            // Map asset-filter to fabric/sor parameters
+            var fabricFilter = 'all';
+            var sorFilter = 'all';
+            if (view === 'sors') {{
+                sorFilter = 'show';
+            }} else if (view === 'fabrics') {{
+                sorFilter = 'hide';
+            }} else if (view !== 'all') {{
+                fabricFilter = view;
+            }}
+
             let url = '/api/topology/summary';
-            
             if (detailLevel === 'all') {{
                 url = '/api/topology';
             }} else if (fabricFilter !== 'all') {{
@@ -2404,17 +2238,17 @@ async def ui_topology():
             const response = await fetch(url);
             if (!response.ok) throw new Error('Request failed: ' + response.status);
             let data = await response.json();
-            
+
             // Apply SOR filter client-side
             if (sorFilter !== 'all') {{
                 if (sorFilter === 'show') {{
                     // Show only SOR nodes
-                    data.nodes = data.nodes.filter(n => 
+                    data.nodes = data.nodes.filter(n =>
                         n.metadata && n.metadata.is_sor === true || n.type === 'fabric_plane'
                     );
                 }} else if (sorFilter === 'hide') {{
                     // Hide SOR nodes
-                    data.nodes = data.nodes.filter(n => 
+                    data.nodes = data.nodes.filter(n =>
                         !n.metadata || n.metadata.is_sor !== true
                     );
                 }}
@@ -2472,22 +2306,33 @@ async def ui_topology():
                 arrows: {{ to: {{ enabled: true, scaleFactor: 0.5 }} }}
             }}));
 
-            // Update sidebar stats
+            // Update sidebar stats — new instrumentation tiles
             if (data.stats) {{
-                document.getElementById('stat-fabrics').textContent = data.stats.fabrics || 0;
+                document.getElementById('stat-planes').textContent = data.stats.fabrics || 0;
                 document.getElementById('stat-sors').textContent = data.stats.sors || 0;
                 document.getElementById('stat-drift').textContent = data.stats.pipes_with_drift || 0;
             }}
 
-            // Fetch DCL export count
-            fetch('/api/export/dcl/declared-pipes')
-                .then(r => r.json())
-                .then(exp => {{
-                    document.getElementById('stat-exported').textContent = exp.total_connections || 0;
-                }})
-                .catch(() => {{
-                    document.getElementById('stat-exported').textContent = 0;
-                }});
+            // Pipe count comes from /api/aam/pipes/count
+            try {{
+                var pcRes = await fetch('/api/aam/pipes/count');
+                if (pcRes.ok) {{
+                    var pc = await pcRes.json();
+                    document.getElementById('stat-pipes').textContent = pc.count || 0;
+                }}
+            }} catch(e) {{}}
+
+            // Health summary comes from /api/aam/health/summary
+            try {{
+                var hRes = await fetch('/api/aam/health/summary');
+                if (hRes.ok) {{
+                    var h = await hRes.json();
+                    document.getElementById('health-reachable').textContent = h.reachable != null ? h.reachable : 0;
+                    document.getElementById('health-degraded').textContent = h.degraded != null ? h.degraded : 0;
+                    document.getElementById('health-unreachable').textContent = h.unreachable != null ? h.unreachable : 0;
+                    document.getElementById('health-auth-expired').textContent = h.auth_expired != null ? h.auth_expired : 0;
+                }}
+            }} catch(e) {{}}
 
             renderNetwork();
         }}
@@ -2764,24 +2609,12 @@ async def ui_topology():
         }}
 
         function applyTopologyFilters() {{
-            const assetFilter = document.getElementById('asset-filter').value;
-            const detailLevel = document.getElementById('detail-filter').value;
-            
-            // Map single filter to fabric/sor parameters
-            let fabricFilter = 'all';
-            let sorFilter = 'all';
-            
-            if (assetFilter === 'sors') {{
-                sorFilter = 'show';
-            }} else if (assetFilter === 'fabrics') {{
-                fabricFilter = 'all';
-                sorFilter = 'hide';
-            }} else if (assetFilter !== 'all') {{
-                // Specific fabric type
-                fabricFilter = assetFilter;
-            }}
-            
-            loadTopology(fabricFilter, sorFilter, detailLevel);
+            // Read from dropdowns, then push to URL state.
+            // loadTopology() reads from URL state (single source of truth).
+            var view = document.getElementById('asset-filter').value;
+            var detail = document.getElementById('detail-filter').value;
+            setViewState({{ view: view, detail: detail }});
+            loadTopology();
         }}
 
         var _lastLayout = 'physics';
@@ -2798,6 +2631,7 @@ async def ui_topology():
                 return;
             }}
             _lastLayout = val;
+            setViewState({{ layout: val }});
             renderNetwork();
         }}
 
@@ -2806,12 +2640,14 @@ async def ui_topology():
         }}
 
         function resetView() {{
+            // Clear URL params, then reset dropdowns and reload
+            history.replaceState(null, '', window.location.pathname);
             document.getElementById('asset-filter').value = 'all';
             document.getElementById('detail-filter').value = 'summary';
             document.getElementById('layout-select').value = 'physics';
             _lastLayout = 'physics';
             physicsEnabled = true;
-            loadTopology('all');
+            loadTopology();
         }}
 
         function fitToScreen() {{
@@ -2850,720 +2686,152 @@ async def ui_topology():
             setTimeout(() => toast.style.display = 'none', 3000);
         }}
 
-        var _inferTimer = null;
-        var _inferStart = 0;
-        document.getElementById('btn-run-inference').addEventListener('click', async function() {{
+        // ────────────────────────────────────────────────────────
+        // New-architecture action handlers (Fix 4)
+        // ────────────────────────────────────────────────────────
+        var _credentialsValidated = false;
+        var _ingestActive = false;
+
+        async function refreshActionGates() {{
+            // Discovery: enabled iff a vendor manifest is loaded
+            try {{
+                var msRes = await fetch('/api/aam/discovery/manifest-status');
+                if (msRes.ok) {{
+                    var ms = await msRes.json();
+                    var rdBtn = document.getElementById('btn-run-discovery');
+                    rdBtn.disabled = !ms.manifest_loaded;
+                    rdBtn.title = ms.manifest_loaded ? '' : 'Vendor manifest not loaded';
+                }}
+            }} catch (e) {{}}
+            // Validate Credentials: enabled iff at least one DeclaredPipe exists
+            try {{
+                var pcRes = await fetch('/api/aam/pipes/count');
+                if (pcRes.ok) {{
+                    var pc = await pcRes.json();
+                    var vcBtn = document.getElementById('btn-validate-credentials');
+                    vcBtn.disabled = !(pc.count && pc.count > 0);
+                    vcBtn.title = vcBtn.disabled ? 'No DeclaredPipes yet' : '';
+                }}
+            }} catch (e) {{}}
+            // Start Ingest: enabled iff credentials validated
+            var siBtn = document.getElementById('btn-start-ingest');
+            siBtn.disabled = !_credentialsValidated || _ingestActive;
+            siBtn.title = _credentialsValidated ? '' : 'Validate credentials first';
+        }}
+
+        document.getElementById('btn-run-discovery').addEventListener('click', async function() {{
             var btn = this;
             btn.disabled = true;
-            btn.classList.add('sb-btn-loading');
-            _inferStart = Date.now();
-            if (_inferTimer) clearInterval(_inferTimer);
-            _inferTimer = setInterval(function() {{
-                var s = Math.floor((Date.now() - _inferStart) / 1000);
-                btn.textContent = 'Running... ' + s + 's';
-            }}, 500);
-            btn.textContent = 'Running... 0s';
+            var orig = btn.textContent;
+            btn.textContent = 'Discovering...';
             try {{
-                const res = await fetch('/api/aam/infer', {{ method: 'POST' }});
-                const data = await res.json();
-                clearInterval(_inferTimer);
-                _inferTimer = null;
-                var elapsed = Math.floor((Date.now() - _inferStart) / 1000);
+                var res = await fetch('/api/aam/discovery/run', {{ method: 'POST' }});
+                var data = await res.json().catch(function() {{ return {{}}; }});
                 if (res.ok) {{
-                    let msg = 'Inference complete: ' + data.pipes_created + ' pipes created';
-                    if (data.from_candidates) msg += ' (' + data.from_candidates + ' from candidates)';
-                    if (data.candidates_unmatched) msg += ', ' + data.candidates_unmatched + ' unmatched';
-                    showToast(msg, data.pipes_created > 0 ? 'success' : 'warning');
-                    btn.classList.remove('sb-btn-loading');
-                    btn.textContent = 'Inferred (' + elapsed + 's)';
-                    btn.disabled = false;
-                    setTimeout(() => location.reload(), 1200);
+                    showToast('Discovery: ' + (data.message || 'ok'), 'success');
+                    await loadTopology();
+                    await refreshActionGates();
                 }} else {{
-                    btn.classList.remove('sb-btn-loading');
-                    showToast('Error: ' + (data.detail || 'Failed'), 'error');
-                    btn.textContent = 'Failed (' + elapsed + 's)';
-                    btn.disabled = false;
+                    showToast('Discovery failed: ' + (data.detail || res.status), 'error');
                 }}
             }} catch (e) {{
-                clearInterval(_inferTimer);
-                _inferTimer = null;
-                var elapsed = Math.floor((Date.now() - _inferStart) / 1000);
-                btn.classList.remove('sb-btn-loading');
-                showToast('Error: ' + e.message, 'error');
-                btn.textContent = 'Failed (' + elapsed + 's)';
-                btn.disabled = false;
-            }}
-        }});
-
-        document.getElementById('btn-export-dcl').addEventListener('click', async function() {{
-            const btn = this;
-            btn.disabled = true;
-            btn.classList.add('sb-btn-loading');
-            btn.textContent = 'Exporting...';
-            try {{
-                const res = await fetch('/api/export/dcl/push', {{
-                    method: 'POST',
-                    headers: {{'Content-Type': 'application/json'}},
-                    body: '{{}}'
-                }});
-                if (!res.ok) {{
-                    var d = await res.json().catch(function() {{ return {{}}; }});
-                    throw new Error(d.detail || 'HTTP ' + res.status);
-                }}
-                const data = await res.json();
-                const dclOk = data.dcl_accepted;
-                const pipeCount = data.export ? data.export.total_connections : 0;
-
-                // Offer JSON download of the export payload
-                if (data.export) {{
-                    const blob = new Blob([JSON.stringify(data.export, null, 2)], {{ type: 'application/json' }});
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = 'dcl-export-' + new Date().toISOString().slice(0,10) + '.json';
-                    a.click();
-                }}
-
-                if (dclOk) {{
-                    showToast('Exported ' + pipeCount + ' pipes to DCL (accepted)', 'success');
-                }} else {{
-                    var ep = data.delivery && data.delivery.export_pipes || {{}};
-                    var reason = ep.error || (ep.status ? 'HTTP ' + ep.status : 'unknown');
-                    showToast('Export ' + pipeCount + ' pipes — DCL rejected: ' + reason, 'error');
-                }}
-                checkDispatchReady();
-            }} catch (e) {{
-                showToast('Export failed: ' + e.message, 'error');
+                showToast('Discovery error: ' + e.message, 'error');
             }} finally {{
-                btn.classList.remove('sb-btn-loading');
-                btn.disabled = false;
-                btn.textContent = 'Export to DCL';
+                btn.textContent = orig;
+                refreshActionGates();
             }}
         }});
 
-        async function checkDispatchReady() {{
-            const btn = document.getElementById('btn-dispatch-all');
-            try {{
-                const res = await fetch('/api/runners/can-dispatch');
-                if (!res.ok) {{
-                    btn.disabled = true;
-                    btn.title = 'Cannot verify dispatch readiness (HTTP ' + res.status + ')';
-                    return;
-                }}
-                const data = await res.json();
-                if (data.ready) {{
-                    btn.disabled = false;
-                    btn.title = '';
-                }} else {{
-                    btn.disabled = true;
-                    btn.title = data.reason || 'Export to DCL first';
-                }}
-            }} catch (e) {{
-                btn.disabled = true;
-                btn.title = 'Cannot verify dispatch readiness: ' + e.message;
-                showToast('Dispatch check failed: ' + e.message, 'error');
-            }}
-        }}
-
-        let _dispatchPollTimer = null;
-        let _dispatchCounterTimer = null;
-        let _dispatchStart = 0;
-        let _dispatchJobCount = 0;
-        let _dispatchPanelRefresh = null;
-
-        function _startDispatchCounter(count) {{
-            _dispatchStart = Date.now();
-            _dispatchJobCount = count;
-            const btn = document.getElementById('btn-dispatch-all');
-            if (_dispatchCounterTimer) clearInterval(_dispatchCounterTimer);
-            _dispatchCounterTimer = setInterval(() => {{
-                const sec = Math.floor((Date.now() - _dispatchStart) / 1000);
-                btn.textContent = 'Running ' + _dispatchJobCount + '... ' + sec + 's';
-            }}, 200);
-        }}
-
-        function _stopDispatchCounter() {{
-            if (_dispatchCounterTimer) {{ clearInterval(_dispatchCounterTimer); _dispatchCounterTimer = null; }}
-            const btn = document.getElementById('btn-dispatch-all');
-            btn.textContent = 'Dispatch Runner';
-        }}
-
-        function startDispatchPolling() {{
-            stopDispatchPolling();
-            _dispatchPollTimer = setInterval(async () => {{
-                await loadDispatchData();
-                if (_dpData) {{
-                    const hasActive = _dpData.some(j => j.status === 'queued' || j.status === 'running' || j.status === 'pushing');
-                    if (!hasActive) {{
-                        stopDispatchPolling();
-                        _stopDispatchCounter();
-                        const statusEl = document.getElementById('dispatch-all-status');
-                        const done = _dpData.filter(j => j.status === 'completed').length;
-                        const failed = _dpData.filter(j => j.status === 'failed').length;
-                        const rows = _dpData.reduce((s, j) => s + (j.rows_transferred || 0), 0);
-                        const elapsed = Math.floor((Date.now() - _dispatchStart) / 1000);
-                        if (failed === 0) {{
-                            statusEl.innerHTML = '<span class="dispatch-pill completed">Done — ' + rows.toLocaleString() + ' rows in ' + elapsed + 's</span>';
-                        }} else {{
-                            statusEl.innerHTML = '<span class="dispatch-pill failed">' + failed + ' failed in ' + elapsed + 's</span>';
-                        }}
-                    }}
-                }}
-            }}, 2000);
-        }}
-
-        function stopDispatchPolling() {{
-            if (_dispatchPollTimer) {{ clearInterval(_dispatchPollTimer); _dispatchPollTimer = null; }}
-        }}
-
-        async function dispatchAllRunners() {{
-            const btn = document.getElementById('btn-dispatch-all');
-            const statusEl = document.getElementById('dispatch-all-status');
+        document.getElementById('btn-validate-credentials').addEventListener('click', async function() {{
+            var btn = this;
             btn.disabled = true;
-            btn.classList.add('sb-btn-loading');
-            btn.textContent = 'Dispatching...';
-            statusEl.style.display = 'inline-block';
-            statusEl.innerHTML = '<span class="dispatch-pill queued">Queued</span>';
-
+            var orig = btn.textContent;
+            btn.textContent = 'Validating...';
+            var resultsEl = document.getElementById('cred-results');
+            resultsEl.innerHTML = '';
+            resultsEl.style.display = 'none';
             try {{
-                const pipesRes = await fetch('/api/pipes');
-                const pipesData = await pipesRes.json();
-                const pipeIds = (pipesData.pipes || []).map(p => p.pipe_id).filter(Boolean);
-
-                if (pipeIds.length === 0) {{
-                    showToast('No pipes to dispatch', 'warning');
-                    btn.classList.remove('sb-btn-loading');
-                    btn.disabled = false;
-                    btn.textContent = 'Dispatch Runner';
-                    statusEl.style.display = 'none';
-                    return;
-                }}
-
-                const res = await fetch('/api/runners/dispatch-batch', {{
-                    method: 'POST',
-                    headers: {{ 'Content-Type': 'application/json' }},
-                    body: JSON.stringify({{ pipe_ids: pipeIds, trigger: 'manual' }})
-                }});
-                const data = await res.json();
-                if (data.jobs && data.jobs.length > 0) _dpRunId = data.jobs[0].run_id;
-
+                var res = await fetch('/api/aam/credentials/validate', {{ method: 'POST' }});
+                var data = await res.json().catch(function() {{ return {{}}; }});
                 if (res.ok) {{
-                    const dispatched = data.dispatched || 0;
-                    const errors = data.errors || 0;
-                    statusEl.innerHTML = '<span class="dispatch-pill running">' + dispatched + ' dispatched</span>';
-                    showToast(dispatched + ' manifests dispatched to Farm', 'success');
-                    _startDispatchCounter(dispatched);
-                    document.getElementById('btn-stop-all').style.display = 'block';
-                    openDispatchPanel();
-                    startDispatchPolling();
+                    var rows = (data.results || []).map(function(r) {{
+                        var cls = r.status === 'connected' ? 'connected' : (r.status === 'failed' ? 'failed' : 'pending');
+                        return '<div class="cred-row"><span class="plane-name">' + r.plane + '</span><span class="cred-status ' + cls + '">' + r.status + '</span></div>';
+                    }}).join('');
+                    resultsEl.innerHTML = rows;
+                    resultsEl.style.display = 'block';
+                    _credentialsValidated = (data.results || []).every(function(r) {{ return r.status === 'connected'; }});
+                    showToast('Credentials validated', _credentialsValidated ? 'success' : 'warning');
                 }} else {{
-                    statusEl.innerHTML = '<span class="dispatch-pill failed">Failed</span>';
-                    showToast('Dispatch failed: ' + (data.detail || res.status), 'error');
-                    btn.classList.remove('sb-btn-loading');
-                    btn.disabled = false;
-                    btn.textContent = 'Dispatch Runner';
+                    showToast('Validation failed: ' + (data.detail || res.status), 'error');
                 }}
             }} catch (e) {{
-                statusEl.innerHTML = '<span class="dispatch-pill failed">Error</span>';
-                showToast('Error: ' + e.message, 'error');
-                btn.classList.remove('sb-btn-loading');
-                btn.disabled = false;
-                btn.textContent = 'Dispatch Runner';
+                showToast('Validation error: ' + e.message, 'error');
+            }} finally {{
+                btn.textContent = orig;
+                refreshActionGates();
             }}
-        }}
+        }});
 
-        // ── Dispatch Panel ──
-        let _dpFilter = 'all';
-        let _dpData = null;
-        let _dpRunId = null;
-
-        async function cancelAllJobs() {{
-            const btn = document.getElementById('btn-stop-all');
+        document.getElementById('btn-start-ingest').addEventListener('click', async function() {{
+            var btn = this;
             btn.disabled = true;
-            btn.textContent = 'Stopping...';
+            var orig = btn.textContent;
+            btn.textContent = 'Starting...';
             try {{
-                const res = await fetch('/api/runners/cancel-queued', {{ method: 'POST' }});
-                const data = await res.json();
-                const count = data.cancelled || 0;
-                showToast(count + ' jobs cancelled', 'success');
-                btn.style.display = 'none';
-                btn.disabled = false;
-                btn.textContent = 'Stop All';
-                const dispBtn = document.getElementById('btn-dispatch-all');
-                dispBtn.disabled = false;
-                dispBtn.textContent = 'Dispatch Runner';
-                const statusEl = document.getElementById('dispatch-all-status');
-                statusEl.innerHTML = '<span class="dispatch-pill failed">' + count + ' cancelled</span>';
-                loadDispatchData();
-            }} catch (e) {{
-                showToast('Cancel failed: ' + e.message, 'error');
-                btn.disabled = false;
-                btn.textContent = 'Stop All';
-            }}
-        }}
-
-        async function openDispatchPanel() {{
-            document.getElementById('dispatch-overlay').classList.add('visible');
-            document.body.style.overflow = 'hidden';
-            try {{
-                const probe = await fetch('/api/runners/jobs?limit=1');
-                const probeData = await probe.json();
-                if (probeData.jobs && probeData.jobs.length > 0) {{
-                    _dpRunId = probeData.jobs[0].run_id;
-                }}
-            }} catch(e) {{}}
-            loadDispatchData();
-            loadDclDispatchStatus();
-            // Start 10-second ambient refresh while panel is open
-            if (_dispatchPanelRefresh) clearInterval(_dispatchPanelRefresh);
-            _dispatchPanelRefresh = setInterval(() => {{
-                loadDispatchData();
-            }}, 10000);
-        }}
-
-        async function loadDclDispatchStatus() {{
-            const banner = document.getElementById('dcl-dispatch-banner');
-            try {{
-                // Try dispatch status first (in-memory, set after DCL dispatch)
-                var d = null;
-                try {{
-                    const res = await fetch('/api/export/dcl/dispatch-status');
-                    const data = await res.json();
-                    d = data.dcl_dispatch;
-                }} catch (e) {{}}
-
-                // Fallback: always show latest AOD run info from DB
-                if (!d) {{
-                    try {{
-                        const runRes = await fetch('/api/handoff/aod/latest');
-                        if (runRes.ok) {{
-                            const run = await runRes.json();
-                            if (run && run.aod_run_id) {{
-                                d = {{
-                                    aod_run_id: run.aod_run_id,
-                                    snapshot_name: run.entity_id || run.snapshot_name,
-                                    pipe_count: run.candidates_accepted,
-                                    ok: true,
-                                    timestamp: run.handoff_timestamp,
-                                }};
-                            }}
-                        }}
-                    }} catch (e) {{}}
-                }}
-
-                if (!d) {{
-                    banner.style.display = 'none';
-                    return;
-                }}
-                const statusColor = d.ok ? '#4ade80' : '#f87171';
-                const statusLabel = d.dcl_status || (d.ok ? 'ok' : 'pending');
-                const ts = d.timestamp ? new Date(d.timestamp).toLocaleTimeString() : '';
-                banner.style.display = 'block';
-                banner.style.borderColor = d.ok ? 'rgba(34,197,94,0.3)' : 'rgba(248,113,113,0.3)';
-                banner.style.background = d.ok ? 'rgba(34,197,94,0.06)' : 'rgba(248,113,113,0.06)';
-                banner.innerHTML =
-                    '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;gap:4px;">' +
-                    '<strong style="color:var(--slate-200,#e2e8f0);">DCL Dispatch</strong>' +
-                    '<span style="color:' + statusColor + ';font-weight:600;">' + statusLabel + '</span>' +
-                    (d.dispatch_id ? '<span style="color:var(--slate-400,#94a3b8);">' + d.dispatch_id + '</span>' : '') +
-                    '</div>' +
-                    '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:4px;color:var(--slate-400,#94a3b8);">' +
-                    ((d.entity_id || d.snapshot_name) ? '<span>Entity: <span style="color:var(--slate-200,#e2e8f0);">' + (d.entity_id || d.snapshot_name) + '</span></span>' : '') +
-                    (d.aod_run_id ? '<span>Run: <span style="color:var(--slate-200,#e2e8f0);">' + d.aod_run_id + '</span></span>' : '') +
-                    (d.pipe_count != null ? '<span>Pipes: <span style="color:var(--slate-200,#e2e8f0);">' + d.pipe_count + '</span></span>' : '') +
-                    (ts ? '<span>At: ' + ts + '</span>' : '') +
-                    '</div>';
-            }} catch (e) {{
-                banner.style.display = 'none';
-            }}
-        }}
-
-        function closeDispatchPanel() {{
-            document.getElementById('dispatch-overlay').classList.remove('visible');
-            document.body.style.overflow = '';
-            stopDispatchPolling();
-            if (_dispatchPanelRefresh) {{ clearInterval(_dispatchPanelRefresh); _dispatchPanelRefresh = null; }}
-            // Reset position so it re-centers next time
-            const panel = document.querySelector('.dispatch-panel');
-            if (panel) {{ panel.style.transform = ''; }}
-        }}
-
-        // --- Drag-to-move dispatch panel ---
-        (function() {{
-            let isDragging = false, startX = 0, startY = 0, dx = 0, dy = 0;
-            document.addEventListener('mousedown', function(e) {{
-                const header = e.target.closest('.dp-header');
-                if (!header || e.target.closest('button')) return;
-                isDragging = true;
-                const panel = header.closest('.dispatch-panel');
-                panel.classList.add('dp-dragging');
-                const t = panel.style.transform;
-                const m = t.match(/translate\(([^,]+),\s*([^)]+)\)/);
-                dx = m ? parseFloat(m[1]) : 0;
-                dy = m ? parseFloat(m[2]) : 0;
-                startX = e.clientX; startY = e.clientY;
-                e.preventDefault();
-            }});
-            document.addEventListener('mousemove', function(e) {{
-                if (!isDragging) return;
-                const panel = document.querySelector('.dispatch-panel');
-                if (!panel) return;
-                panel.style.transform = 'translate(' + (dx + e.clientX - startX) + 'px,' + (dy + e.clientY - startY) + 'px)';
-            }});
-            document.addEventListener('mouseup', function() {{
-                if (!isDragging) return;
-                isDragging = false;
-                const panel = document.querySelector('.dispatch-panel');
-                if (panel) panel.classList.remove('dp-dragging');
-            }});
-        }})();
-
-        function setDpFilter(f, el) {{
-            _dpFilter = f;
-            document.querySelectorAll('.dp-stat').forEach(b => b.classList.remove('dp-active'));
-            el.classList.add('dp-active');
-            renderDispatchJobs(_dpData);
-        }}
-
-        async function loadDispatchData() {{
-            const body = document.getElementById('dp-body');
-            if (!_dpData) {{
-                body.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--slate-500);">Loading...</td></tr>';
-            }}
-            try {{
-                let _djUrl = '/api/runners/jobs?limit=1000';
-                if (_dpRunId) _djUrl += '&run_id=' + encodeURIComponent(_dpRunId);
-                const res = await fetch(_djUrl);
-                const data = await res.json();
-                _dpData = data.jobs || [];
-                renderDispatchSummary(_dpData);
-                renderDispatchJobs(_dpData);
-            }} catch (e) {{
-                if (!_dpData) {{
-                    body.innerHTML = '<tr><td colspan="7" style="color:#f87171;">Error: ' + e.message + '</td></tr>';
-                }}
-            }}
-        }}
-
-        function renderDispatchSummary(jobs) {{
-            const counts = {{ dispatched: 0, completed: 0, failed: 0, running: 0, queued: 0, pushing: 0, cancelled: 0, skipped: 0 }};
-            let idemSkips = 0;
-            jobs.forEach(j => {{
-                const s = j.status || 'queued';
-                if (counts[s] !== undefined) counts[s]++;
-                // Count idempotency skips within completed jobs
-                if (s === 'completed') {{
-                    let dclR = j.dcl_response;
-                    if (typeof dclR === 'string') {{ try {{ dclR = JSON.parse(dclR); }} catch(e) {{ dclR = null; }} }}
-                    if (dclR && dclR.skipped_duplicate) idemSkips++;
-                }}
-            }});
-            document.getElementById('dp-total').textContent = jobs.length;
-            document.getElementById('dp-dispatched').textContent = counts.dispatched;
-            document.getElementById('dp-running').textContent = counts.running + counts.pushing;
-            document.getElementById('dp-completed').textContent = counts.completed + (idemSkips ? ' (' + idemSkips + ' idem)' : '');
-            document.getElementById('dp-failed').textContent = counts.failed + counts.cancelled;
-            document.getElementById('dp-queued').textContent = counts.queued;
-            document.getElementById('dp-skipped').textContent = counts.skipped;
-            const hasActive = counts.queued > 0 || counts.running > 0 || counts.pushing > 0;
-            document.getElementById('btn-stop-all').style.display = hasActive ? 'block' : 'none';
-            // Show which run the results are scoped to
-            const ctxEl = document.getElementById('dp-run-context');
-            if (_dpRunId) {{
-                ctxEl.textContent = 'Showing jobs for run ' + _dpRunId.substring(0, 20) + '\u2026';
-            }} else {{
-                ctxEl.textContent = 'Showing all jobs (no run filter)';
-            }}
-        }}
-
-        function _escHtml(s) {{
-            return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-        }}
-
-        function renderDispatchJobs(jobs) {{
-            const body = document.getElementById('dp-body');
-            let filtered = jobs;
-            if (_dpFilter !== 'all') {{
-                filtered = jobs.filter(j => {{
-                    const s = j.status || 'queued';
-                    if (_dpFilter === 'running') return s === 'running' || s === 'pushing';
-                    if (_dpFilter === 'failed') return s === 'failed' || s === 'cancelled';
-                    if (_dpFilter === 'skipped') {{
-                        if (s === 'skipped') return true;
-                        // Include idempotency-skipped completed jobs
-                        if (s === 'completed') {{
-                            let dclR = j.dcl_response;
-                            if (typeof dclR === 'string') {{ try {{ dclR = JSON.parse(dclR); }} catch(e) {{ dclR = null; }} }}
-                            return dclR && dclR.skipped_duplicate;
-                        }}
-                        return false;
-                    }}
-                    return s === _dpFilter;
-                }});
-            }}
-            if (filtered.length === 0) {{
-                body.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:16px;color:var(--slate-500);">No jobs</td></tr>';
-                return;
-            }}
-            body.innerHTML = filtered.map((j, idx) => {{
-                const s = j.status || 'queued';
-                const rows = j.rows_transferred || 0;
-                let errText = (j.error_message||'').replace(/<!DOCTYPE[\s\S]*$/i, '').trim();
-                if (!errText && (s === 'failed' || s === 'timed_out' || s === 'cancelled')) {{
-                    // Infer reason from available data
-                    if (s === 'timed_out') {{
-                        errText = 'Timed out — no response from Farm';
-                    }} else if (s === 'cancelled') {{
-                        errText = 'Cancelled by operator';
-                    }} else if (!j.dcl_response && j.rows_transferred === 0) {{
-                        errText = 'Farm failed — no rows extracted, no DCL response';
-                    }} else if (j.dcl_response) {{
-                        let dclP = j.dcl_response;
-                        if (typeof dclP === 'string') {{ try {{ dclP = JSON.parse(dclP); }} catch(e) {{ dclP = null; }} }}
-                        if (dclP && dclP.status && dclP.status !== 'ingested' && !(dclP.status_code && dclP.status_code < 300 && !dclP.error_type)) {{
-                            errText = 'DCL rejected: ' + (dclP.status || dclP.error || 'unknown');
-                        }} else {{
-                            errText = 'Farm extraction failed';
-                        }}
+                var res = await fetch('/api/aam/ingest/start', {{ method: 'POST' }});
+                var data = await res.json().catch(function() {{ return {{}}; }});
+                if (res.ok) {{
+                    _ingestActive = (data.ingest_state === 'active');
+                    if (_ingestActive) {{
+                        btn.textContent = 'Ingest Active';
+                        document.getElementById('ingest-stop-link').style.display = 'inline';
+                        showToast('Ingest started', 'success');
                     }} else {{
-                        errText = 'Farm extraction failed';
+                        btn.textContent = orig;
+                        showToast('Ingest start: ' + (data.message || 'ok'), 'warning');
                     }}
-                }}
-                const err = errText ? '<div class="dp-error" title="' + _escHtml(errText).substring(0,200) + '">' + _escHtml(errText).substring(0,80) + '</div>' : '';
-                const jobId = j.job_id || '';
-                const pipeId = j.pipe_id || '';
-                const runId = j.run_id || '';
-                const src = j.source_system || jobId.replace(/^run_\d{8}_/, '').replace(/_[a-f0-9]+$/, '') || pipeId;
-                const label = src.length > 25 ? src.substring(0,22) + '...' : src;
-                const ts = j.completed_at || j.started_at || j.created_at || '';
-                const shortTs = ts ? new Date(ts).toLocaleTimeString() : '-';
-                // Parse dcl_response once for reuse
-                let dclParsed = j.dcl_response;
-                if (typeof dclParsed === 'string') {{ try {{ dclParsed = JSON.parse(dclParsed); }} catch(e) {{ dclParsed = null; }} }}
-                const isIdemSkip = dclParsed && dclParsed.skipped_duplicate;
-
-                // Status pill — override for idempotency skips
-                let statusPill;
-                if (isIdemSkip) {{
-                    statusPill = '<span class="dp-status idem-skip" title="Farm returned cached result — no new push to DCL">idem. skip</span>';
                 }} else {{
-                    statusPill = '<span class="dp-status ' + s + '">' + s + '</span>';
+                    btn.textContent = orig;
+                    showToast('Ingest failed: ' + (data.detail || res.status), 'error');
                 }}
-
-                // DCL POST result column
-                let dclHtml = '';
-                if (isIdemSkip) {{
-                    dclHtml = '<span style="color:#fb923c;font-weight:600;" title="Farm idempotency skip — cached result">cached</span>';
-                }} else if (dclParsed) {{
-                    if (dclParsed.status === 'ingested' || (dclParsed.status_code && dclParsed.status_code < 300 && !dclParsed.error_type)) {{
-                        const code = dclParsed.dcl_status_code || 200;
-                        dclHtml = '<span style="color:#4ade80;font-weight:600;" title="DCL accepted (' + code + ')">' + code + ' ok</span>';
-                    }} else {{
-                        const code = dclParsed.dcl_status_code || dclParsed.status_code || '?';
-                        const reason = dclParsed.status || dclParsed.error || 'rejected';
-                        dclHtml = '<span style="color:#f87171;font-weight:600;" title="' + _escHtml(String(reason)) + '">' + code + ' fail</span>';
-                    }}
-                }} else if (j.dcl_response) {{
-                    dclHtml = '<span style="color:#f87171;">err</span>';
-                }} else if (s === 'failed' || s === 'timed_out' || s === 'cancelled') {{
-                    dclHtml = '<span style="color:#f87171;">-</span>';
-                }} else if (s === 'skipped') {{
-                    dclHtml = '<span style="color:#fb923c;">-</span>';
-                }} else {{
-                    dclHtml = '<span style="color:#94a3b8;">pending</span>';
-                }}
-
-                // Snapshot column
-                let snapshotHtml = '-';
-                if (isIdemSkip) {{
-                    snapshotHtml = '<span style="color:#fb923c;" title="Result from a previous snapshot">cached</span>';
-                }} else if (j.entity_id || j.snapshot_name) {{
-                    const sn = j.entity_id || j.snapshot_name;
-                    snapshotHtml = sn.length > 18 ? sn.substring(0,15) + '...' : sn;
-                }}
-
-                return '<tr class="dp-clickable" data-jobid="' + _escHtml(jobId) + '" title="Click for details">' +
-                    '<td title="pipe: ' + pipeId + '">' + label + '</td>' +
-                    '<td>' + statusPill + '</td>' +
-                    '<td>' + dclHtml + '</td>' +
-                    '<td style="font-size:0.78rem;color:var(--slate-400);">' + snapshotHtml + '</td>' +
-                    '<td style="text-align:right;">' + rows + '</td>' +
-                    '<td>' + shortTs + '</td>' +
-                    '<td>' + err + '</td>' +
-                    '</tr>';
-            }}).join('');
-
-            // Event delegation for clickable job rows
-            body.querySelectorAll('tr.dp-clickable').forEach(function(tr) {{
-                tr.addEventListener('click', function() {{
-                    toggleJobDetail(tr.getAttribute('data-jobid'), tr);
-                }});
-            }});
-        }}
-
-        async function toggleJobDetail(jobId, rowEl) {{
-            var existing = rowEl.nextElementSibling;
-            if (existing && existing.classList.contains('dp-detail')) {{
-                existing.remove();
-                return;
-            }}
-            // Remove any other open detail rows
-            document.querySelectorAll('.dp-detail').forEach(function(el) {{ el.remove(); }});
-            var detailRow = document.createElement('tr');
-            detailRow.className = 'dp-detail';
-            detailRow.innerHTML = '<td colspan="5"><div class="dp-detail-inner"><span class="dp-v">Loading...</span></div></td>';
-            rowEl.after(detailRow);
-            try {{
-                var res = await fetch('/api/runners/jobs/' + encodeURIComponent(jobId));
-                if (!res.ok) {{
-                    detailRow.innerHTML = '<td colspan="5"><div class="dp-detail-inner"><span class="dp-v err">Failed to load job details (HTTP ' + res.status + ')</span></div></td>';
-                    return;
-                }}
-                var job = await res.json();
-                var m = job.manifest || {{}};
-                var src = m.source || {{}};
-                var tgt = m.target || {{}};
-                var prov = m.provenance || {{}};
-                var lim = m.limits || {{}};
-                var html = '';
-                function kv(k, v, cls) {{
-                    return '<div class="dp-kv"><span class="dp-k">' + k + '</span><span class="dp-v' + (cls ? ' '+cls : '') + '">' + _escHtml(String(v || '-')) + '</span></div>';
-                }}
-                html += kv('Pipe ID', src.pipe_id);
-                html += kv('Run ID', m.run_id);
-                html += kv('System', src.system);
-                html += kv('Adapter', src.adapter);
-                html += kv('Category', src.category);
-                html += kv('Entity', tgt.entity_id || tgt.snapshot_name);
-                html += kv('DCL URL', tgt.dcl_url);
-                html += kv('Tenant', tgt.tenant_id);
-                html += kv('Trigger', prov.triggered_by);
-                html += kv('AOD Run', prov.aod_run_id);
-                html += kv('Timeout', lim.timeout_seconds ? lim.timeout_seconds + 's' : '-');
-                html += kv('Dispatched', job.dispatched_at);
-                if (src.credentials_ref) html += kv('Creds Ref', src.credentials_ref);
-                if (job.started_at) html += kv('Started', job.started_at);
-                if (job.completed_at) html += kv('Completed', job.completed_at);
-                if (job.last_heartbeat) html += kv('Heartbeat', job.last_heartbeat);
-                if (job.rows_transferred) html += kv('Rows', job.rows_transferred);
-                if (src.endpoint_ref) {{
-                    var ep = typeof src.endpoint_ref === 'object' ? JSON.stringify(src.endpoint_ref) : src.endpoint_ref;
-                    html += '<div class="dp-kv dp-full"><span class="dp-k">Endpoint</span><span class="dp-v">' + _escHtml(ep).substring(0, 200) + '</span></div>';
-                }}
-                var jobErr = (job.error_message||'').replace(/<!DOCTYPE[\s\S]*$/i, '').trim();
-                if (!jobErr && (job.status === 'failed' || job.status === 'timed_out')) {{
-                    if (job.status === 'timed_out') jobErr = 'Timed out — no response from Farm within timeout window';
-                    else if (!job.dcl_response && !job.rows_transferred) jobErr = 'Farm failed — no rows extracted, no DCL response received';
-                    else jobErr = 'Farm extraction failed';
-                }}
-                if (jobErr) {{
-                    html += '<div class="dp-kv dp-full"><span class="dp-k">Error</span><span class="dp-v err">' + _escHtml(jobErr).substring(0, 500) + '</span></div>';
-                }}
-                if (job.dcl_response) {{
-                    html += '<div class="dp-kv dp-full"><span class="dp-k">DCL Resp</span><span class="dp-v">' + _escHtml(JSON.stringify(job.dcl_response)).substring(0, 300) + '</span></div>';
-                }}
-                detailRow.innerHTML = '<td colspan="5"><div class="dp-detail-inner">' + html + '</div></td>';
             }} catch (e) {{
-                detailRow.innerHTML = '<td colspan="5"><div class="dp-detail-inner"><span class="dp-v err">Error: ' + _escHtml(String(e)) + '</span></div></td>';
+                btn.textContent = orig;
+                showToast('Ingest error: ' + e.message, 'error');
+            }} finally {{
+                refreshActionGates();
             }}
-        }}
+        }});
 
-        function renderPipelineLog(steps) {{
-            var section = document.getElementById('pipeline-log-section');
-            var container = document.getElementById('pipeline-log');
-            var countEl = document.getElementById('pipeline-log-count');
-            if (!steps || steps.length === 0) {{
-                section.style.display = 'none';
-                return;
-            }}
-            section.style.display = 'block';
-            countEl.textContent = '(' + steps.length + ')';
-            container.innerHTML = steps.map(function(s) {{
-                var icon = s.ok ? '<span style="color:#4ade80;">&#10003;</span>' : '<span style="color:#f87171;">&#10007;</span>';
-                return '<div style="display:flex;align-items:center;gap:6px;">' + icon + ' <span style="color:var(--slate-300,#cbd5e1);">' + s.text + '</span></div>';
-            }}).join('');
-            // Restore accordion state
-            var wasOpen = localStorage.getItem('aam_pipeline_log_open') === '1';
-            var hdr = document.getElementById('pipeline-log-toggle');
-            var body = document.getElementById('pipeline-log-body');
-            if (wasOpen) {{
-                hdr.classList.add('open');
-                body.classList.add('open');
-            }}
-        }}
+        document.getElementById('ingest-stop-link').addEventListener('click', function(e) {{
+            e.preventDefault();
+            _ingestActive = false;
+            var btn = document.getElementById('btn-start-ingest');
+            btn.textContent = 'Start Ingest';
+            this.style.display = 'none';
+            showToast('Ingest stopped', 'success');
+            refreshActionGates();
+        }});
 
-        function togglePipelineLog() {{
-            var hdr = document.getElementById('pipeline-log-toggle');
-            var body = document.getElementById('pipeline-log-body');
-            var isOpen = hdr.classList.toggle('open');
-            body.classList.toggle('open');
-            localStorage.setItem('aam_pipeline_log_open', isOpen ? '1' : '0');
-        }}
-
-        // Restore pipeline log from previous run
-        (function() {{
-            try {{
-                var saved = localStorage.getItem('aam_pipeline_log');
-                if (saved) {{
-                    var parsed = JSON.parse(saved);
-                    if (parsed.steps && parsed.steps.length > 0) {{
-                        var age = Date.now() - new Date(parsed.timestamp).getTime();
-                        if (age < 3600000) {{
-                            renderPipelineLog(parsed.steps);
-                        }}
-                    }}
-                }}
-            }} catch(e) {{}}
+        // ────────────────────────────────────────────────────────
+        // Initialize — URL state aware, silent 60s background refresh (Fix 6)
+        // ────────────────────────────────────────────────────────
+        (function initFromUrl() {{
+            var s = getViewState();
+            var af = document.getElementById('asset-filter'); if (af) af.value = s.view;
+            var df = document.getElementById('detail-filter'); if (df) df.value = s.detail;
+            var ls = document.getElementById('layout-select'); if (ls) ls.value = s.layout;
+            _lastLayout = s.layout;
         }})();
-
-        // Restore full-cycle result badge from previous run
-        (function() {{
-            try {{
-                var saved = localStorage.getItem('aam_full_cycle');
-                if (saved) {{
-                    var parsed = JSON.parse(saved);
-                    if (parsed.label) {{
-                        var badge = document.getElementById('pipeline-result-badge');
-                        badge.textContent = parsed.label;
-                        badge.style.display = 'block';
-                    }}
-                }}
-            }} catch(e) {{}}
-        }})();
-
-        // Initialize
         loadTopology();
         refreshSidebarRun();
-        setInterval(refreshSidebarRun, 10000);  // poll every 10s for external handoffs
-        checkDispatchReady();
+        refreshActionGates();
+        // Silent background refresh — 60s, no spinner, no UI trigger
+        setInterval(function() {{
+            refreshSidebarRun();
+            refreshActionGates();
+        }}, 60000);
     </script>
-
-    <div class="dispatch-overlay" id="dispatch-overlay" data-testid="dispatch-overlay" onclick="if(event.target===this)closeDispatchPanel()">
-        <div class="dispatch-panel">
-            <div class="dp-header">
-                <h2>Dispatch Details</h2>
-                <button class="dp-stop-btn" onclick="cancelAllJobs()" data-testid="dp-btn-stop">Stop All</button>
-                <button class="dp-close" onclick="closeDispatchPanel()" data-testid="btn-close-dispatch">&times;</button>
-            </div>
-            <div id="dcl-dispatch-banner" data-testid="dcl-dispatch-banner" style="padding:8px 12px;margin:0 0 8px;border-radius:6px;font-size:0.82rem;display:none;background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.2);"></div>
-            <div id="dp-run-context" style="padding:4px 12px;margin:0 0 6px;font-size:0.78rem;color:var(--slate-500);"></div>
-            <div class="dp-summary">
-                <div class="dp-stat total dp-active" onclick="setDpFilter('all',this)" data-tooltip="All jobs in this dispatch cycle, regardless of status. Click to show all." data-testid="dp-filter-all"><span class="dp-val" id="dp-total">-</span><span class="dp-lbl">Total</span></div>
-                <div class="dp-stat dispatched" onclick="setDpFilter('dispatched',this)" data-tooltip="Manifest sent to Farm, waiting for Farm to start extracting data. Farm has the instructions but hasn't begun yet." data-testid="dp-filter-dispatched"><span class="dp-val" id="dp-dispatched">-</span><span class="dp-lbl">Dispatched</span></div>
-                <div class="dp-stat running" onclick="setDpFilter('running',this)" data-tooltip="Farm is actively extracting data from the source system and pushing rows to DCL right now." data-testid="dp-filter-running"><span class="dp-val" id="dp-running">-</span><span class="dp-lbl">Running</span></div>
-                <div class="dp-stat completed" onclick="setDpFilter('completed',this)" data-tooltip="Farm finished extraction AND DCL accepted the data. This pipe's data is fully landed and usable." data-testid="dp-filter-completed"><span class="dp-val" id="dp-completed">-</span><span class="dp-lbl">Completed</span></div>
-                <div class="dp-stat failed" onclick="setDpFilter('failed',this)" data-tooltip="Something went wrong -- Farm couldn't extract, DCL rejected the data, or the connection timed out. Check the error column for details." data-testid="dp-filter-failed"><span class="dp-val" id="dp-failed">-</span><span class="dp-lbl">Failed</span></div>
-                <div class="dp-stat queued" onclick="setDpFilter('queued',this)" data-tooltip="Job is created but hasn't been sent to Farm yet. Waiting in line to be dispatched." data-testid="dp-filter-queued"><span class="dp-val" id="dp-queued">-</span><span class="dp-lbl">Queued</span></div>
-                <div class="dp-stat skipped" onclick="setDpFilter('skipped',this)" data-tooltip="Pipe was filtered out before dispatch (null category, no matched_pipe_id, already in-flight) or Farm returned a cached result (idempotency skip)." data-testid="dp-filter-skipped"><span class="dp-val" id="dp-skipped">-</span><span class="dp-lbl">Skipped</span></div>
-            </div>
-            <div class="dp-jobs">
-                <table>
-                    <thead><tr><th>Pipe</th><th>Status</th><th>DCL</th><th>Snapshot</th><th style="text-align:right;">Rows</th><th>Time</th><th>Error</th></tr></thead>
-                    <tbody id="dp-body"></tbody>
-                </table>
-            </div>
-        </div>
-    </div>
 </body>
 </html>
 """)

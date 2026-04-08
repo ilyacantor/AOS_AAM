@@ -80,29 +80,24 @@ test('F2: Topology graph renders with interactive elements', async ({ page }) =>
   expect(hasNodes).toBeTruthy();
 });
 
-// F3: Topology buttons hidden in SYNTHETIC
-test('F3: Topology buttons hidden in SYNTHETIC mode', async ({ page }) => {
+// F3: Topology actions panel shows new-architecture buttons only
+test('F3: Topology actions panel shows new-architecture buttons only', async ({ page }) => {
   await page.goto(`${AAM_URL}/ui/topology`);
   await page.waitForLoadState('domcontentloaded');
   await page.waitForTimeout(3000);
 
-  // These should be HIDDEN in SYNTHETIC mode
-  const dispatchBtn = page.locator('#btn-dispatch-all');
-  const exportBtn = page.locator('#btn-export-dcl');
-  const viewDispatchBtn = page.locator('#btn-view-dispatch');
+  // All six old-pipeline buttons must be absent from the DOM
+  await expect(page.locator('#fetch-aod-btn')).toHaveCount(0);
+  await expect(page.locator('#btn-run-inference')).toHaveCount(0);
+  await expect(page.locator('#btn-full-pipeline')).toHaveCount(0);
+  await expect(page.locator('#btn-export-dcl')).toHaveCount(0);
+  await expect(page.locator('#btn-dispatch-all')).toHaveCount(0);
+  await expect(page.locator('#btn-view-dispatch')).toHaveCount(0);
 
-  await expect(dispatchBtn).toBeHidden();
-  await expect(exportBtn).toBeHidden();
-  await expect(viewDispatchBtn).toBeHidden();
-
-  // These should REMAIN visible
-  const fetchAodBtn = page.locator('#fetch-aod-btn');
-  const runInferenceBtn = page.locator('#btn-run-inference');
-  const fullPipelineBtn = page.locator('#btn-full-pipeline');
-
-  await expect(fetchAodBtn).toBeVisible();
-  await expect(runInferenceBtn).toBeVisible();
-  await expect(fullPipelineBtn).toBeVisible();
+  // The three new-architecture buttons must exist
+  await expect(page.locator('[data-testid="btn-run-discovery"]')).toHaveCount(1);
+  await expect(page.locator('[data-testid="btn-validate-credentials"]')).toHaveCount(1);
+  await expect(page.locator('[data-testid="btn-start-ingest"]')).toHaveCount(1);
 });
 
 // F4: Operating mode API

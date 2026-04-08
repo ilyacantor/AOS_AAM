@@ -136,14 +136,24 @@ async def get_pipe_topology(pipe_id: str):
 
 @router.get("/plane/{fabric_plane}")
 async def get_plane_topology(fabric_plane: str):
-    """Get topology for a specific fabric plane."""
-    from ..constants import ALL_PLANE_TYPES
-    if fabric_plane.upper() not in ALL_PLANE_TYPES:
+    """Get topology for a specific fabric plane.
+
+    Accepts canonical uppercase (IPAAS, API_GATEWAY, EVENT_BUS,
+    DATA_WAREHOUSE) and any alias listed in PLANE_TYPE_ALIASES
+    (including the lowercase canonical the topology UI now uses:
+    ipaas, api_gateway, event_bus, warehouse).
+    """
+    from ..constants import ALL_PLANE_TYPES, PLANE_TYPE_ALIASES
+    raw = (fabric_plane or "").strip()
+    # Normalize: try the alias map first (handles lowercase, "warehouse",
+    # "apigateway", etc.), then fall back to raw uppercasing.
+    normalized = PLANE_TYPE_ALIASES.get(raw) or PLANE_TYPE_ALIASES.get(raw.lower()) or raw.upper()
+    if normalized not in ALL_PLANE_TYPES:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid fabric plane. Must be one of: {', '.join(ALL_PLANE_TYPES)}",
+            detail=f"Invalid fabric plane '{fabric_plane}'. Must be one of: {', '.join(ALL_PLANE_TYPES)} (aliases accepted).",
         )
-    result = get_topology_for_fabric_plane(fabric_plane.upper())
+    result = get_topology_for_fabric_plane(normalized)
     return {**result, "generated_at": datetime.utcnow().isoformat()}
 
 

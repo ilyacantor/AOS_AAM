@@ -176,3 +176,53 @@ def write_triples_with_ledger(
         raise
 
 
+def touch_latest_run(entity_id: str) -> int:
+    """Refresh created_at on the latest AAM run's triples to NOW.
+
+    Used by the infer endpoint when there is nothing new to process but
+    inference was explicitly invoked. The semantic meaning: AAM has just
+    re-confirmed that the existing triples reflect the current state.
+    The freshness query (MAX(created_at) WHERE source_system='AAM') then
+    correctly reports GREEN — inference was just run.
+
+    UPDATE-only — does not grow the table.
+    Returns the number of rows touched.
+    """
+    if not entity_id:
+        raise ValueError("touch_latest_run requires entity_id")
+
+    conn = _sb._get_conn()
+    try:
+        conn.autocommit = False
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE semantic_triples
+            SET created_at = NOW()
+            WHERE source_system = 'AAM'
+              AND entity_id = %s
+              AND run_id = (
+                SELECT run_id FROM semantic_triples
+                WHERE source_system = 'AAM' AND entity_id = %s
+                ORDER BY created_at DESC
+                LIMIT 1
+              )
+            """,
+            (entity_id, entity_id),
+        )
+        touched = cur.rowcount
+        conn.commit()
+        _log.info("touch_latest_run: refreshed %d AAM triples for entity=%s", touched, entity_id)
+        return touched
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        try:
+            conn.autocommit = True
+        except Exception:
+            pass
+        _sb._put_conn(conn)
