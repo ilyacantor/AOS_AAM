@@ -91,8 +91,68 @@ from .pii_redaction import redact_pii_from_observation
 # App factory + lifecycle
 # ---------------------------------------------------------------------------
 
+async def _probe_downstreams() -> None:
+    """Validate downstream URLs at boot. Refuses to boot on misconfig.
+
+    Converts runtime connection errors (wrong host, typo'd DNS) into
+    deploy-time boot failures. Only probes external downstreams — AAM's
+    self URL (settings.BASE_URL) is skipped because the server isn't
+    yet accepting connections during lifespan init.
+    """
+    import os
+    import socket
+    from urllib.parse import urlparse
+    import httpx
+
+    # (env_var, url, health_path)
+    downstreams: list[tuple[str, str, str]] = [
+        ("DCL_URL", os.environ["DCL_URL"].rstrip("/"), "/api/health"),
+        ("FARM_INTAKE_URL", os.environ["FARM_INTAKE_URL"].rstrip("/"), "/api/health"),
+    ]
+
+    errors: list[str] = []
+    async with httpx.AsyncClient(timeout=2.0) as client:
+        for var_name, url, health_path in downstreams:
+            parsed = urlparse(url)
+            if not parsed.scheme or not parsed.hostname:
+                errors.append(f"{var_name}={url}: malformed URL (missing scheme or host)")
+                continue
+            try:
+                socket.gethostbyname(parsed.hostname)
+            except socket.gaierror as e:
+                errors.append(
+                    f"{var_name}={url}: DNS resolution failed for '{parsed.hostname}': {e}"
+                )
+                continue
+            health_url = f"{parsed.scheme}://{parsed.netloc}{health_path}"
+            try:
+                resp = await client.get(health_url)
+                if resp.status_code >= 500:
+                    errors.append(
+                        f"{var_name}: {health_url} returned HTTP {resp.status_code}"
+                    )
+                else:
+                    _log.info(
+                        "[startup] %s OK: %s -> %s (%d)",
+                        var_name, parsed.hostname, health_url, resp.status_code,
+                    )
+            except httpx.HTTPError as e:
+                errors.append(
+                    f"{var_name}: health probe at {health_url} failed: {type(e).__name__}: {e}"
+                )
+
+    if errors:
+        raise RuntimeError(
+            f"[startup] {len(errors)} downstream probe(s) failed — refusing to boot:\n"
+            + "\n".join(f"  - {e}" for e in errors)
+        )
+
+
 @asynccontextmanager
 async def lifespan(app):
+    # Boot-time downstream probes — refuse to boot on misconfig.
+    await _probe_downstreams()
+
     init_db()
     # Initialize the triple write ledger (SQLite, AAM-local)
     from .db.ledger import init_ledger_db
