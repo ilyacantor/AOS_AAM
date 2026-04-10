@@ -23,7 +23,7 @@ class Settings:
         )
         # Runner / DCL ingestion
         # DCL_URL is required — no fallback. A missing DCL_URL means every job
-        # would silently route to a bogus host and appear to succeed before failing.
+        # would silently route to localhost and appear to succeed before failing.
         dcl_base = os.environ.get("DCL_URL", "").rstrip("/")
         if not dcl_base:
             raise RuntimeError(
@@ -36,15 +36,10 @@ class Settings:
         self.RUNNER_JOB_TIMEOUT_S: int = int(
             os.environ.get("AAM_RUNNER_JOB_TIMEOUT_S", "300")
         )
-        # Base URL for self-referencing HTTP calls (Runner → AAM callback).
-        # Required — without it, runner callbacks silently target a bogus host.
-        self.BASE_URL: str = os.environ.get("AAM_BASE_URL", "").rstrip("/")
-        if not self.BASE_URL:
-            raise RuntimeError(
-                "FATAL: AAM_BASE_URL must be set. "
-                "Runner dispatch uses this for callback URLs — missing it means "
-                "runner status updates never reach AAM."
-            )
+        # Base URL for self-referencing HTTP calls (Runner → DCL ingest)
+        self.BASE_URL: str = os.environ.get(
+            "AAM_BASE_URL", "http://127.0.0.1:5000"
+        )
         # API key the Runner sends in x-api-key header to DCL.
         # Must be set via AAM_DCL_API_KEY env var. Empty string means
         # requests to DCL will fail authentication, which is the correct
