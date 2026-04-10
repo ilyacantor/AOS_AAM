@@ -2072,7 +2072,8 @@ async def ui_topology():
             </div>
             <div class="sb-section">
                 <div class="sb-title">Actions</div>
-                <button class="sb-btn sb-btn-primary" id="btn-run-discovery" data-testid="btn-run-discovery" disabled>Run Discovery</button>
+                <button class="sb-btn sb-btn-primary" id="btn-run-inference" data-testid="btn-run-inference">Run Inference</button>
+                <button class="sb-btn" id="btn-run-discovery" data-testid="btn-run-discovery" disabled>Run Discovery</button>
                 <button class="sb-btn" id="btn-validate-credentials" data-testid="btn-validate-credentials" disabled>Validate Credentials</button>
                 <div id="cred-results" class="sb-cred-results" style="display:none;"></div>
                 <button class="sb-btn" id="btn-start-ingest" data-testid="btn-start-ingest" disabled>Start Ingest</button>
@@ -2687,130 +2688,30 @@ async def ui_topology():
         }}
 
         // ────────────────────────────────────────────────────────
-        // New-architecture action handlers (Fix 4)
+        // Action handlers
         // ────────────────────────────────────────────────────────
-        var _credentialsValidated = false;
-        var _ingestActive = false;
 
-        async function refreshActionGates() {{
-            // Discovery: enabled iff a vendor manifest is loaded
-            try {{
-                var msRes = await fetch('/api/aam/discovery/manifest-status');
-                if (msRes.ok) {{
-                    var ms = await msRes.json();
-                    var rdBtn = document.getElementById('btn-run-discovery');
-                    rdBtn.disabled = !ms.manifest_loaded;
-                    rdBtn.title = ms.manifest_loaded ? '' : 'Vendor manifest not loaded';
-                }}
-            }} catch (e) {{}}
-            // Validate Credentials: enabled iff at least one DeclaredPipe exists
-            try {{
-                var pcRes = await fetch('/api/aam/pipes/count');
-                if (pcRes.ok) {{
-                    var pc = await pcRes.json();
-                    var vcBtn = document.getElementById('btn-validate-credentials');
-                    vcBtn.disabled = !(pc.count && pc.count > 0);
-                    vcBtn.title = vcBtn.disabled ? 'No DeclaredPipes yet' : '';
-                }}
-            }} catch (e) {{}}
-            // Start Ingest: enabled iff credentials validated
-            var siBtn = document.getElementById('btn-start-ingest');
-            siBtn.disabled = !_credentialsValidated || _ingestActive;
-            siBtn.title = _credentialsValidated ? '' : 'Validate credentials first';
-        }}
-
-        document.getElementById('btn-run-discovery').addEventListener('click', async function() {{
+        document.getElementById('btn-run-inference').addEventListener('click', async function() {{
             var btn = this;
             btn.disabled = true;
             var orig = btn.textContent;
-            btn.textContent = 'Discovering...';
+            btn.textContent = 'Inferring...';
             try {{
-                var res = await fetch('/api/aam/discovery/run', {{ method: 'POST' }});
+                var res = await fetch('/api/aam/infer', {{ method: 'POST' }});
                 var data = await res.json().catch(function() {{ return {{}}; }});
                 if (res.ok) {{
-                    showToast('Discovery: ' + (data.message || 'ok'), 'success');
+                    var msg = 'Inference complete — ' + (data.pipes_created || 0) + ' pipes created';
+                    showToast(msg, 'success');
                     await loadTopology();
-                    await refreshActionGates();
                 }} else {{
-                    showToast('Discovery failed: ' + (data.detail || res.status), 'error');
+                    showToast('Inference failed: ' + (data.detail || res.status), 'error');
                 }}
             }} catch (e) {{
-                showToast('Discovery error: ' + e.message, 'error');
+                showToast('Inference error: ' + e.message, 'error');
             }} finally {{
                 btn.textContent = orig;
-                refreshActionGates();
+                btn.disabled = false;
             }}
-        }});
-
-        document.getElementById('btn-validate-credentials').addEventListener('click', async function() {{
-            var btn = this;
-            btn.disabled = true;
-            var orig = btn.textContent;
-            btn.textContent = 'Validating...';
-            var resultsEl = document.getElementById('cred-results');
-            resultsEl.innerHTML = '';
-            resultsEl.style.display = 'none';
-            try {{
-                var res = await fetch('/api/aam/credentials/validate', {{ method: 'POST' }});
-                var data = await res.json().catch(function() {{ return {{}}; }});
-                if (res.ok) {{
-                    var rows = (data.results || []).map(function(r) {{
-                        var cls = r.status === 'connected' ? 'connected' : (r.status === 'failed' ? 'failed' : 'pending');
-                        return '<div class="cred-row"><span class="plane-name">' + r.plane + '</span><span class="cred-status ' + cls + '">' + r.status + '</span></div>';
-                    }}).join('');
-                    resultsEl.innerHTML = rows;
-                    resultsEl.style.display = 'block';
-                    _credentialsValidated = (data.results || []).every(function(r) {{ return r.status === 'connected'; }});
-                    showToast('Credentials validated', _credentialsValidated ? 'success' : 'warning');
-                }} else {{
-                    showToast('Validation failed: ' + (data.detail || res.status), 'error');
-                }}
-            }} catch (e) {{
-                showToast('Validation error: ' + e.message, 'error');
-            }} finally {{
-                btn.textContent = orig;
-                refreshActionGates();
-            }}
-        }});
-
-        document.getElementById('btn-start-ingest').addEventListener('click', async function() {{
-            var btn = this;
-            btn.disabled = true;
-            var orig = btn.textContent;
-            btn.textContent = 'Starting...';
-            try {{
-                var res = await fetch('/api/aam/ingest/start', {{ method: 'POST' }});
-                var data = await res.json().catch(function() {{ return {{}}; }});
-                if (res.ok) {{
-                    _ingestActive = (data.ingest_state === 'active');
-                    if (_ingestActive) {{
-                        btn.textContent = 'Ingest Active';
-                        document.getElementById('ingest-stop-link').style.display = 'inline';
-                        showToast('Ingest started', 'success');
-                    }} else {{
-                        btn.textContent = orig;
-                        showToast('Ingest start: ' + (data.message || 'ok'), 'warning');
-                    }}
-                }} else {{
-                    btn.textContent = orig;
-                    showToast('Ingest failed: ' + (data.detail || res.status), 'error');
-                }}
-            }} catch (e) {{
-                btn.textContent = orig;
-                showToast('Ingest error: ' + e.message, 'error');
-            }} finally {{
-                refreshActionGates();
-            }}
-        }});
-
-        document.getElementById('ingest-stop-link').addEventListener('click', function(e) {{
-            e.preventDefault();
-            _ingestActive = false;
-            var btn = document.getElementById('btn-start-ingest');
-            btn.textContent = 'Start Ingest';
-            this.style.display = 'none';
-            showToast('Ingest stopped', 'success');
-            refreshActionGates();
         }});
 
         // ────────────────────────────────────────────────────────
@@ -2825,11 +2726,9 @@ async def ui_topology():
         }})();
         loadTopology();
         refreshSidebarRun();
-        refreshActionGates();
         // Silent background refresh — 60s, no spinner, no UI trigger
         setInterval(function() {{
             refreshSidebarRun();
-            refreshActionGates();
         }}, 60000);
     </script>
 </body>

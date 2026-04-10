@@ -9,38 +9,26 @@ test('T1: New-architecture action buttons render with correct gating', async ({ 
   await page.waitForLoadState('domcontentloaded');
   await page.waitForTimeout(2000);
 
-  // Probe manifest-status to determine expected gating
-  const msRes = await request.get(`${AAM_URL}/api/aam/discovery/manifest-status`);
-  const ms = await msRes.json();
-  const pcRes = await request.get(`${AAM_URL}/api/aam/pipes/count`);
-  const pc = await pcRes.json();
+  // Run Inference: primary action, always enabled
+  const runInference = page.locator('[data-testid="btn-run-inference"]');
+  await expect(runInference).toHaveCount(1);
+  await expect(runInference).toBeEnabled();
 
-  // Run Discovery: enabled iff manifest_loaded
+  // Run Discovery, Validate Credentials, Start Ingest: greyed out (disabled)
   const runDiscovery = page.locator('[data-testid="btn-run-discovery"]');
   await expect(runDiscovery).toHaveCount(1);
-  if (ms.manifest_loaded) {
-    await expect(runDiscovery).toBeEnabled();
-  } else {
-    await expect(runDiscovery).toBeDisabled();
-  }
+  await expect(runDiscovery).toBeDisabled();
 
-  // Validate Credentials: enabled iff pipes count > 0
   const validateCreds = page.locator('[data-testid="btn-validate-credentials"]');
   await expect(validateCreds).toHaveCount(1);
-  if (pc.count && pc.count > 0) {
-    await expect(validateCreds).toBeEnabled();
-  } else {
-    await expect(validateCreds).toBeDisabled();
-  }
+  await expect(validateCreds).toBeDisabled();
 
-  // Start Ingest: disabled on page load (no validation has happened)
   const startIngest = page.locator('[data-testid="btn-start-ingest"]');
   await expect(startIngest).toHaveCount(1);
   await expect(startIngest).toBeDisabled();
 
-  // Old buttons MUST NOT exist
+  // Old pipeline buttons MUST NOT exist
   await expect(page.locator('#fetch-aod-btn')).toHaveCount(0);
-  await expect(page.locator('#btn-run-inference')).toHaveCount(0);
   await expect(page.locator('#btn-full-pipeline')).toHaveCount(0);
   await expect(page.locator('#btn-export-dcl')).toHaveCount(0);
   await expect(page.locator('#btn-dispatch-all')).toHaveCount(0);
