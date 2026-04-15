@@ -1,19 +1,19 @@
 """
-Maestra status endpoint — returns structured AAM state for cross-module orchestration.
+Mai status endpoint — returns structured AAM state for cross-module orchestration.
 
-GET /maestra/status?tenant_id=<id> returns manifest counts, connection state,
+GET /mai/status?tenant_id=<id> returns manifest counts, connection state,
 and health for a given tenant.
 """
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 from typing import Optional
 
-from ..db.maestra_status import get_maestra_status
+from ..db.mai_status import get_mai_status
 from ..logger import get_logger
 
-_log = get_logger("routers.maestra")
+_log = get_logger("routers.mai")
 
-router = APIRouter(prefix="/maestra", tags=["Maestra"])
+router = APIRouter(prefix="/mai", tags=["Mai"])
 
 
 class ManifestCounts(BaseModel):
@@ -36,7 +36,7 @@ class ConnectionInfo(BaseModel):
     transport_kind: str
 
 
-class MaestraStatusResponse(BaseModel):
+class MaiStatusResponse(BaseModel):
     module: str
     tenant_id: str
     manifests: ManifestCounts
@@ -46,8 +46,8 @@ class MaestraStatusResponse(BaseModel):
     healthy: bool
 
 
-@router.get("/status", response_model=MaestraStatusResponse)
-async def maestra_status(
+@router.get("/status", response_model=MaiStatusResponse)
+async def mai_status(
     tenant_id: str = Query(..., description="Tenant identifier (maps to AOD snapshot_name)"),
 ):
     """Return AAM manifest and connection state for a given tenant.
@@ -55,5 +55,5 @@ async def maestra_status(
     Queries runner_jobs, connection_candidates, declared_pipes, and
     drift_events scoped to the aod_run_ids associated with the tenant.
     """
-    result = get_maestra_status(tenant_id)
-    return MaestraStatusResponse(**result)
+    result = get_mai_status(tenant_id)
+    return MaiStatusResponse(**result)
