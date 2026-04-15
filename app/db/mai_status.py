@@ -1,5 +1,5 @@
 """
-Maestra status queries — aggregate AAM state for a given tenant.
+Mai status queries — aggregate AAM state for a given tenant.
 
 Tenant scoping: tenant_id maps to aod_handoff_log.snapshot_name.
 All queries are scoped through the aod_run_ids linked to that snapshot.
@@ -11,10 +11,10 @@ from psycopg2 import sql as psql
 from . import supabase_client as sb
 from ..logger import get_logger
 
-_log = get_logger("db.maestra_status")
+_log = get_logger("db.mai_status")
 
 
-def get_maestra_status(tenant_id: str) -> dict:
+def get_mai_status(tenant_id: str) -> dict:
     """Return structured AAM status for a tenant.
 
     Queries runner_jobs, connection_candidates, declared_pipes, and
@@ -72,7 +72,7 @@ def _get_aod_run_ids_for_tenant(tenant_id: str) -> list[str]:
 def _get_manifest_counts(aod_run_ids: list[str]) -> dict:
     """Aggregate runner_jobs by status for the given run_ids.
 
-    Maps job statuses to the Maestra contract:
+    Maps job statuses to the Mai contract:
     - succeeded: completed
     - failed: failed + timed_out
     - pending: queued + dispatched + running + pushing

@@ -1,4 +1,4 @@
-"""Tests for GET /maestra/status endpoint.
+"""Tests for GET /mai/status endpoint.
 
 Tests seed real data through the handoff service and runner_jobs DB layer,
 then query the endpoint via FastAPI TestClient. No mocks, no backdoors.
@@ -108,9 +108,9 @@ def _seed_declared_pipe(pipe_id: str, source_system: str):
 
 
 _TEST_RUN_IDS = (
-    "maestra-test-run-001", "maestra-schema-run", "maestra-counts-run",
-    "maestra-sso-run", "maestra-conn-run", "maestra-exec-run",
-    "maestra-healthy-run", "maestra-unhealthy-run", "iso-run-a", "iso-run-b",
+    "mai-test-run-001", "mai-schema-run", "mai-counts-run",
+    "mai-sso-run", "mai-conn-run", "mai-exec-run",
+    "mai-healthy-run", "mai-unhealthy-run", "iso-run-a", "iso-run-b",
 )
 
 _TEST_PIPE_IDS = (
@@ -203,27 +203,27 @@ def _scoped_cleanup():
 # ---------------------------------------------------------------------------
 
 
-def test_maestra_status_returns_200(db):
-    """GET /maestra/status with a valid tenant_id returns 200."""
-    run_id ="maestra-test-run-001"
+def test_mai_status_returns_200(db):
+    """GET /mai/status with a valid tenant_id returns 200."""
+    run_id ="mai-test-run-001"
     _seed_handoff(db, run_id, "test-tenant", [
         _candidate("sf.com", "Salesforce", "Salesforce", "crm", "a1", run_id),
     ])
 
     client = _get_client()
-    resp = client.get("/maestra/status", params={"tenant_id": "test-tenant"})
+    resp = client.get("/mai/status", params={"tenant_id": "test-tenant"})
     assert resp.status_code == 200
 
 
-def test_maestra_status_valid_json_schema(db):
-    """Response matches the Maestra contract schema — all required fields present."""
-    run_id ="maestra-schema-run"
+def test_mai_status_valid_json_schema(db):
+    """Response matches the Mai contract schema — all required fields present."""
+    run_id ="mai-schema-run"
     _seed_handoff(db, run_id, "schema-tenant", [
         _candidate("sf.com", "Salesforce", "Salesforce", "crm", "a1", run_id),
     ])
 
     client = _get_client()
-    resp = client.get("/maestra/status", params={"tenant_id": "schema-tenant"})
+    resp = client.get("/mai/status", params={"tenant_id": "schema-tenant"})
     data = resp.json()
 
     assert data["module"] == "aam"
@@ -238,40 +238,40 @@ def test_maestra_status_valid_json_schema(db):
     assert isinstance(data["healthy"], bool)
 
 
-def test_maestra_status_module_field(db):
+def test_mai_status_module_field(db):
     """The module field must be 'aam'."""
     client = _get_client()
-    resp = client.get("/maestra/status", params={"tenant_id": "any-tenant"})
+    resp = client.get("/mai/status", params={"tenant_id": "any-tenant"})
     assert resp.json()["module"] == "aam"
 
 
-def test_maestra_status_healthy_is_boolean(db):
+def test_mai_status_healthy_is_boolean(db):
     """The healthy field must be a boolean."""
     client = _get_client()
-    resp = client.get("/maestra/status", params={"tenant_id": "any-tenant"})
+    resp = client.get("/mai/status", params={"tenant_id": "any-tenant"})
     assert isinstance(resp.json()["healthy"], bool)
 
 
-def test_maestra_status_tenant_id_matches_request(db):
+def test_mai_status_tenant_id_matches_request(db):
     """The tenant_id in the response must match what was requested."""
     client = _get_client()
-    resp = client.get("/maestra/status", params={"tenant_id": "my-tenant-123"})
+    resp = client.get("/mai/status", params={"tenant_id": "my-tenant-123"})
     assert resp.json()["tenant_id"] == "my-tenant-123"
 
 
-def test_maestra_status_response_time(db):
+def test_mai_status_response_time(db):
     """Response time must be under 500ms."""
     client = _get_client()
     start = time.monotonic()
-    resp = client.get("/maestra/status", params={"tenant_id": "perf-tenant"})
+    resp = client.get("/mai/status", params={"tenant_id": "perf-tenant"})
     elapsed_ms = (time.monotonic() - start) * 1000
     assert resp.status_code == 200
     assert elapsed_ms < 500, f"Response took {elapsed_ms:.0f}ms (limit: 500ms)"
 
 
-def test_maestra_status_manifest_counts(db):
+def test_mai_status_manifest_counts(db):
     """Manifest counts reflect actual runner_jobs state."""
-    run_id ="maestra-counts-run"
+    run_id ="mai-counts-run"
     _seed_handoff(db, run_id, "counts-tenant", [
         _candidate("sf.com", "Salesforce", "Salesforce", "crm", "a1", run_id),
     ])
@@ -284,7 +284,7 @@ def test_maestra_status_manifest_counts(db):
     ])
 
     client = _get_client()
-    resp = client.get("/maestra/status", params={"tenant_id": "counts-tenant"})
+    resp = client.get("/mai/status", params={"tenant_id": "counts-tenant"})
     m = resp.json()["manifests"]
 
     assert m["total"] == 5
@@ -293,9 +293,9 @@ def test_maestra_status_manifest_counts(db):
     assert m["pending"] == 2
 
 
-def test_maestra_status_sso_pending(db):
+def test_mai_status_sso_pending(db):
     """SSO pending reflects candidates with execution_allowed=false."""
-    run_id ="maestra-sso-run"
+    run_id ="mai-sso-run"
     _seed_handoff(db, run_id, "sso-tenant", [
         _candidate("sf.com", "Salesforce", "Salesforce", "crm", "a1", run_id, execution_allowed=True),
         _candidate("okta.com", "Okta", "Okta IdP", "identity", "a2", run_id, execution_allowed=False),
@@ -303,7 +303,7 @@ def test_maestra_status_sso_pending(db):
     ])
 
     client = _get_client()
-    resp = client.get("/maestra/status", params={"tenant_id": "sso-tenant"})
+    resp = client.get("/mai/status", params={"tenant_id": "sso-tenant"})
     sso = resp.json()["sso_pending"]
 
     assert sso["count"] == 2
@@ -313,16 +313,16 @@ def test_maestra_status_sso_pending(db):
     assert "Duo" in vendors
 
 
-def test_maestra_status_connections(db):
+def test_mai_status_connections(db):
     """Connections lists declared pipes linked to tenant's candidates."""
-    run_id ="maestra-conn-run"
+    run_id ="mai-conn-run"
     _seed_handoff(db, run_id, "conn-tenant", [
         _candidate("sf.com", "Salesforce", "Salesforce", "crm", "a1", run_id),
     ])
     _seed_declared_pipe("pipe-sf-001", "Salesforce")
 
     client = _get_client()
-    resp = client.get("/maestra/status", params={"tenant_id": "conn-tenant"})
+    resp = client.get("/mai/status", params={"tenant_id": "conn-tenant"})
     conns = resp.json()["connections"]
 
     assert len(conns) == 1
@@ -330,22 +330,22 @@ def test_maestra_status_connections(db):
     assert conns[0]["source_system"] == "Salesforce"
 
 
-def test_maestra_status_last_execution_at(db):
+def test_mai_status_last_execution_at(db):
     """last_execution_at reflects the latest completed runner job."""
-    run_id ="maestra-exec-run"
+    run_id ="mai-exec-run"
     _seed_handoff(db, run_id, "exec-tenant", [
         _candidate("sf.com", "Salesforce", "Salesforce", "crm", "a1", run_id),
     ])
     _seed_runner_jobs(run_id, [("pipe-done", "completed")])
 
     client = _get_client()
-    resp = client.get("/maestra/status", params={"tenant_id": "exec-tenant"})
+    resp = client.get("/mai/status", params={"tenant_id": "exec-tenant"})
     assert resp.json()["last_execution_at"] is not None
 
 
-def test_maestra_status_healthy_true_when_no_failures(db):
+def test_mai_status_healthy_true_when_no_failures(db):
     """Healthy is true when all jobs succeeded and no drift."""
-    run_id ="maestra-healthy-run"
+    run_id ="mai-healthy-run"
     _seed_handoff(db, run_id, "healthy-tenant", [
         _candidate("sf.com", "Salesforce", "Salesforce", "crm", "a1", run_id),
     ])
@@ -355,13 +355,13 @@ def test_maestra_status_healthy_true_when_no_failures(db):
     ])
 
     client = _get_client()
-    resp = client.get("/maestra/status", params={"tenant_id": "healthy-tenant"})
+    resp = client.get("/mai/status", params={"tenant_id": "healthy-tenant"})
     assert resp.json()["healthy"] is True
 
 
-def test_maestra_status_healthy_false_when_failures(db):
+def test_mai_status_healthy_false_when_failures(db):
     """Healthy is false when there are failed jobs."""
-    run_id ="maestra-unhealthy-run"
+    run_id ="mai-unhealthy-run"
     _seed_handoff(db, run_id, "unhealthy-tenant", [
         _candidate("sf.com", "Salesforce", "Salesforce", "crm", "a1", run_id),
     ])
@@ -371,14 +371,14 @@ def test_maestra_status_healthy_false_when_failures(db):
     ])
 
     client = _get_client()
-    resp = client.get("/maestra/status", params={"tenant_id": "unhealthy-tenant"})
+    resp = client.get("/mai/status", params={"tenant_id": "unhealthy-tenant"})
     assert resp.json()["healthy"] is False
 
 
-def test_maestra_status_unknown_tenant_returns_empty(db):
+def test_mai_status_unknown_tenant_returns_empty(db):
     """An unknown tenant returns zeroed-out response, not an error."""
     client = _get_client()
-    resp = client.get("/maestra/status", params={"tenant_id": "nonexistent-tenant"})
+    resp = client.get("/mai/status", params={"tenant_id": "nonexistent-tenant"})
     assert resp.status_code == 200
     data = resp.json()
     assert data["manifests"]["total"] == 0
@@ -388,14 +388,14 @@ def test_maestra_status_unknown_tenant_returns_empty(db):
     assert data["healthy"] is True
 
 
-def test_maestra_status_requires_tenant_id(db):
+def test_mai_status_requires_tenant_id(db):
     """Missing tenant_id query param returns 422."""
     client = _get_client()
-    resp = client.get("/maestra/status")
+    resp = client.get("/mai/status")
     assert resp.status_code == 422
 
 
-def test_maestra_status_tenant_isolation(db):
+def test_mai_status_tenant_isolation(db):
     """Data from one tenant does not leak into another tenant's response."""
     # Seed directly via DB to avoid process_handoff clearing state between tenants.
     from app.db import supabase_client as sb
@@ -427,13 +427,13 @@ def test_maestra_status_tenant_isolation(db):
 
     client = _get_client()
 
-    resp_a = client.get("/maestra/status", params={"tenant_id": "tenant-a"})
+    resp_a = client.get("/mai/status", params={"tenant_id": "tenant-a"})
     data_a = resp_a.json()
     assert data_a["manifests"]["succeeded"] == 1
     assert data_a["manifests"]["failed"] == 0
     assert data_a["healthy"] is True
 
-    resp_b = client.get("/maestra/status", params={"tenant_id": "tenant-b"})
+    resp_b = client.get("/mai/status", params={"tenant_id": "tenant-b"})
     data_b = resp_b.json()
     assert data_b["manifests"]["succeeded"] == 0
     assert data_b["manifests"]["failed"] == 1
