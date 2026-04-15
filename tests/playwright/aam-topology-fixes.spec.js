@@ -189,3 +189,61 @@ test('T6: /api/topology/plane accepts lowercase aliases', async ({ request }) =>
     expect(data).toHaveProperty('edges');
   }
 });
+
+// T7 — Auto-fetch of latest AOD handoff: 10s interval picks up new handoffs without manual refresh
+test('T7: Sidebar auto-updates when a new AOD handoff appears', async ({ page }) => {
+  let callCount = 0;
+  const firstRun = {
+    aod_run_id: 'run_first_test',
+    snapshot_name: 'FirstSnap',
+    entity_id: 'FirstSnap',
+    candidates_received: 10,
+    candidates_accepted: 10,
+    handoff_timestamp: '2026-04-15T10:00:00Z',
+  };
+  const secondRun = {
+    aod_run_id: 'run_second_test',
+    snapshot_name: 'SecondSnap',
+    entity_id: 'SecondSnap',
+    candidates_received: 42,
+    candidates_accepted: 42,
+    handoff_timestamp: '2026-04-15T11:00:00Z',
+  };
+
+  await page.route('**/api/handoff/aod/latest', async (route) => {
+    callCount += 1;
+    const body = callCount === 1 ? firstRun : secondRun;
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+  });
+
+  await page.goto(`${AAM_URL}/ui/topology`);
+  await page.waitForLoadState('domcontentloaded');
+
+  // First fetch should populate with FirstSnap
+  await expect(page.locator('#sb-run-info')).toContainText('FirstSnap', { timeout: 5000 });
+
+  // Confirm the 10-second interval is configured (regression guard against future slowdowns)
+  const html = await page.content();
+  expect(html).toContain('setInterval(refreshSidebarRun, 10000)');
+
+  // Manually trigger the poll (faster than waiting 10s) — simulates the next tick
+  await page.evaluate(() => refreshSidebarRun());
+
+  // Sidebar should now reflect the second handoff without any page reload
+  await expect(page.locator('#sb-run-info')).toContainText('SecondSnap', { timeout: 5000 });
+  expect(callCount).toBeGreaterThanOrEqual(2);
+});
+
+// T8 — Handoff endpoint failure surfaces visibly instead of silently going stale
+test('T8: Sidebar shows a visible error when /api/handoff/aod/latest fails', async ({ page }) => {
+  await page.route('**/api/handoff/aod/latest', async (route) => {
+    await route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"boom"}' });
+  });
+
+  await page.goto(`${AAM_URL}/ui/topology`);
+  await page.waitForLoadState('domcontentloaded');
+
+  // The sidebar must show a user-visible failure message — not the old silent stale state
+  await expect(page.locator('#sb-run-info')).toContainText('handoff fetch failed', { timeout: 5000 });
+  await expect(page.locator('#sb-run-info')).toContainText('500');
+});

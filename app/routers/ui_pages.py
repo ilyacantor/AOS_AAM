@@ -2164,11 +2164,17 @@ async def ui_topology():
         }}
 
         async function refreshSidebarRun() {{
+            var el = document.getElementById('sb-run-info');
             try {{
                 var res = await fetch('/api/handoff/aod/latest');
-                if (!res.ok) return;
+                if (!res.ok) {{
+                    console.error('refreshSidebarRun: /api/handoff/aod/latest returned ' + res.status);
+                    if (el) {{
+                        el.innerHTML = '<div class="sb-dim" style="color:#f87171;">handoff fetch failed (' + res.status + ')</div>';
+                    }}
+                    return;
+                }}
                 var run = await res.json();
-                var el = document.getElementById('sb-run-info');
                 if (el && run && (run.entity_id || run.snapshot_name)) {{
                     var snap = run.entity_id || run.snapshot_name || 'Unnamed';
                     var pipes = run.candidates_accepted || 0;
@@ -2181,10 +2187,12 @@ async def ui_topology():
                 if (reconEl && run && run.aod_run_id) {{
                     reconEl.innerHTML = '<a href="/ui/reconcile/' + run.aod_run_id + '" class="sb-link">Reconcile</a>';
                 }}
-            }} catch(e) {{}}
-            try {{
-                await loadTopology();
-            }} catch(e) {{}}
+            }} catch(e) {{
+                console.error('refreshSidebarRun: network error', e);
+                if (el) {{
+                    el.innerHTML = '<div class="sb-dim" style="color:#f87171;">handoff fetch network error</div>';
+                }}
+            }}
         }}
 
         let network = null;
@@ -2726,10 +2734,7 @@ async def ui_topology():
         }})();
         loadTopology();
         refreshSidebarRun();
-        // Silent background refresh — 60s, no spinner, no UI trigger
-        setInterval(function() {{
-            refreshSidebarRun();
-        }}, 60000);
+        setInterval(refreshSidebarRun, 10000);  // poll every 10s for external handoffs
     </script>
 </body>
 </html>
