@@ -7,7 +7,7 @@
 length-greater-than-zero|\.length[[:space:]]*>[[:space:]]*0
 length-greater-equal-one|\.length[[:space:]]*>=[[:space:]]*1
 bare-toBeVisible|toBeVisible\([[:space:]]*\)
-status-eq-200|status[[:space:]]*[=!]==?[[:space:]]*200
+status-eq-200|status(\(\))?[[:space:]]*[=!]==?[[:space:]]*200
 toContain-success|toContain\([[:space:]]*['"`]success['"`]
 toBeTruthy|toBeTruthy\([[:space:]]*\)
 not-toBeNull|\.not\.toBeNull\([[:space:]]*\)

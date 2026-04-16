@@ -1,0 +1,31 @@
+// Operator-visible outcome: <one sentence describing exactly what the operator sees on screen with specific counts, entity names, and rendered text>
+//
+// Copy this file to <feature>.spec.ts and keep the first-line header. The
+// pre-commit hook rejects any *.spec.ts / *.spec.js that lacks this header
+// or uses a banned assertion pattern (.playwright-banned-patterns at repo
+// root, CLAUDE.md § Playwright Acceptance).
+
+import { test, expect } from '@playwright/test';
+
+test('<feature> — <visible outcome in plain English>', async ({ page, request }) => {
+  // 1. Fetch ground truth from the source system at test time.
+  //    Never hardcode expected values, never author them yourself.
+  //    const gt = await request.get('http://localhost:8003/api/ground-truth/<endpoint>');
+  //    const expected = (await gt.json()).value;
+
+  // 2. For mutative features, capture rendered state before the action.
+  //    const before = await page.locator('[data-testid="<target>"]').innerText();
+
+  await page.goto('http://localhost:<port>/<route>');
+
+  // 3. Assert the specific expected value. No bare toBeVisible / toBeTruthy /
+  //    status == 200 / toContain('success'). Match against ground truth.
+  //    await expect(page.locator('[data-testid="<target>"]')).toHaveText(String(expected));
+
+  // 4. Screenshot for completion report.
+  await page.screenshot({ path: 'screenshots/<feature>.png' });
+
+  // 5. If the feature has a visible failure surface, add a paired negative
+  //    test in a separate test() block that asserts the readable error
+  //    message (not the status code).
+});
