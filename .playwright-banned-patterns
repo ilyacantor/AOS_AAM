@@ -4,6 +4,14 @@
 # Hook fails commits on any match in staged *.spec.ts / *.spec.js files.
 # Each pattern corresponds to an acceptance rule in CLAUDE.md § Playwright Acceptance.
 #
+# Two enforcement families:
+#   1. Banned assertion patterns — weak/always-wrong asserts.
+#   2. UI-bypass patterns — test runner hitting the backend instead of clicking.
+#      Acceptance is operator clicks driving sequences. Mutative API calls and
+#      raw fetch() from inside specs are API tests, not acceptance. Read-only
+#      reads (Farm ground-truth, health) must use page.request.get() so they
+#      share browser context and are visible as "test setup" not "test action".
+#
 length-greater-than-zero|\.length[[:space:]]*>[[:space:]]*0
 length-greater-equal-one|\.length[[:space:]]*>=[[:space:]]*1
 bare-toBeVisible|toBeVisible\([[:space:]]*\)
@@ -14,3 +22,6 @@ not-toBeNull|\.not\.toBeNull\([[:space:]]*\)
 toHaveCount-literal-integer|toHaveCount\([[:space:]]*[0-9]+[[:space:]]*\)
 toHaveLength-empty|toHaveLength\([[:space:]]*\)
 toHaveLength-literal-integer|toHaveLength\([[:space:]]*[0-9]+[[:space:]]*\)
+ui-bypass-page-request-mutate|page\.request\.(post|put|patch|delete)\(
+ui-bypass-fetch-call|(^|[^a-zA-Z0-9_.])fetch\(
+ui-bypass-axios-mutate|axios\.(post|put|patch|delete)\(
