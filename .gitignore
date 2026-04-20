@@ -42,3 +42,4 @@ vite.config.ts.*
 
 # Binary documents
 *.xlsx
+.env.development
