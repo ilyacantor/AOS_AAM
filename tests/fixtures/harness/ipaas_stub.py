@@ -59,14 +59,19 @@ def _load_records_file(data_dir: str, filename: str, limit: int | None = None) -
 
 
 def _records_for(pipe: dict[str, Any], scenario_data: dict[str, Any]) -> list[dict[str, Any]]:
-    """Return the records for a pipe — inline records[] or lazy-loaded from records_file."""
+    """Return the records for a pipe — inline records[] or lazy-loaded from records_file.
+
+    Pipe-level `sample_size` overrides the scenario default. Useful when one
+    pipe needs full coverage (assignments → utilization math) while others
+    are fine with a smaller sample (vendors, apps).
+    """
     if "records" in pipe:
         return pipe["records"]
     records_file = pipe.get("records_file")
     if not records_file:
         return []
     data_dir = scenario_data.get("data_dir") or "tests/fixtures/harness"
-    limit = scenario_data.get("sample_size_per_pipe")
+    limit = pipe.get("sample_size", scenario_data.get("sample_size_per_pipe"))
     return _load_records_file(data_dir, records_file, limit=limit)
 
 
@@ -162,7 +167,10 @@ def create_stub_app(scenario: str = "healthy") -> FastAPI:
                 "entity_scope": [r.get("source_system", "")],
                 "identity_keys": [f["name"] for f in r.get("schema", []) if f.get("is_key")],
                 "change_semantics": "CDC_UPSERT" if r.get("trigger") == "external_event" else "FULL_REFRESH",
-                "endpoint_ref": {"path": f"/workato/api/recipes/{r['id']}/callable"},
+                "endpoint_ref": {
+                    "path": f"/workato/api/recipes/{r['id']}/callable",
+                    "domain": r.get("domain"),
+                },
             })
         return {"content": [], "isError": False, "structured": {"items": items}}
 
@@ -216,7 +224,10 @@ def create_stub_app(scenario: str = "healthy") -> FastAPI:
                 "entity_scope": [p.get("source_system", "")],
                 "identity_keys": [f["name"] for f in p.get("schema", []) if f.get("is_key")],
                 "change_semantics": "CDC_UPSERT",
-                "endpoint_ref": {"path": f"/boomi/api/processes/{p['id']}/execute"},
+                "endpoint_ref": {
+                    "path": f"/boomi/api/processes/{p['id']}/execute",
+                    "domain": p.get("domain"),
+                },
             })
         return {"content": [], "isError": False, "structured": {"items": items}}
 

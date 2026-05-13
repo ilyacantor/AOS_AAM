@@ -41,7 +41,7 @@ from ..ingest.mappings import MAPPINGS, FieldMapping
 router = APIRouter(tags=["demo"])
 _log = logging.getLogger("aam.routers.demo")
 
-_DATA_DIR = Path(__file__).parent.parent.parent / "tests" / "fixtures" / "harness" / "combined_financials_data"
+_DATA_DIR = Path(__file__).parent.parent.parent / "tests" / "fixtures" / "harness" / "finops_saas_data"
 
 # In-memory mid-confidence approvals so the demo UI is interactive.
 _MAPPING_APPROVALS: dict[str, dict[str, Any]] = {}
@@ -128,14 +128,11 @@ async def demo_mappings() -> dict[str, Any]:
     Includes any in-memory approval state so the UI can render check marks.
     """
     DEMO_KEYS = [
-        "workato::netsuite::entity_id",
-        "workato::netsuite::tran_id",
-        "workato::netsuite::vendor_name",
-        "workato::netsuite::internal_id",
-        "boomi::sage intacct::customerid",
-        "boomi::sage intacct::billno",
-        "boomi::sage intacct::vendorid",
-        "boomi::sage intacct::recordno",
+        "workato::netsuite::vendor",
+        "workato::netsuite::ap_invoice",
+        "boomi::okta::saas_app",
+        "boomi::okta::user",
+        "boomi::okta::assignment",
     ]
     out: list[dict[str, Any]] = []
     for key in DEMO_KEYS:
@@ -164,12 +161,12 @@ async def demo_mappings() -> dict[str, Any]:
 
 
 def _rationale_for(pipe_key: str, source_field: str, confidence: float) -> str:
-    if pipe_key == "workato::netsuite::tran_id" and source_field == "entity_id":
+    if pipe_key == "workato::netsuite::ap_invoice" and source_field == "amount":
         return (
-            "Field name 'entity_id' is ambiguous in NetSuite (it carries the "
-            "customer reference on an invoice, but the same word is used by "
-            "Salesforce for a different concept). Resolver picked Invoice.customer_id "
-            "with 0.78 confidence — needs operator confirmation."
+            "Field name 'amount' on a NetSuite AP invoice is ambiguous — it "
+            "could mean gross_billed_usd (what we owed) or net_recognized_usd "
+            "(what hit OpEx after accruals). Resolver picked APInvoice.gross_billed_usd "
+            "at 0.78 confidence — needs operator confirmation for FinOps spend math."
         )
     if confidence >= 0.9:
         return "Exact concept match; auto-applied."
@@ -251,116 +248,253 @@ async def demo_answer(
     """
     eid = _resolve_entity_id(entity_id)
     q = question.lower()
-    if "ar aging" in q or "ar-aging" in q or "aging" in q:
-        return _answer_ar_aging(eid, question)
+    if "utilization" in q or "saas" in q or "subscriptions" in q or "licenses" in q:
+        return _answer_saas_utilization(eid, question)
     return JSONResponse(
         status_code=200,
         content={
             "question": question,
-            "answer": "Demo handler not implemented for this question. The demo currently answers AR aging + vendor consolidation questions only.",
+            "answer": "Demo handler not implemented for this question. The demo currently answers SaaS-utilization questions only.",
             "supported_questions": [
-                "Show me combined Q3 AR aging across both entities, with vendors that appear in both books flagged for consolidation",
+                "Show me SaaS subscriptions where actual utilization is below 50% of paid licenses, ranked by potential annual savings",
             ],
         },
     )
 
 
-def _answer_ar_aging(entity_id: str, question: str) -> dict[str, Any]:
-    """Compute the answer payload for the demo's AR aging question."""
+def _latest_run_for(entity_id: str, concept: str) -> str | None:
     rows = sb._execute_composed(
         psql.SQL("""
-            SELECT pipe_id, run_id, source_table, source_run_tag, source_field, property, value
+            SELECT run_id, MAX(created_at) AS ts
               FROM semantic_triples
-             WHERE entity_id = %s
-               AND concept   = 'ARAging'
-               AND source_table LIKE 'aam_via:%%'
+             WHERE entity_id = %s AND concept = %s AND source_table LIKE 'aam_via:%%'
+             GROUP BY run_id
+             ORDER BY ts DESC
+             LIMIT 1
         """),
-        params=(entity_id,),
+        params=(entity_id, concept),
         fetch=True,
     )
-    # Group triples by source_run_tag (which carries the per-record key suffix)
-    # to reconstruct ARAging records.
-    records: dict[str, dict[str, Any]] = {}
-    for r in rows:
-        key = r["source_run_tag"]
-        rec = records.setdefault(key, {
-            "pipe_id": r["pipe_id"],
-            # I1: read the PG column but expose under the namespaced name.
-            "aam_inference_id": r["run_id"],
-            "source_table": r["source_table"],
-            "source_run_tag": key,
-            "fields": {},
-        })
-        rec["fields"][r["property"]] = r["value"]
+    return str(rows[0]["run_id"]) if rows else None
 
-    # Q3-2024 filter: due_date in [2024-07-01, 2024-09-30].
-    q3_start, q3_end = "2024-07-01", "2024-09-30"
-    workato_q3: list[dict[str, Any]] = []
-    boomi_q3: list[dict[str, Any]] = []
-    for rec in records.values():
-        fields = rec["fields"]
-        due_date = str(fields.get("due_date", "")).strip('"')
-        if not (q3_start <= due_date <= q3_end):
-            continue
-        amount_due = float(fields.get("amount_due_usd") or 0)
-        amount_paid = float(fields.get("amount_paid_usd") or 0)
-        net = round(amount_due - amount_paid, 2)
-        aging_bucket = str(fields.get("aging_bucket", "Unknown")).strip('"')
-        line = {
-            "pipe_id": rec["pipe_id"],
-            "source_table": rec["source_table"],
-            "due_date": due_date,
-            "aging_bucket": aging_bucket,
-            "amount_due_usd": amount_due,
-            "amount_paid_usd": amount_paid,
-            "net_outstanding_usd": net,
-            "customer_id": str(fields.get("customer_id", "")).strip('"'),
+
+def _resolve_pipe_ids_by_domain() -> dict[str, str]:
+    """Return {domain: pipe_id} for the active scenario by running discovery
+    once. Used to embed concrete pipe IDs in the answer response so the UI
+    doesn't have to second-guess which pipe to drill into.
+    """
+    from ..adapters.factory import get_mcp_pair_for_vendor, supported_vendors
+    from ..mcp.translator import ToolOutputTranslator
+    out: dict[str, str] = {}
+    for vendor in supported_vendors():
+        try:
+            discovery, _ = get_mcp_pair_for_vendor(vendor)
+            tools = discovery.list_tools()
+            if not tools:
+                continue
+            result = discovery.invoke_tool(tools[0].name)
+            for pipe in ToolOutputTranslator(vendor=vendor).translate(tools[0].name, result):
+                ref = pipe.get("endpoint_ref") or {}
+                domain = ref.get("domain") if isinstance(ref, dict) else None
+                if domain:
+                    out[str(domain)] = pipe["pipe_id"]
+        except Exception as exc:  # surface in logs, no silent fallback
+            _log.warning("resolve_pipe_ids: vendor=%s failed: %s", vendor, exc)
+    return out
+
+
+def _answer_saas_utilization(entity_id: str, question: str) -> dict[str, Any]:
+    """Answer the FinOps SaaS-utilization demo question.
+
+    Uses SQL aggregation against `semantic_triples` (latest run per concept)
+    so the endpoint stays under the demo latency budget. The aggregation
+    pivots per-record via source_run_tag, which carries the per-record key
+    suffix from the triple builder.
+    """
+    # Latest runs per concept so we only see the most recent ingestion.
+    app_run = _latest_run_for(entity_id, "SaaSApp")
+    assign_run = _latest_run_for(entity_id, "Assignment")
+    invoice_run = _latest_run_for(entity_id, "APInvoice")
+
+    if not (app_run and assign_run and invoice_run):
+        return {
+            "question": question,
+            "entity_id": entity_id,
+            "answer_text": "No data ingested yet for this entity. Run /api/aam/ingest/demo first.",
+            "answer_table": {"headers": [], "rows": []},
         }
-        if "workato" in rec["source_table"]:
-            workato_q3.append(line)
-        else:
-            boomi_q3.append(line)
 
-    def bucket_totals(rows: list[dict[str, Any]]) -> dict[str, float]:
-        out: dict[str, float] = {b: 0.0 for b in ("Current", "1-30", "31-60", "61-90", "90+")}
-        for r in rows:
-            b = r["aging_bucket"] if r["aging_bucket"] in out else "Current"
-            out[b] = round(out[b] + r["net_outstanding_usd"], 2)
-        return out
+    # Per-app: license_seat_count, annual_cost_per_seat_usd, name (pivoted via source_run_tag).
+    app_rows = sb._execute_composed(
+        psql.SQL("""
+            SELECT source_run_tag,
+                   MAX(pipe_id::text) AS pipe_id,
+                   MAX(CASE WHEN property = 'id' THEN value::text END) AS app_id,
+                   MAX(CASE WHEN property = 'name' THEN value::text END) AS app_name,
+                   MAX(CASE WHEN property = 'license_seat_count' THEN value::text END) AS seat_count,
+                   MAX(CASE WHEN property = 'annual_cost_per_seat_usd' THEN value::text END) AS per_seat
+              FROM semantic_triples
+             WHERE entity_id = %s AND concept = 'SaaSApp' AND run_id = %s
+             GROUP BY source_run_tag
+        """),
+        params=(entity_id, app_run),
+        fetch=True,
+    )
 
-    workato_buckets = bucket_totals(workato_q3)
-    boomi_buckets = bucket_totals(boomi_q3)
-    combined_buckets = {
-        b: round(workato_buckets[b] + boomi_buckets[b], 2)
-        for b in workato_buckets
-    }
+    def _unquote(s: str | None) -> str:
+        if s is None:
+            return ""
+        return s.strip('"')
 
-    # Vendor consolidation: read identity_matches.json, filter domain=vendor.
+    app_by_id: dict[str, dict[str, Any]] = {}
+    for r in app_rows:
+        aid = _unquote(r["app_id"])
+        if not aid:
+            continue
+        try:
+            seats = int(float(_unquote(r["seat_count"]) or "0"))
+        except ValueError:
+            seats = 0
+        try:
+            per_seat = float(_unquote(r["per_seat"]) or "0")
+        except ValueError:
+            per_seat = 0.0
+        app_by_id[aid] = {
+            "pipe_id": r["pipe_id"],
+            "id": aid,
+            "label": _unquote(r["app_name"]),
+            "license_seat_count": seats,
+            "annual_cost_per_seat_usd": per_seat,
+            "license_tier": "",
+        }
+
+    # Active users per app — pull only the two relevant Assignment properties
+    # (app_id, active_in_last_30d) and pivot per-record in Python. Avoids an
+    # expensive self-join on a multi-hundred-k-row triple store.
+    assign_rows = sb._execute_composed(
+        psql.SQL("""
+            SELECT source_run_tag, property, value::text AS value
+              FROM semantic_triples
+             WHERE entity_id = %s AND concept = 'Assignment' AND run_id = %s
+               AND property IN ('app_id', 'active_in_last_30d')
+        """),
+        params=(entity_id, assign_run),
+        fetch=True,
+    )
+    assign_pairs: dict[str, dict[str, str]] = {}
+    for r in assign_rows:
+        assign_pairs.setdefault(r["source_run_tag"], {})[r["property"]] = r["value"]
+    active_by_app: dict[str, int] = {}
+    for pair in assign_pairs.values():
+        if (pair.get("active_in_last_30d") or "").lower() == "true":
+            aid = _unquote(pair.get("app_id"))
+            if aid:
+                active_by_app[aid] = active_by_app.get(aid, 0) + 1
+
+    # Annual cost per vendor — sum AP invoice gross amounts within last 12 months.
+    # Latest due_date determines the rolling window cutoff.
+    cutoff_rows = sb._execute_composed(
+        psql.SQL("""
+            SELECT MAX(value::text) AS latest_due
+              FROM semantic_triples
+             WHERE entity_id = %s AND concept = 'APInvoice' AND run_id = %s AND property = 'due_date'
+        """),
+        params=(entity_id, invoice_run),
+        fetch=True,
+    )
+    latest_due = _unquote(cutoff_rows[0]["latest_due"]) if cutoff_rows else ""
+    if latest_due and len(latest_due) >= 10:
+        y, mo, d = latest_due.split("-")
+        cutoff = f"{int(y) - 1}-{mo}-{d}"
+    else:
+        cutoff = "1970-01-01"
+
+    # Annual cost per vendor — pull 3 properties (vendor_id, gross, due_date),
+    # pivot in Python, filter to the rolling 12-month window.
+    invoice_rows = sb._execute_composed(
+        psql.SQL("""
+            SELECT source_run_tag, property, value::text AS value
+              FROM semantic_triples
+             WHERE entity_id = %s AND concept = 'APInvoice' AND run_id = %s
+               AND property IN ('vendor_id', 'gross_billed_usd', 'due_date')
+        """),
+        params=(entity_id, invoice_run),
+        fetch=True,
+    )
+    invoice_recs: dict[str, dict[str, str]] = {}
+    for r in invoice_rows:
+        invoice_recs.setdefault(r["source_run_tag"], {})[r["property"]] = r["value"]
+    annual_cost_by_vendor: dict[str, float] = {}
+    for rec in invoice_recs.values():
+        due = _unquote(rec.get("due_date"))
+        if due < cutoff:
+            continue
+        vid = _unquote(rec.get("vendor_id"))
+        if not vid:
+            continue
+        try:
+            gross = float(rec.get("gross_billed_usd") or 0)
+        except ValueError:
+            gross = 0.0
+        annual_cost_by_vendor[vid] = round(annual_cost_by_vendor.get(vid, 0.0) + gross, 2)
+
+    # Pipe IDs by domain — embed in response so the UI drill-through doesn't
+    # have to second-guess which Okta pipe (apps/users/assignments) to query.
+    pipe_ids_by_domain = _resolve_pipe_ids_by_domain()
+    netsuite_vendor_pipe_id = pipe_ids_by_domain.get("vendor", "")
+    okta_app_pipe_id = pipe_ids_by_domain.get("saas_app", "")
+
+    # Identity matches: vendor.left_record_key (NetSuite vendor_id) ↔ saas_app.right_record_key (Okta app id)
     matches_doc = _load_json("identity_matches.json")
-    vendor_overlap = [
-        {
+    saas_matches = [m for m in matches_doc if m.get("domain") == "saas_subscription"]
+    auto_matches = [m for m in saas_matches if m.get("review_status") == "auto_accepted"]
+    pending_matches = [m for m in saas_matches if m.get("review_status") == "pending_review"]
+
+    # Build per-app utilization+savings rows.
+    rows: list[dict[str, Any]] = []
+    for m in auto_matches:
+        vendor_id = m["left_record_key"]
+        app_id = m["right_record_key"]
+        app = app_by_id.get(app_id)
+        if not app or app["license_seat_count"] <= 0:
+            continue
+        active = active_by_app.get(app_id, 0)
+        utilization = active / app["license_seat_count"]
+        annual_cost = annual_cost_by_vendor.get(vendor_id, 0.0)
+        # Right-size to 2x current active users; savings are the wasted seats * per-seat cost.
+        ideal_seats = max(active * 2, 1)
+        wasted_seats = max(0, app["license_seat_count"] - ideal_seats)
+        projected_savings = round(wasted_seats * app["annual_cost_per_seat_usd"], 2)
+        rows.append({
             "canonical_id": m["canonical_id"],
+            "app_id": app_id,
+            "app_name": app["label"],
+            "vendor_id": vendor_id,
             "vendor_name": m["left_display_name"],
+            "license_seat_count": app["license_seat_count"],
+            "active_user_count": active,
+            "utilization_pct": round(utilization * 100, 1),
+            "annual_cost_usd": annual_cost,
+            "projected_annual_savings_usd": projected_savings,
+            "license_tier": app["license_tier"],
             "left_pipe": m["left_pipe"],
             "right_pipe": m["right_pipe"],
-            "confidence": m["confidence"],
-        }
-        for m in matches_doc
-        if m.get("domain") == "vendor" and m.get("review_status") == "auto_accepted"
-    ]
-    pending_customer_overlap = [
-        m for m in matches_doc
-        if m.get("domain") == "customer" and m.get("review_status") == "pending_review"
-    ]
+            "netsuite_pipe_id": netsuite_vendor_pipe_id,
+            "okta_pipe_id": okta_app_pipe_id,
+        })
+
+    # Filter to under-utilized (< 50%) and rank by savings.
+    under_used = [r for r in rows if r["utilization_pct"] < 50.0]
+    under_used.sort(key=lambda r: r["projected_annual_savings_usd"], reverse=True)
+
+    total_savings = round(sum(r["projected_annual_savings_usd"] for r in under_used), 2)
+    total_spend = round(sum(r["annual_cost_usd"] for r in under_used), 2)
 
     answer_text = (
-        f"Q3 2024 AR Aging across NetSuite (Workato) + Sage Intacct (Boomi): "
-        f"${combined_buckets['Current']:,.0f} current, "
-        f"${combined_buckets['1-30']:,.0f} 1-30 days, "
-        f"${combined_buckets['31-60']:,.0f} 31-60 days, "
-        f"${combined_buckets['61-90']:,.0f} 61-90 days, "
-        f"${combined_buckets['90+']:,.0f} 90+ days. "
-        f"{len(vendor_overlap)} vendors appear in both books and are candidates for consolidation."
+        f"{len(under_used)} SaaS subscriptions are under 50% utilization, "
+        f"costing ${total_spend:,.0f} per year. "
+        f"Right-sizing recovers ~${total_savings:,.0f} annually. "
+        f"{len(pending_matches)} vendor↔app match{'es' if len(pending_matches) != 1 else ''} held in review."
     )
 
     return {
@@ -368,19 +502,22 @@ def _answer_ar_aging(entity_id: str, question: str) -> dict[str, Any]:
         "entity_id": entity_id,
         "answer_text": answer_text,
         "answer_table": {
-            "headers": ["Bucket", "Workato → NetSuite", "Boomi → Sage Intacct", "Combined"],
+            "headers": ["App", "Paid Licenses", "Active Users", "Utilization", "Annual Cost", "Projected Savings"],
             "rows": [
                 {
-                    "bucket": b,
-                    "workato_netsuite": workato_buckets[b],
-                    "boomi_sage_intacct": boomi_buckets[b],
-                    "combined": combined_buckets[b],
+                    "app_name": r["app_name"],
+                    "license_seat_count": r["license_seat_count"],
+                    "active_user_count": r["active_user_count"],
+                    "utilization_pct": r["utilization_pct"],
+                    "annual_cost_usd": r["annual_cost_usd"],
+                    "projected_annual_savings_usd": r["projected_annual_savings_usd"],
                 }
-                for b in ("Current", "1-30", "31-60", "61-90", "90+")
+                for r in under_used[:20]
             ],
         },
-        "vendor_consolidation_candidates": vendor_overlap,
-        "pending_review_customer_matches": [
+        "total_projected_annual_savings_usd": total_savings,
+        "total_under_used_spend_usd": total_spend,
+        "pending_review_matches": [
             {
                 "canonical_id": m["canonical_id"],
                 "left_display_name": m["left_display_name"],
@@ -388,20 +525,27 @@ def _answer_ar_aging(entity_id: str, question: str) -> dict[str, Any]:
                 "confidence": m["confidence"],
                 "reason": m["reason"],
             }
-            for m in pending_customer_overlap
+            for m in pending_matches
         ],
         "provenance_drill_through": {
-            "workato_q3_records": [
-                {"pipe_id": r["pipe_id"], "customer_id": r["customer_id"],
-                 "amount": r["net_outstanding_usd"], "bucket": r["aging_bucket"],
-                 "due_date": r["due_date"]}
-                for r in workato_q3[:25]
-            ],
-            "boomi_q3_records": [
-                {"pipe_id": r["pipe_id"], "customer_id": r["customer_id"],
-                 "amount": r["net_outstanding_usd"], "bucket": r["aging_bucket"],
-                 "due_date": r["due_date"]}
-                for r in boomi_q3[:25]
+            "subscriptions": [
+                {
+                    "canonical_id": r["canonical_id"],
+                    "app_name": r["app_name"],
+                    "vendor_name": r["vendor_name"],
+                    "utilization_pct": r["utilization_pct"],
+                    "annual_cost_usd": r["annual_cost_usd"],
+                    "projected_annual_savings_usd": r["projected_annual_savings_usd"],
+                    "license_seat_count": r["license_seat_count"],
+                    "active_user_count": r["active_user_count"],
+                    "okta_pipe": r["right_pipe"],
+                    "okta_pipe_id": r["okta_pipe_id"],
+                    "okta_app_id": r["app_id"],
+                    "netsuite_pipe": r["left_pipe"],
+                    "netsuite_pipe_id": r["netsuite_pipe_id"],
+                    "netsuite_vendor_id": r["vendor_id"],
+                }
+                for r in under_used[:20]
             ],
         },
     }
@@ -410,42 +554,48 @@ def _answer_ar_aging(entity_id: str, question: str) -> dict[str, Any]:
 @router.get("/api/aam/demo/provenance")
 async def demo_provenance(
     pipe_id: str = Query(...),
-    customer_id: str | None = Query(default=None),
+    record_key: str | None = Query(default=None, description="any natural key — app_id, vendor_id, customer_id, etc."),
     entity_id: str | None = Query(default=None),
 ) -> dict[str, Any]:
-    """Provenance drill-through: given a pipe_id (and optional customer_id),
-    return the underlying triples plus the pipe metadata. This is what the
-    Consumer View renders when an operator clicks a value.
+    """Provenance drill-through: given a pipe_id (and optional record_key for
+    the natural id on that pipe), return the underlying triples plus pipe
+    metadata. Each triple shows its source_field — the operator sees the raw
+    vendor field that produced each AOS property.
     """
     eid = _resolve_entity_id(entity_id)
-    if customer_id:
+    # Normalize the pipe_id to the same UUID form that the triple writer used.
+    # Translator pipe IDs are scenario strings ("wk-netsuite-vendors"); PG has
+    # uuid5(NAMESPACE_URL, that string).
+    import uuid as _u
+    try:
+        _u.UUID(pipe_id)
+    except ValueError:
+        pipe_id = str(_u.uuid5(_u.NAMESPACE_URL, pipe_id))
+    if record_key:
+        # Match by source_run_tag suffix, which carries the record_key from
+        # the original transport record.
         rows = sb._execute_composed(
             psql.SQL("""
-                SELECT t1.pipe_id, t1.run_id, t1.source_table, t1.source_system,
-                       t1.source_field, t1.property, t1.value, t1.confidence_score
-                  FROM semantic_triples t1
-                 WHERE t1.entity_id = %s
-                   AND t1.pipe_id   = %s
-                   AND t1.run_id IN (
-                     SELECT t2.run_id FROM semantic_triples t2
-                      WHERE t2.entity_id = %s AND t2.pipe_id = %s
-                        AND t2.property IN ('customer_id', 'id')
-                        AND t2.value::text = %s
-                   )
-                 ORDER BY t1.run_id, t1.property
+                SELECT pipe_id, run_id, source_table, source_system,
+                       source_field, property, value, confidence_score, source_run_tag
+                  FROM semantic_triples
+                 WHERE entity_id = %s
+                   AND pipe_id   = %s
+                   AND source_run_tag LIKE %s
+                 ORDER BY source_run_tag, property
                  LIMIT 200
             """),
-            params=(eid, pipe_id, eid, pipe_id, json.dumps(customer_id)),
+            params=(eid, pipe_id, f"%::{record_key}"),
             fetch=True,
         )
     else:
         rows = sb._execute_composed(
             psql.SQL("""
                 SELECT pipe_id, run_id, source_table, source_system,
-                       source_field, property, value, confidence_score
+                       source_field, property, value, confidence_score, source_run_tag
                   FROM semantic_triples
                  WHERE entity_id = %s AND pipe_id = %s
-                 ORDER BY run_id, property
+                 ORDER BY source_run_tag, property
                  LIMIT 50
             """),
             params=(eid, pipe_id),
@@ -454,7 +604,7 @@ async def demo_provenance(
     return {
         "entity_id": eid,
         "pipe_id": pipe_id,
-        "customer_id": customer_id,
+        "record_key": record_key,
         "triple_count": len(rows),
         "triples": [
             {
@@ -520,24 +670,24 @@ def _wrap_page(title: str, body: str) -> str:
 @router.get("/ui/demo/", response_class=HTMLResponse)
 async def demo_landing() -> HTMLResponse:
     body = """
-    <div class="demo-title">AAM Demo — Combined Financials</div>
-    <div class="demo-sub">Two ERPs, two pipes, one unified context. Workato → NetSuite + Boomi → Sage Intacct.</div>
+    <div class="demo-title">AAM Demo — FinOps SaaS Spending</div>
+    <div class="demo-sub">Two systems of record, two pipes, one unified context. Workato → NetSuite AP + Boomi → Okta. The FinOps agent answers SaaS-utilization questions with provenance back to both pipes.</div>
     <div class="demo-card nav-grid">
       <div>
         <h3><a class="demo-link" href="/ui/demo/pipe-catalog" data-testid="link-pipe-catalog">Pipe Catalog</a></h3>
-        <div class="muted">The pipes AAM discovered through MCP. Same code path across both vendors.</div>
+        <div class="muted">The pipes AAM discovered through MCP. Same code path across NetSuite (Workato) and Okta (Boomi).</div>
       </div>
       <div>
         <h3><a class="demo-link" href="/ui/demo/semantic-mapping" data-testid="link-semantic-mapping">Semantic Mapping</a></h3>
-        <div class="muted">Field-to-concept mappings. One field at mid-confidence needs your click.</div>
+        <div class="muted">Field-to-concept mappings for NetSuite AP and Okta. One mid-confidence field needs your click.</div>
       </div>
       <div>
         <h3><a class="demo-link" href="/ui/demo/identity-resolution" data-testid="link-identity-resolution">Identity Resolution</a></h3>
-        <div class="muted">Customers and vendors matched across both books. One queued for review.</div>
+        <div class="muted">SaaS vendor (NetSuite AP) matched to SaaS app (Okta). One match held in review.</div>
       </div>
       <div>
         <h3><a class="demo-link" href="/ui/demo/consumer-view" data-testid="link-consumer-view">Consumer View</a></h3>
-        <div class="muted">Ask a question. See the answer. Drill through to source records.</div>
+        <div class="muted">Ask the FinOps question. See the answer. Drill through to source records.</div>
       </div>
     </div>
     """
@@ -565,13 +715,11 @@ async def ui_pipe_catalog() -> HTMLResponse:
     <script>
       function esc(s){ var d=document.createElement('div'); d.textContent=String(s==null?'':s); return d.innerHTML; }
       function inferVendor(p){
-        var ref = p.endpoint_ref || {};
-        if (typeof ref === 'string') { try { ref = JSON.parse(ref); } catch(e) {} }
         var hints = (p.provenance && p.provenance.lineage_hints) || [];
         for (var i=0; i<hints.length; i++) { if (typeof hints[i] === 'string' && hints[i].indexOf('vendor:')===0) return hints[i].split(':')[1]; }
         var name = (p.display_name||'').toLowerCase();
         if (name.indexOf('netsuite') >= 0) return 'Workato';
-        if (name.indexOf('sage') >= 0) return 'Boomi';
+        if (name.indexOf('okta') >= 0) return 'Boomi';
         return p.source_system || '';
       }
       fetch('/api/aam/demo/pipes').then(function(r){ return r.json(); }).then(function(data){
@@ -664,7 +812,7 @@ async def ui_semantic_mapping() -> HTMLResponse:
 async def ui_identity_resolution() -> HTMLResponse:
     body = """
     <div class="demo-title">Identity Resolution</div>
-    <div class="demo-sub">Customers and vendors matched across NetSuite (Workato) and Sage Intacct (Boomi). Auto-accepted matches power consolidation. Pending-review matches stay in the queue until you decide — the rest of the pipeline keeps working.</div>
+    <div class="demo-sub">NetSuite vendor master (Workato) matched to Okta SaaS apps (Boomi) — pairs the cost we paid with the app we provisioned. Auto-accepted matches power the FinOps answer. One match is held in review — the rest of the pipeline keeps working.</div>
     <div class="demo-card">
       <h3>Review Queue <span id="review-count" data-testid="review-count" class="muted"></span></h3>
       <div id="review-rows"></div>
@@ -672,7 +820,7 @@ async def ui_identity_resolution() -> HTMLResponse:
     <div class="demo-card">
       <h3>Auto-Accepted Matches <span id="auto-count" data-testid="auto-count" class="muted"></span></h3>
       <table class="demo-tbl" data-testid="auto-matches-table">
-        <thead><tr><th>Domain</th><th>Workato → NetSuite</th><th>Boomi → Sage Intacct</th><th>Confidence</th><th>Method</th></tr></thead>
+        <thead><tr><th>Domain</th><th>NetSuite Vendor (Workato)</th><th>Okta App (Boomi)</th><th>Confidence</th><th>Method</th></tr></thead>
         <tbody id="auto-rows"></tbody>
       </table>
     </div>
@@ -745,25 +893,26 @@ async def ui_identity_resolution() -> HTMLResponse:
 @router.get("/ui/demo/consumer-view", response_class=HTMLResponse)
 async def ui_consumer_view(question: str | None = None) -> HTMLResponse:
     default_q = (
-        "Show me combined Q3 AR aging across both entities, with vendors that "
-        "appear in both books flagged for consolidation"
+        "Show me SaaS subscriptions where actual utilization is below 50% "
+        "of paid licenses, ranked by potential annual savings"
     )
     qval = (question or default_q).replace('"', '&quot;')
     body = f"""
     <div class="demo-title">Consumer View</div>
-    <div class="demo-sub">Ask a question. The answer is computed from triples in DCL. Every value cites the pipe + record it came from.</div>
+    <div class="demo-sub">Ask the FinOps question. The answer is computed live from triples in DCL — Okta tells us who is using which app, NetSuite tells us what we paid. Every value cites the pipe + record it came from.</div>
     <div class="demo-card">
       <div style="display:flex; gap: 10px;">
         <input id="question" data-testid="question-input" value="{qval}" style="flex:1; background:#020617; color:#cbd5e1; border:1px solid #1e293b; border-radius:6px; padding:8px 12px;" />
         <button class="demo-btn" id="ask" data-testid="btn-ask">Ask</button>
       </div>
-      <div class="muted" style="margin-top:8px;">Demo question pre-filled. Click Ask to fetch the live answer.</div>
+      <div class="muted" style="margin-top:8px;">FinOps demo question pre-filled. Click Ask to fetch the live answer.</div>
     </div>
     <div id="answer-card"></div>
     <div id="drill-card"></div>
     <script>
       function esc(s){{ var d=document.createElement('div'); d.textContent=String(s==null?'':s); return d.innerHTML; }}
       function money(v){{ if (v==null) return ''; return '$' + (Number(v)).toLocaleString('en-US', {{maximumFractionDigits: 0}}); }}
+      function pct(v){{ if (v==null) return ''; return Number(v).toFixed(1) + '%'; }}
       function ask(){{
         var q = document.getElementById('question').value;
         var btn = document.getElementById('ask');
@@ -783,39 +932,29 @@ async def ui_consumer_view(question: str | None = None) -> HTMLResponse:
         }}
         var html = '<div class="demo-card" data-testid="answer-card">';
         html += '<h3 data-testid="answer-text">' + esc(d.answer_text) + '</h3>';
+        html += '<div class="muted" style="margin-bottom:10px;" data-testid="answer-totals">Under-used annual spend: <strong>' + money(d.total_under_used_spend_usd) + '</strong> · Projected savings: <strong data-testid="total-savings">' + money(d.total_projected_annual_savings_usd) + '</strong></div>';
         html += '<table class="demo-tbl" data-testid="answer-table"><thead><tr>';
         d.answer_table.headers.forEach(function(h){{ html += '<th>' + esc(h) + '</th>'; }});
         html += '</tr></thead><tbody>';
         d.answer_table.rows.forEach(function(row){{
           html += '<tr data-testid="answer-row">';
-          html += '<td data-testid="answer-bucket">' + esc(row.bucket) + '</td>';
-          html += '<td data-testid="answer-workato">' + money(row.workato_netsuite) + '</td>';
-          html += '<td data-testid="answer-boomi">' + money(row.boomi_sage_intacct) + '</td>';
-          html += '<td data-testid="answer-combined"><strong>' + money(row.combined) + '</strong></td>';
+          html += '<td data-testid="answer-app"><strong>' + esc(row.app_name) + '</strong></td>';
+          html += '<td data-testid="answer-licenses">' + row.license_seat_count + '</td>';
+          html += '<td data-testid="answer-active">' + row.active_user_count + '</td>';
+          html += '<td data-testid="answer-utilization">' + pct(row.utilization_pct) + '</td>';
+          html += '<td data-testid="answer-cost">' + money(row.annual_cost_usd) + '</td>';
+          html += '<td data-testid="answer-savings"><strong>' + money(row.projected_annual_savings_usd) + '</strong></td>';
           html += '</tr>';
         }});
         html += '</tbody></table>';
-        if ((d.vendor_consolidation_candidates || []).length){{
-          html += '<h3 style="margin-top:18px;">Vendors flagged for consolidation</h3>';
-          html += '<table class="demo-tbl" data-testid="vendor-consolidation-table"><thead><tr><th>Vendor</th><th>Workato Pipe</th><th>Boomi Pipe</th><th>Confidence</th></tr></thead><tbody>';
-          d.vendor_consolidation_candidates.forEach(function(v){{
-            html += '<tr data-testid="vendor-consolidation-row">';
-            html += '<td><strong>' + esc(v.vendor_name) + '</strong></td>';
-            html += '<td><code class="mono">' + esc(v.left_pipe) + '</code></td>';
-            html += '<td><code class="mono">' + esc(v.right_pipe) + '</code></td>';
-            html += '<td><span class="pill auto">' + (v.confidence*100).toFixed(0) + '%</span></td>';
-            html += '</tr>';
-          }});
-          html += '</tbody></table>';
-        }}
-        if ((d.pending_review_customer_matches || []).length){{
-          html += '<h3 style="margin-top:18px;">Customer matches in review (system continues)</h3>';
-          html += '<table class="demo-tbl" data-testid="pending-review-table"><thead><tr><th>Workato → NetSuite</th><th>Boomi → Sage</th><th>Confidence</th><th>Reason</th></tr></thead><tbody>';
-          d.pending_review_customer_matches.forEach(function(p){{
+        if ((d.pending_review_matches || []).length){{
+          html += '<h3 style="margin-top:18px;">Matches held in review (system continues)</h3>';
+          html += '<table class="demo-tbl" data-testid="pending-review-table"><thead><tr><th>NetSuite Vendor</th><th>Okta App</th><th>Confidence</th><th>Reason</th></tr></thead><tbody>';
+          d.pending_review_matches.forEach(function(p){{
             html += '<tr data-testid="pending-review-row">';
             html += '<td>' + esc(p.left_display_name) + '</td>';
             html += '<td>' + esc(p.right_display_name) + '</td>';
-            html += '<td><span class="pill review">' + (p.confidence*100).toFixed(0) + '%</span></td>';
+            html += '<td><span class="pill review" data-testid="pending-review-confidence">' + (p.confidence*100).toFixed(0) + '%</span></td>';
             html += '<td class="muted">' + esc(p.reason) + '</td>';
             html += '</tr>';
           }});
@@ -824,45 +963,37 @@ async def ui_consumer_view(question: str | None = None) -> HTMLResponse:
         html += '</div>';
         root.innerHTML = html;
 
-        var dr = '';
-        var w = (d.provenance_drill_through && d.provenance_drill_through.workato_q3_records) || [];
-        var b = (d.provenance_drill_through && d.provenance_drill_through.boomi_q3_records) || [];
-        dr += '<div class="demo-card" data-testid="drill-card">';
+        var subs = (d.provenance_drill_through && d.provenance_drill_through.subscriptions) || [];
+        var dr = '<div class="demo-card" data-testid="drill-card">';
         dr += '<h3>Provenance Drill-Through</h3>';
-        dr += '<div class="muted">Every value in the answer above traces to source records below. Click a row to see the underlying triples.</div>';
-        dr += '<h3 style="margin-top:14px;">Workato → NetSuite Q3 records (' + w.length + ')</h3>';
-        dr += renderDrillTable('drill-workato', w);
-        dr += '<h3 style="margin-top:14px;">Boomi → Sage Intacct Q3 records (' + b.length + ')</h3>';
-        dr += renderDrillTable('drill-boomi', b);
+        dr += '<div class="muted">Each subscription cites both pipes. Click NetSuite or Okta to see the underlying triples.</div>';
+        dr += '<table class="demo-tbl" data-testid="drill-table"><thead><tr><th>Subscription</th><th>Utilization</th><th>Cost</th><th>NetSuite (Workato)</th><th>Okta (Boomi)</th></tr></thead><tbody>';
+        subs.forEach(function(s){{
+          dr += '<tr data-testid="drill-row">';
+          dr += '<td><strong>' + esc(s.app_name) + '</strong><div class="muted">canonical: <code class="mono">' + esc(s.canonical_id.substring(0,8)) + '</code></div></td>';
+          dr += '<td>' + pct(s.utilization_pct) + ' (' + s.active_user_count + '/' + s.license_seat_count + ')</td>';
+          dr += '<td>' + money(s.annual_cost_usd) + '</td>';
+          dr += '<td><button class="demo-btn outline" data-testid="btn-drill-netsuite" data-pipe-id="' + esc(s.netsuite_pipe_id) + '" data-key="' + esc(s.netsuite_vendor_id) + '">' + esc(s.vendor_name) + '</button></td>';
+          dr += '<td><button class="demo-btn outline" data-testid="btn-drill-okta" data-pipe-id="' + esc(s.okta_pipe_id) + '" data-key="' + esc(s.okta_app_id) + '">' + esc(s.app_name) + '</button></td>';
+          dr += '</tr>';
+        }});
+        dr += '</tbody></table>';
         dr += '<div id="triple-detail" style="margin-top:18px;"></div>';
         dr += '</div>';
         document.getElementById('drill-card').innerHTML = dr;
         bindDrillClicks();
       }}
-      function renderDrillTable(tid, rows){{
-        var html = '<table class="demo-tbl" data-testid="' + tid + '"><thead><tr><th>Customer</th><th>Bucket</th><th>Due Date</th><th>Net Outstanding</th><th>Pipe</th></tr></thead><tbody>';
-        rows.forEach(function(r){{
-          html += '<tr data-testid="drill-row" data-pipe="' + esc(r.pipe_id) + '" data-customer="' + esc(r.customer_id) + '" style="cursor:pointer;">';
-          html += '<td>' + esc(r.customer_id) + '</td>';
-          html += '<td>' + esc(r.bucket) + '</td>';
-          html += '<td>' + esc(r.due_date) + '</td>';
-          html += '<td>' + money(r.amount) + '</td>';
-          html += '<td><code class="mono">' + esc(r.pipe_id) + '</code></td>';
-          html += '</tr>';
-        }});
-        html += '</tbody></table>';
-        return html;
-      }}
       function bindDrillClicks(){{
-        document.querySelectorAll('[data-testid="drill-row"]').forEach(function(row){{
-          row.addEventListener('click', function(){{
-            var pipe = row.getAttribute('data-pipe');
-            var cust = row.getAttribute('data-customer');
-            fetch('/api/aam/demo/provenance?pipe_id=' + encodeURIComponent(pipe) + '&customer_id=' + encodeURIComponent(cust))
-              .then(function(r){{return r.json();}}).then(function(p){{
-                var html = '<h3 data-testid="triple-detail-title">Source records for ' + esc(cust) + ' on pipe ' + esc(pipe) + '</h3>';
+        document.querySelectorAll('[data-testid="btn-drill-netsuite"], [data-testid="btn-drill-okta"]').forEach(function(btn){{
+          btn.addEventListener('click', function(){{
+            var pipeId = btn.getAttribute('data-pipe-id');
+            var key = btn.getAttribute('data-key');
+            var label = btn.getAttribute('data-testid') === 'btn-drill-netsuite' ? 'NetSuite (Workato)' : 'Okta (Boomi)';
+            fetch('/api/aam/demo/provenance?pipe_id=' + encodeURIComponent(pipeId) + '&record_key=' + encodeURIComponent(key))
+              .then(function(r){{ return r.json(); }}).then(function(p2){{
+                var html = '<h3 data-testid="triple-detail-title">Source triples — ' + esc(label) + ' record <code class="mono">' + esc(key) + '</code></h3>';
                 html += '<table class="demo-tbl" data-testid="triple-detail-table"><thead><tr><th>Property</th><th>Value</th><th>Source Field</th><th>Confidence</th></tr></thead><tbody>';
-                (p.triples||[]).forEach(function(t){{
+                (p2.triples||[]).forEach(function(t){{
                   html += '<tr data-testid="triple-detail-row">';
                   html += '<td>' + esc(t.concept_property) + '</td>';
                   html += '<td><code class="mono">' + esc(JSON.stringify(t.value)) + '</code></td>';

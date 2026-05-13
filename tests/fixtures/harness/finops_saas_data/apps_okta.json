@@ -1,0 +1,1802 @@
+[
+  {
+    "id": "okta-app-00000",
+    "label": "LinkedIn Sales Nav.",
+    "status": "ACTIVE",
+    "license_tier": "T1_collaboration",
+    "license_seat_count": 698,
+    "annual_cost_per_seat_usd": 96,
+    "created": "2022-03-19"
+  },
+  {
+    "id": "okta-app-00001",
+    "label": "Zoom",
+    "status": "ACTIVE",
+    "license_tier": "T1_collaboration",
+    "license_seat_count": 697,
+    "annual_cost_per_seat_usd": 96,
+    "created": "2024-07-21"
+  },
+  {
+    "id": "okta-app-00002",
+    "label": "Microsoft 365",
+    "status": "ACTIVE",
+    "license_tier": "T1_collaboration",
+    "license_seat_count": 553,
+    "annual_cost_per_seat_usd": 96,
+    "created": "2023-11-18"
+  },
+  {
+    "id": "okta-app-00003",
+    "label": "Google Workspace",
+    "status": "ACTIVE",
+    "license_tier": "T1_collaboration",
+    "license_seat_count": 468,
+    "annual_cost_per_seat_usd": 96,
+    "created": "2023-06-23"
+  },
+  {
+    "id": "okta-app-00004",
+    "label": "Notion",
+    "status": "ACTIVE",
+    "license_tier": "T1_collaboration",
+    "license_seat_count": 300,
+    "annual_cost_per_seat_usd": 96,
+    "created": "2025-04-06"
+  },
+  {
+    "id": "okta-app-00005",
+    "label": "Confluence",
+    "status": "ACTIVE",
+    "license_tier": "T1_collaboration",
+    "license_seat_count": 375,
+    "annual_cost_per_seat_usd": 96,
+    "created": "2023-11-03"
+  },
+  {
+    "id": "okta-app-00006",
+    "label": "Asana",
+    "status": "ACTIVE",
+    "license_tier": "T1_collaboration",
+    "license_seat_count": 770,
+    "annual_cost_per_seat_usd": 96,
+    "created": "2022-04-08"
+  },
+  {
+    "id": "okta-app-00007",
+    "label": "GitHub",
+    "status": "ACTIVE",
+    "license_tier": "T2_engineering",
+    "license_seat_count": 204,
+    "annual_cost_per_seat_usd": 240,
+    "created": "2024-04-27"
+  },
+  {
+    "id": "okta-app-00008",
+    "label": "GitLab",
+    "status": "ACTIVE",
+    "license_tier": "T2_engineering",
+    "license_seat_count": 59,
+    "annual_cost_per_seat_usd": 240,
+    "created": "2022-06-20"
+  },
+  {
+    "id": "okta-app-00009",
+    "label": "Jira",
+    "status": "ACTIVE",
+    "license_tier": "T2_engineering",
+    "license_seat_count": 113,
+    "annual_cost_per_seat_usd": 240,
+    "created": "2022-10-25"
+  },
+  {
+    "id": "okta-app-00010",
+    "label": "Datadog",
+    "status": "ACTIVE",
+    "license_tier": "T2_engineering",
+    "license_seat_count": 226,
+    "annual_cost_per_seat_usd": 240,
+    "created": "2024-12-03"
+  },
+  {
+    "id": "okta-app-00011",
+    "label": "Sentry",
+    "status": "ACTIVE",
+    "license_tier": "T2_engineering",
+    "license_seat_count": 183,
+    "annual_cost_per_seat_usd": 240,
+    "created": "2023-09-19"
+  },
+  {
+    "id": "okta-app-00012",
+    "label": "PagerDuty",
+    "status": "ACTIVE",
+    "license_tier": "T2_engineering",
+    "license_seat_count": 72,
+    "annual_cost_per_seat_usd": 240,
+    "created": "2023-08-21"
+  },
+  {
+    "id": "okta-app-00013",
+    "label": "Linear",
+    "status": "ACTIVE",
+    "license_tier": "T2_engineering",
+    "license_seat_count": 173,
+    "annual_cost_per_seat_usd": 240,
+    "created": "2025-02-10"
+  },
+  {
+    "id": "okta-app-00014",
+    "label": "Salesforce",
+    "status": "ACTIVE",
+    "license_tier": "T3_sales_marketing",
+    "license_seat_count": 128,
+    "annual_cost_per_seat_usd": 1800,
+    "created": "2021-11-20"
+  },
+  {
+    "id": "okta-app-00015",
+    "label": "HubSpot",
+    "status": "ACTIVE",
+    "license_tier": "T3_sales_marketing",
+    "license_seat_count": 59,
+    "annual_cost_per_seat_usd": 1800,
+    "created": "2024-10-22"
+  },
+  {
+    "id": "okta-app-00016",
+    "label": "Outreach",
+    "status": "ACTIVE",
+    "license_tier": "T3_sales_marketing",
+    "license_seat_count": 116,
+    "annual_cost_per_seat_usd": 1800,
+    "created": "2024-09-22"
+  },
+  {
+    "id": "okta-app-00017",
+    "label": "Gong",
+    "status": "ACTIVE",
+    "license_tier": "T3_sales_marketing",
+    "license_seat_count": 126,
+    "annual_cost_per_seat_usd": 1800,
+    "created": "2025-06-15"
+  },
+  {
+    "id": "okta-app-00018",
+    "label": "ZoomInfo",
+    "status": "ACTIVE",
+    "license_tier": "T3_sales_marketing",
+    "license_seat_count": 73,
+    "annual_cost_per_seat_usd": 1800,
+    "created": "2023-01-03"
+  },
+  {
+    "id": "okta-app-00019",
+    "label": "Marketo",
+    "status": "ACTIVE",
+    "license_tier": "T3_sales_marketing",
+    "license_seat_count": 116,
+    "annual_cost_per_seat_usd": 1800,
+    "created": "2024-02-15"
+  },
+  {
+    "id": "okta-app-00020",
+    "label": "LinkedIn Sales Navigator",
+    "status": "ACTIVE",
+    "license_tier": "T3_sales_marketing",
+    "license_seat_count": 138,
+    "annual_cost_per_seat_usd": 1800,
+    "created": "2023-08-29"
+  },
+  {
+    "id": "okta-app-00021",
+    "label": "Workday",
+    "status": "ACTIVE",
+    "license_tier": "T4_hr_finance",
+    "license_seat_count": 24,
+    "annual_cost_per_seat_usd": 144,
+    "created": "2023-03-30"
+  },
+  {
+    "id": "okta-app-00022",
+    "label": "Gusto",
+    "status": "ACTIVE",
+    "license_tier": "T4_hr_finance",
+    "license_seat_count": 44,
+    "annual_cost_per_seat_usd": 144,
+    "created": "2023-10-30"
+  },
+  {
+    "id": "okta-app-00023",
+    "label": "Carta",
+    "status": "ACTIVE",
+    "license_tier": "T4_hr_finance",
+    "license_seat_count": 13,
+    "annual_cost_per_seat_usd": 144,
+    "created": "2023-07-11"
+  },
+  {
+    "id": "okta-app-00024",
+    "label": "Bill.com",
+    "status": "ACTIVE",
+    "license_tier": "T4_hr_finance",
+    "license_seat_count": 40,
+    "annual_cost_per_seat_usd": 144,
+    "created": "2025-05-11"
+  },
+  {
+    "id": "okta-app-00025",
+    "label": "Concur",
+    "status": "ACTIVE",
+    "license_tier": "T4_hr_finance",
+    "license_seat_count": 33,
+    "annual_cost_per_seat_usd": 144,
+    "created": "2022-08-29"
+  },
+  {
+    "id": "okta-app-00026",
+    "label": "Ramp",
+    "status": "ACTIVE",
+    "license_tier": "T4_hr_finance",
+    "license_seat_count": 24,
+    "annual_cost_per_seat_usd": 144,
+    "created": "2023-09-06"
+  },
+  {
+    "id": "okta-app-00027",
+    "label": "Brex",
+    "status": "ACTIVE",
+    "license_tier": "T4_hr_finance",
+    "license_seat_count": 17,
+    "annual_cost_per_seat_usd": 144,
+    "created": "2023-08-09"
+  },
+  {
+    "id": "okta-app-00028",
+    "label": "1Password",
+    "status": "ACTIVE",
+    "license_tier": "T5_security",
+    "license_seat_count": 255,
+    "annual_cost_per_seat_usd": 60,
+    "created": "2024-06-22"
+  },
+  {
+    "id": "okta-app-00029",
+    "label": "Okta",
+    "status": "ACTIVE",
+    "license_tier": "T5_security",
+    "license_seat_count": 164,
+    "annual_cost_per_seat_usd": 60,
+    "created": "2023-10-11"
+  },
+  {
+    "id": "okta-app-00030",
+    "label": "Crowdstrike",
+    "status": "ACTIVE",
+    "license_tier": "T5_security",
+    "license_seat_count": 111,
+    "annual_cost_per_seat_usd": 60,
+    "created": "2024-06-16"
+  },
+  {
+    "id": "okta-app-00031",
+    "label": "Snyk",
+    "status": "ACTIVE",
+    "license_tier": "T5_security",
+    "license_seat_count": 206,
+    "annual_cost_per_seat_usd": 60,
+    "created": "2022-02-12"
+  },
+  {
+    "id": "okta-app-00032",
+    "label": "Vanta",
+    "status": "ACTIVE",
+    "license_tier": "T5_security",
+    "license_seat_count": 503,
+    "annual_cost_per_seat_usd": 60,
+    "created": "2024-02-17"
+  },
+  {
+    "id": "okta-app-00033",
+    "label": "Drata",
+    "status": "ACTIVE",
+    "license_tier": "T5_security",
+    "license_seat_count": 198,
+    "annual_cost_per_seat_usd": 60,
+    "created": "2023-12-24"
+  },
+  {
+    "id": "okta-app-00034",
+    "label": "Snowflake",
+    "status": "ACTIVE",
+    "license_tier": "T6_storage_data",
+    "license_seat_count": 37,
+    "annual_cost_per_seat_usd": 600,
+    "created": "2022-01-27"
+  },
+  {
+    "id": "okta-app-00035",
+    "label": "Databricks",
+    "status": "ACTIVE",
+    "license_tier": "T6_storage_data",
+    "license_seat_count": 83,
+    "annual_cost_per_seat_usd": 600,
+    "created": "2024-02-29"
+  },
+  {
+    "id": "okta-app-00036",
+    "label": "AWS",
+    "status": "ACTIVE",
+    "license_tier": "T6_storage_data",
+    "license_seat_count": 98,
+    "annual_cost_per_seat_usd": 600,
+    "created": "2022-01-02"
+  },
+  {
+    "id": "okta-app-00037",
+    "label": "Google Cloud",
+    "status": "ACTIVE",
+    "license_tier": "T6_storage_data",
+    "license_seat_count": 57,
+    "annual_cost_per_seat_usd": 600,
+    "created": "2024-09-25"
+  },
+  {
+    "id": "okta-app-00038",
+    "label": "Microsoft Azure",
+    "status": "ACTIVE",
+    "license_tier": "T6_storage_data",
+    "license_seat_count": 150,
+    "annual_cost_per_seat_usd": 600,
+    "created": "2025-01-21"
+  },
+  {
+    "id": "okta-app-00039",
+    "label": "Box",
+    "status": "ACTIVE",
+    "license_tier": "T6_storage_data",
+    "license_seat_count": 80,
+    "annual_cost_per_seat_usd": 600,
+    "created": "2023-08-23"
+  },
+  {
+    "id": "okta-app-00040",
+    "label": "Dropbox",
+    "status": "ACTIVE",
+    "license_tier": "T6_storage_data",
+    "license_seat_count": 155,
+    "annual_cost_per_seat_usd": 600,
+    "created": "2023-07-17"
+  },
+  {
+    "id": "okta-app-00041",
+    "label": "Zendesk",
+    "status": "ACTIVE",
+    "license_tier": "T7_support",
+    "license_seat_count": 26,
+    "annual_cost_per_seat_usd": 1200,
+    "created": "2024-07-28"
+  },
+  {
+    "id": "okta-app-00042",
+    "label": "Intercom",
+    "status": "ACTIVE",
+    "license_tier": "T7_support",
+    "license_seat_count": 15,
+    "annual_cost_per_seat_usd": 1200,
+    "created": "2025-01-05"
+  },
+  {
+    "id": "okta-app-00043",
+    "label": "Front",
+    "status": "ACTIVE",
+    "license_tier": "T7_support",
+    "license_seat_count": 50,
+    "annual_cost_per_seat_usd": 1200,
+    "created": "2022-03-09"
+  },
+  {
+    "id": "okta-app-00044",
+    "label": "Help Scout",
+    "status": "ACTIVE",
+    "license_tier": "T7_support",
+    "license_seat_count": 55,
+    "annual_cost_per_seat_usd": 1200,
+    "created": "2023-03-14"
+  },
+  {
+    "id": "okta-app-00045",
+    "label": "NimbusIO-45",
+    "status": "ACTIVE",
+    "license_tier": "T6_storage_data",
+    "license_seat_count": 101,
+    "annual_cost_per_seat_usd": 600,
+    "created": "2023-02-14"
+  },
+  {
+    "id": "okta-app-00046",
+    "label": "TrailAI-46",
+    "status": "ACTIVE",
+    "license_tier": "T6_storage_data",
+    "license_seat_count": 175,
+    "annual_cost_per_seat_usd": 600,
+    "created": "2022-11-03"
+  },
+  {
+    "id": "okta-app-00047",
+    "label": "InsightsAI-47",
+    "status": "ACTIVE",
+    "license_tier": "T2_engineering",
+    "license_seat_count": 246,
+    "annual_cost_per_seat_usd": 240,
+    "created": "2022-01-22"
+  },
+  {
+    "id": "okta-app-00048",
+    "label": "VelocityAI-48",
+    "status": "ACTIVE",
+    "license_tier": "T5_security",
+    "license_seat_count": 339,
+    "annual_cost_per_seat_usd": 60,
+    "created": "2025-01-26"
+  },
+  {
+    "id": "okta-app-00049",
+    "label": "PivotPlatform-49",
+    "status": "ACTIVE",
+    "license_tier": "T7_support",
+    "license_seat_count": 23,
+    "annual_cost_per_seat_usd": 1200,
+    "created": "2024-04-27"
+  },
+  {
+    "id": "okta-app-00050",
+    "label": "ConduitOps-50",
+    "status": "ACTIVE",
+    "license_tier": "T7_support",
+    "license_seat_count": 46,
+    "annual_cost_per_seat_usd": 1200,
+    "created": "2022-04-22"
+  },
+  {
+    "id": "okta-app-00051",
+    "label": "VertexLab-51",
+    "status": "ACTIVE",
+    "license_tier": "T1_collaboration",
+    "license_seat_count": 430,
+    "annual_cost_per_seat_usd": 96,
+    "created": "2023-08-27"
+  },
+  {
+    "id": "okta-app-00052",
+    "label": "TrailOps-52",
+    "status": "ACTIVE",
+    "license_tier": "T5_security",
+    "license_seat_count": 449,
+    "annual_cost_per_seat_usd": 60,
+    "created": "2023-11-29"
+  },
+  {
+    "id": "okta-app-00053",
+    "label": "StreamIO-53",
+    "status": "ACTIVE",
+    "license_tier": "T3_sales_marketing",
+    "license_seat_count": 112,
+    "annual_cost_per_seat_usd": 1800,
+    "created": "2024-03-29"
+  },
+  {
+    "id": "okta-app-00054",
+    "label": "InsightsIO-54",
+    "status": "ACTIVE",
+    "license_tier": "T3_sales_marketing",
+    "license_seat_count": 56,
+    "annual_cost_per_seat_usd": 1800,
+    "created": "2023-04-18"
+  },
+  {
+    "id": "okta-app-00055",
+    "label": "TrailHub-55",
+    "status": "ACTIVE",
+    "license_tier": "T4_hr_finance",
+    "license_seat_count": 12,
+    "annual_cost_per_seat_usd": 144,
+    "created": "2025-05-19"
+  },
+  {
+    "id": "okta-app-00056",
+    "label": "MeshLab-56",
+    "status": "ACTIVE",
+    "license_tier": "T6_storage_data",
+    "license_seat_count": 172,
+    "annual_cost_per_seat_usd": 600,
+    "created": "2023-01-01"
+  },
+  {
+    "id": "okta-app-00057",
+    "label": "InsightsStack-57",
+    "status": "ACTIVE",
+    "license_tier": "T3_sales_marketing",
+    "license_seat_count": 42,
+    "annual_cost_per_seat_usd": 1800,
+    "created": "2024-06-08"
+  },
+  {
+    "id": "okta-app-00058",
+    "label": "StreamAI-58",
+    "status": "ACTIVE",
+    "license_tier": "T4_hr_finance",
+    "license_seat_count": 45,
+    "annual_cost_per_seat_usd": 144,
+    "created": "2023-02-01"
+  },
+  {
+    "id": "okta-app-00059",
+    "label": "BeaconIO-59",
+    "status": "ACTIVE",
+    "license_tier": "T4_hr_finance",
+    "license_seat_count": 38,
+    "annual_cost_per_seat_usd": 144,
+    "created": "2023-10-17"
+  },
+  {
+    "id": "okta-app-00060",
+    "label": "MeshSuite-60",
+    "status": "ACTIVE",
+    "license_tier": "T2_engineering",
+    "license_seat_count": 78,
+    "annual_cost_per_seat_usd": 240,
+    "created": "2022-05-19"
+  },
+  {
+    "id": "okta-app-00061",
+    "label": "PulsePlatform-61",
+    "status": "ACTIVE",
+    "license_tier": "T4_hr_finance",
+    "license_seat_count": 32,
+    "annual_cost_per_seat_usd": 144,
+    "created": "2024-07-22"
+  },
+  {
+    "id": "okta-app-00062",
+    "label": "InsightsStack-62",
+    "status": "ACTIVE",
+    "license_tier": "T4_hr_finance",
+    "license_seat_count": 28,
+    "annual_cost_per_seat_usd": 144,
+    "created": "2022-10-10"
+  },
+  {
+    "id": "okta-app-00063",
+    "label": "BridgeIO-63",
+    "status": "ACTIVE",
+    "license_tier": "T5_security",
+    "license_seat_count": 280,
+    "annual_cost_per_seat_usd": 60,
+    "created": "2023-04-09"
+  },
+  {
+    "id": "okta-app-00064",
+    "label": "DataSyncStack-64",
+    "status": "ACTIVE",
+    "license_tier": "T6_storage_data",
+    "license_seat_count": 39,
+    "annual_cost_per_seat_usd": 600,
+    "created": "2022-12-27"
+  },
+  {
+    "id": "okta-app-00065",
+    "label": "AtlasIO-65",
+    "status": "ACTIVE",
+    "license_tier": "T4_hr_finance",
+    "license_seat_count": 43,
+    "annual_cost_per_seat_usd": 144,
+    "created": "2023-12-03"
+  },
+  {
+    "id": "okta-app-00066",
+    "label": "NimbusIO-66",
+    "status": "ACTIVE",
+    "license_tier": "T4_hr_finance",
+    "license_seat_count": 58,
+    "annual_cost_per_seat_usd": 144,
+    "created": "2024-02-10"
+  },
+  {
+    "id": "okta-app-00067",
+    "label": "ConduitPlatform-67",
+    "status": "ACTIVE",
+    "license_tier": "T7_support",
+    "license_seat_count": 18,
+    "annual_cost_per_seat_usd": 1200,
+    "created": "2022-06-12"
+  },
+  {
+    "id": "okta-app-00068",
+    "label": "CascadePlatform-68",
+    "status": "ACTIVE",
+    "license_tier": "T3_sales_marketing",
+    "license_seat_count": 43,
+    "annual_cost_per_seat_usd": 1800,
+    "created": "2024-06-15"
+  },
+  {
+    "id": "okta-app-00069",
+    "label": "LoopApp-69",
+    "status": "ACTIVE",
+    "license_tier": "T4_hr_finance",
+    "license_seat_count": 70,
+    "annual_cost_per_seat_usd": 144,
+    "created": "2025-04-30"
+  },
+  {
+    "id": "okta-app-00070",
+    "label": "BeaconIO-70",
+    "status": "ACTIVE",
+    "license_tier": "T2_engineering",
+    "license_seat_count": 116,
+    "annual_cost_per_seat_usd": 240,
+    "created": "2022-09-14"
+  },
+  {
+    "id": "okta-app-00071",
+    "label": "BridgeSuite-71",
+    "status": "ACTIVE",
+    "license_tier": "T3_sales_marketing",
+    "license_seat_count": 128,
+    "annual_cost_per_seat_usd": 1800,
+    "created": "2024-07-22"
+  },
+  {
+    "id": "okta-app-00072",
+    "label": "InsightsPlatform-72",
+    "status": "ACTIVE",
+    "license_tier": "T3_sales_marketing",
+    "license_seat_count": 102,
+    "annual_cost_per_seat_usd": 1800,
+    "created": "2024-01-02"
+  },
+  {
+    "id": "okta-app-00073",
+    "label": "AtlasSuite-73",
+    "status": "ACTIVE",
+    "license_tier": "T5_security",
+    "license_seat_count": 220,
+    "annual_cost_per_seat_usd": 60,
+    "created": "2021-12-22"
+  },
+  {
+    "id": "okta-app-00074",
+    "label": "HelixLab-74",
+    "status": "ACTIVE",
+    "license_tier": "T4_hr_finance",
+    "license_seat_count": 79,
+    "annual_cost_per_seat_usd": 144,
+    "created": "2024-12-25"
+  },
+  {
+    "id": "okta-app-00075",
+    "label": "BridgeCloud-75",
+    "status": "ACTIVE",
+    "license_tier": "T7_support",
+    "license_seat_count": 60,
+    "annual_cost_per_seat_usd": 1200,
+    "created": "2024-12-07"
+  },
+  {
+    "id": "okta-app-00076",
+    "label": "WorkflowCoSuite-76",
+    "status": "ACTIVE",
+    "license_tier": "T4_hr_finance",
+    "license_seat_count": 59,
+    "annual_cost_per_seat_usd": 144,
+    "created": "2023-07-30"
+  },
+  {
+    "id": "okta-app-00077",
+    "label": "HelixPlatform-77",
+    "status": "ACTIVE",
+    "license_tier": "T3_sales_marketing",
+    "license_seat_count": 99,
+    "annual_cost_per_seat_usd": 1800,
+    "created": "2023-06-03"
+  },
+  {
+    "id": "okta-app-00078",
+    "label": "BridgeSuite-78",
+    "status": "ACTIVE",
+    "license_tier": "T1_collaboration",
+    "license_seat_count": 223,
+    "annual_cost_per_seat_usd": 96,
+    "created": "2023-07-02"
+  },
+  {
+    "id": "okta-app-00079",
+    "label": "WorkflowCoStack-79",
+    "status": "ACTIVE",
+    "license_tier": "T2_engineering",
+    "license_seat_count": 230,
+    "annual_cost_per_seat_usd": 240,
+    "created": "2024-02-12"
+  },
+  {
+    "id": "okta-app-00080",
+    "label": "VelocitySuite-80",
+    "status": "ACTIVE",
+    "license_tier": "T1_collaboration",
+    "license_seat_count": 260,
+    "annual_cost_per_seat_usd": 96,
+    "created": "2024-04-30"
+  },
+  {
+    "id": "okta-app-00081",
+    "label": "StreamStack-81",
+    "status": "ACTIVE",
+    "license_tier": "T2_engineering",
+    "license_seat_count": 58,
+    "annual_cost_per_seat_usd": 240,
+    "created": "2024-01-28"
+  },
+  {
+    "id": "okta-app-00082",
+    "label": "AtlasSuite-82",
+    "status": "ACTIVE",
+    "license_tier": "T6_storage_data",
+    "license_seat_count": 78,
+    "annual_cost_per_seat_usd": 600,
+    "created": "2024-11-04"
+  },
+  {
+    "id": "okta-app-00083",
+    "label": "WorkflowCoOps-83",
+    "status": "ACTIVE",
+    "license_tier": "T3_sales_marketing",
+    "license_seat_count": 63,
+    "annual_cost_per_seat_usd": 1800,
+    "created": "2024-08-24"
+  },
+  {
+    "id": "okta-app-00084",
+    "label": "ConduitLab-84",
+    "status": "ACTIVE",
+    "license_tier": "T1_collaboration",
+    "license_seat_count": 734,
+    "annual_cost_per_seat_usd": 96,
+    "created": "2023-04-06"
+  },
+  {
+    "id": "okta-app-00085",
+    "label": "CascadeIO-85",
+    "status": "ACTIVE",
+    "license_tier": "T1_collaboration",
+    "license_seat_count": 296,
+    "annual_cost_per_seat_usd": 96,
+    "created": "2024-08-13"
+  },
+  {
+    "id": "okta-app-00086",
+    "label": "StreamPlatform-86",
+    "status": "ACTIVE",
+    "license_tier": "T6_storage_data",
+    "license_seat_count": 140,
+    "annual_cost_per_seat_usd": 600,
+    "created": "2024-04-25"
+  },
+  {
+    "id": "okta-app-00087",
+    "label": "InsightsSuite-87",
+    "status": "ACTIVE",
+    "license_tier": "T6_storage_data",
+    "license_seat_count": 193,
+    "annual_cost_per_seat_usd": 600,
+    "created": "2025-03-08"
+  },
+  {
+    "id": "okta-app-00088",
+    "label": "StreamStack-88",
+    "status": "ACTIVE",
+    "license_tier": "T4_hr_finance",
+    "license_seat_count": 23,
+    "annual_cost_per_seat_usd": 144,
+    "created": "2022-03-30"
+  },
+  {
+    "id": "okta-app-00089",
+    "label": "WorkflowCoAI-89",
+    "status": "ACTIVE",
+    "license_tier": "T5_security",
+    "license_seat_count": 213,
+    "annual_cost_per_seat_usd": 60,
+    "created": "2022-06-14"
+  },
+  {
+    "id": "okta-app-00090",
+    "label": "BeaconApp-90",
+    "status": "ACTIVE",
+    "license_tier": "T4_hr_finance",
+    "license_seat_count": 12,
+    "annual_cost_per_seat_usd": 144,
+    "created": "2023-04-06"
+  },
+  {
+    "id": "okta-app-00091",
+    "label": "BridgeApp-91",
+    "status": "ACTIVE",
+    "license_tier": "T6_storage_data",
+    "license_seat_count": 96,
+    "annual_cost_per_seat_usd": 600,
+    "created": "2023-05-07"
+  },
+  {
+    "id": "okta-app-00092",
+    "label": "PulseIO-92",
+    "status": "ACTIVE",
+    "license_tier": "T6_storage_data",
+    "license_seat_count": 154,
+    "annual_cost_per_seat_usd": 600,
+    "created": "2024-05-04"
+  },
+  {
+    "id": "okta-app-00093",
+    "label": "ConduitAI-93",
+    "status": "ACTIVE",
+    "license_tier": "T2_engineering",
+    "license_seat_count": 53,
+    "annual_cost_per_seat_usd": 240,
+    "created": "2022-08-18"
+  },
+  {
+    "id": "okta-app-00094",
+    "label": "HelixCloud-94",
+    "status": "ACTIVE",
+    "license_tier": "T4_hr_finance",
+    "license_seat_count": 78,
+    "annual_cost_per_seat_usd": 144,
+    "created": "2024-12-16"
+  },
+  {
+    "id": "okta-app-00095",
+    "label": "BridgeHub-95",
+    "status": "ACTIVE",
+    "license_tier": "T3_sales_marketing",
+    "license_seat_count": 47,
+    "annual_cost_per_seat_usd": 1800,
+    "created": "2023-07-06"
+  },
+  {
+    "id": "okta-app-00096",
+    "label": "StreamPlatform-96",
+    "status": "ACTIVE",
+    "license_tier": "T7_support",
+    "license_seat_count": 16,
+    "annual_cost_per_seat_usd": 1200,
+    "created": "2023-06-02"
+  },
+  {
+    "id": "okta-app-00097",
+    "label": "PivotSuite-97",
+    "status": "ACTIVE",
+    "license_tier": "T7_support",
+    "license_seat_count": 38,
+    "annual_cost_per_seat_usd": 1200,
+    "created": "2025-01-12"
+  },
+  {
+    "id": "okta-app-00098",
+    "label": "DataSyncIO-98",
+    "status": "ACTIVE",
+    "license_tier": "T5_security",
+    "license_seat_count": 294,
+    "annual_cost_per_seat_usd": 60,
+    "created": "2023-12-07"
+  },
+  {
+    "id": "okta-app-00099",
+    "label": "InsightsAI-99",
+    "status": "ACTIVE",
+    "license_tier": "T3_sales_marketing",
+    "license_seat_count": 121,
+    "annual_cost_per_seat_usd": 1800,
+    "created": "2023-03-30"
+  },
+  {
+    "id": "okta-app-00100",
+    "label": "NimbusIO-100",
+    "status": "ACTIVE",
+    "license_tier": "T5_security",
+    "license_seat_count": 166,
+    "annual_cost_per_seat_usd": 60,
+    "created": "2024-04-27"
+  },
+  {
+    "id": "okta-app-00101",
+    "label": "BridgeApp-101",
+    "status": "ACTIVE",
+    "license_tier": "T1_collaboration",
+    "license_seat_count": 710,
+    "annual_cost_per_seat_usd": 96,
+    "created": "2024-10-04"
+  },
+  {
+    "id": "okta-app-00102",
+    "label": "WorkflowCoCloud-102",
+    "status": "ACTIVE",
+    "license_tier": "T4_hr_finance",
+    "license_seat_count": 22,
+    "annual_cost_per_seat_usd": 144,
+    "created": "2024-03-14"
+  },
+  {
+    "id": "okta-app-00103",
+    "label": "StreamCloud-103",
+    "status": "ACTIVE",
+    "license_tier": "T2_engineering",
+    "license_seat_count": 187,
+    "annual_cost_per_seat_usd": 240,
+    "created": "2025-03-04"
+  },
+  {
+    "id": "okta-app-00104",
+    "label": "BeaconLab-104",
+    "status": "ACTIVE",
+    "license_tier": "T3_sales_marketing",
+    "license_seat_count": 80,
+    "annual_cost_per_seat_usd": 1800,
+    "created": "2021-11-22"
+  },
+  {
+    "id": "okta-app-00105",
+    "label": "DataSyncCloud-105",
+    "status": "ACTIVE",
+    "license_tier": "T1_collaboration",
+    "license_seat_count": 307,
+    "annual_cost_per_seat_usd": 96,
+    "created": "2024-03-27"
+  },
+  {
+    "id": "okta-app-00106",
+    "label": "StreamApp-106",
+    "status": "ACTIVE",
+    "license_tier": "T6_storage_data",
+    "license_seat_count": 193,
+    "annual_cost_per_seat_usd": 600,
+    "created": "2023-09-29"
+  },
+  {
+    "id": "okta-app-00107",
+    "label": "LoopApp-107",
+    "status": "ACTIVE",
+    "license_tier": "T4_hr_finance",
+    "license_seat_count": 59,
+    "annual_cost_per_seat_usd": 144,
+    "created": "2025-05-24"
+  },
+  {
+    "id": "okta-app-00108",
+    "label": "AtlasOps-108",
+    "status": "ACTIVE",
+    "license_tier": "T4_hr_finance",
+    "license_seat_count": 70,
+    "annual_cost_per_seat_usd": 144,
+    "created": "2024-01-18"
+  },
+  {
+    "id": "okta-app-00109",
+    "label": "VertexLab-109",
+    "status": "ACTIVE",
+    "license_tier": "T4_hr_finance",
+    "license_seat_count": 28,
+    "annual_cost_per_seat_usd": 144,
+    "created": "2022-04-11"
+  },
+  {
+    "id": "okta-app-00110",
+    "label": "VelocitySuite-110",
+    "status": "ACTIVE",
+    "license_tier": "T1_collaboration",
+    "license_seat_count": 421,
+    "annual_cost_per_seat_usd": 96,
+    "created": "2025-01-22"
+  },
+  {
+    "id": "okta-app-00111",
+    "label": "CascadeIO-111",
+    "status": "ACTIVE",
+    "license_tier": "T5_security",
+    "license_seat_count": 389,
+    "annual_cost_per_seat_usd": 60,
+    "created": "2025-03-21"
+  },
+  {
+    "id": "okta-app-00112",
+    "label": "PivotPlatform-112",
+    "status": "ACTIVE",
+    "license_tier": "T3_sales_marketing",
+    "license_seat_count": 141,
+    "annual_cost_per_seat_usd": 1800,
+    "created": "2022-06-09"
+  },
+  {
+    "id": "okta-app-00113",
+    "label": "ConduitAI-113",
+    "status": "ACTIVE",
+    "license_tier": "T7_support",
+    "license_seat_count": 38,
+    "annual_cost_per_seat_usd": 1200,
+    "created": "2025-04-05"
+  },
+  {
+    "id": "okta-app-00114",
+    "label": "PivotAI-114",
+    "status": "ACTIVE",
+    "license_tier": "T1_collaboration",
+    "license_seat_count": 700,
+    "annual_cost_per_seat_usd": 96,
+    "created": "2023-09-21"
+  },
+  {
+    "id": "okta-app-00115",
+    "label": "AtlasLab-115",
+    "status": "ACTIVE",
+    "license_tier": "T2_engineering",
+    "license_seat_count": 185,
+    "annual_cost_per_seat_usd": 240,
+    "created": "2025-01-10"
+  },
+  {
+    "id": "okta-app-00116",
+    "label": "PivotOps-116",
+    "status": "ACTIVE",
+    "license_tier": "T4_hr_finance",
+    "license_seat_count": 76,
+    "annual_cost_per_seat_usd": 144,
+    "created": "2024-03-21"
+  },
+  {
+    "id": "okta-app-00117",
+    "label": "VertexAI-117",
+    "status": "ACTIVE",
+    "license_tier": "T3_sales_marketing",
+    "license_seat_count": 29,
+    "annual_cost_per_seat_usd": 1800,
+    "created": "2025-03-12"
+  },
+  {
+    "id": "okta-app-00118",
+    "label": "LoopIO-118",
+    "status": "ACTIVE",
+    "license_tier": "T2_engineering",
+    "license_seat_count": 76,
+    "annual_cost_per_seat_usd": 240,
+    "created": "2025-01-02"
+  },
+  {
+    "id": "okta-app-00119",
+    "label": "PivotSuite-119",
+    "status": "ACTIVE",
+    "license_tier": "T1_collaboration",
+    "license_seat_count": 545,
+    "annual_cost_per_seat_usd": 96,
+    "created": "2023-02-25"
+  },
+  {
+    "id": "okta-app-00120",
+    "label": "TrailHub-120",
+    "status": "ACTIVE",
+    "license_tier": "T5_security",
+    "license_seat_count": 127,
+    "annual_cost_per_seat_usd": 60,
+    "created": "2024-01-05"
+  },
+  {
+    "id": "okta-app-00121",
+    "label": "BridgeOps-121",
+    "status": "ACTIVE",
+    "license_tier": "T1_collaboration",
+    "license_seat_count": 343,
+    "annual_cost_per_seat_usd": 96,
+    "created": "2023-01-20"
+  },
+  {
+    "id": "okta-app-00122",
+    "label": "MeshSuite-122",
+    "status": "ACTIVE",
+    "license_tier": "T4_hr_finance",
+    "license_seat_count": 79,
+    "annual_cost_per_seat_usd": 144,
+    "created": "2022-07-29"
+  },
+  {
+    "id": "okta-app-00123",
+    "label": "TrailLab-123",
+    "status": "ACTIVE",
+    "license_tier": "T7_support",
+    "license_seat_count": 17,
+    "annual_cost_per_seat_usd": 1200,
+    "created": "2022-07-23"
+  },
+  {
+    "id": "okta-app-00124",
+    "label": "ConduitHub-124",
+    "status": "ACTIVE",
+    "license_tier": "T2_engineering",
+    "license_seat_count": 229,
+    "annual_cost_per_seat_usd": 240,
+    "created": "2024-02-10"
+  },
+  {
+    "id": "okta-app-00125",
+    "label": "LoopIO-125",
+    "status": "ACTIVE",
+    "license_tier": "T3_sales_marketing",
+    "license_seat_count": 90,
+    "annual_cost_per_seat_usd": 1800,
+    "created": "2024-11-17"
+  },
+  {
+    "id": "okta-app-00126",
+    "label": "DataSyncOps-126",
+    "status": "ACTIVE",
+    "license_tier": "T2_engineering",
+    "license_seat_count": 234,
+    "annual_cost_per_seat_usd": 240,
+    "created": "2023-09-02"
+  },
+  {
+    "id": "okta-app-00127",
+    "label": "TrailLab-127",
+    "status": "ACTIVE",
+    "license_tier": "T2_engineering",
+    "license_seat_count": 180,
+    "annual_cost_per_seat_usd": 240,
+    "created": "2022-11-16"
+  },
+  {
+    "id": "okta-app-00128",
+    "label": "WorkflowCoSuite-128",
+    "status": "ACTIVE",
+    "license_tier": "T1_collaboration",
+    "license_seat_count": 370,
+    "annual_cost_per_seat_usd": 96,
+    "created": "2024-12-30"
+  },
+  {
+    "id": "okta-app-00129",
+    "label": "InsightsOps-129",
+    "status": "ACTIVE",
+    "license_tier": "T1_collaboration",
+    "license_seat_count": 247,
+    "annual_cost_per_seat_usd": 96,
+    "created": "2022-03-06"
+  },
+  {
+    "id": "okta-app-00130",
+    "label": "WorkflowCoLab-130",
+    "status": "ACTIVE",
+    "license_tier": "T6_storage_data",
+    "license_seat_count": 128,
+    "annual_cost_per_seat_usd": 600,
+    "created": "2022-07-30"
+  },
+  {
+    "id": "okta-app-00131",
+    "label": "VertexLab-131",
+    "status": "ACTIVE",
+    "license_tier": "T1_collaboration",
+    "license_seat_count": 351,
+    "annual_cost_per_seat_usd": 96,
+    "created": "2023-04-16"
+  },
+  {
+    "id": "okta-app-00132",
+    "label": "MeshPlatform-132",
+    "status": "ACTIVE",
+    "license_tier": "T5_security",
+    "license_seat_count": 155,
+    "annual_cost_per_seat_usd": 60,
+    "created": "2023-06-20"
+  },
+  {
+    "id": "okta-app-00133",
+    "label": "AtlasAI-133",
+    "status": "ACTIVE",
+    "license_tier": "T4_hr_finance",
+    "license_seat_count": 46,
+    "annual_cost_per_seat_usd": 144,
+    "created": "2023-05-14"
+  },
+  {
+    "id": "okta-app-00134",
+    "label": "AtlasAI-134",
+    "status": "ACTIVE",
+    "license_tier": "T2_engineering",
+    "license_seat_count": 236,
+    "annual_cost_per_seat_usd": 240,
+    "created": "2023-12-19"
+  },
+  {
+    "id": "okta-app-00135",
+    "label": "NimbusOps-135",
+    "status": "ACTIVE",
+    "license_tier": "T6_storage_data",
+    "license_seat_count": 101,
+    "annual_cost_per_seat_usd": 600,
+    "created": "2023-03-17"
+  },
+  {
+    "id": "okta-app-00136",
+    "label": "WorkflowCoCloud-136",
+    "status": "ACTIVE",
+    "license_tier": "T2_engineering",
+    "license_seat_count": 82,
+    "annual_cost_per_seat_usd": 240,
+    "created": "2022-09-14"
+  },
+  {
+    "id": "okta-app-00137",
+    "label": "VertexApp-137",
+    "status": "ACTIVE",
+    "license_tier": "T3_sales_marketing",
+    "license_seat_count": 48,
+    "annual_cost_per_seat_usd": 1800,
+    "created": "2022-09-12"
+  },
+  {
+    "id": "okta-app-00138",
+    "label": "CatalystOps-138",
+    "status": "ACTIVE",
+    "license_tier": "T2_engineering",
+    "license_seat_count": 174,
+    "annual_cost_per_seat_usd": 240,
+    "created": "2024-05-16"
+  },
+  {
+    "id": "okta-app-00139",
+    "label": "PulseSuite-139",
+    "status": "ACTIVE",
+    "license_tier": "T5_security",
+    "license_seat_count": 599,
+    "annual_cost_per_seat_usd": 60,
+    "created": "2024-01-25"
+  },
+  {
+    "id": "okta-app-00140",
+    "label": "LoopSuite-140",
+    "status": "ACTIVE",
+    "license_tier": "T6_storage_data",
+    "license_seat_count": 85,
+    "annual_cost_per_seat_usd": 600,
+    "created": "2022-07-23"
+  },
+  {
+    "id": "okta-app-00141",
+    "label": "VertexHub-141",
+    "status": "ACTIVE",
+    "license_tier": "T5_security",
+    "license_seat_count": 151,
+    "annual_cost_per_seat_usd": 60,
+    "created": "2022-10-20"
+  },
+  {
+    "id": "okta-app-00142",
+    "label": "LoopCloud-142",
+    "status": "ACTIVE",
+    "license_tier": "T5_security",
+    "license_seat_count": 199,
+    "annual_cost_per_seat_usd": 60,
+    "created": "2022-12-30"
+  },
+  {
+    "id": "okta-app-00143",
+    "label": "CatalystIO-143",
+    "status": "ACTIVE",
+    "license_tier": "T1_collaboration",
+    "license_seat_count": 359,
+    "annual_cost_per_seat_usd": 96,
+    "created": "2024-08-31"
+  },
+  {
+    "id": "okta-app-00144",
+    "label": "PulseAI-144",
+    "status": "ACTIVE",
+    "license_tier": "T4_hr_finance",
+    "license_seat_count": 39,
+    "annual_cost_per_seat_usd": 144,
+    "created": "2022-03-07"
+  },
+  {
+    "id": "okta-app-00145",
+    "label": "PulseStack-145",
+    "status": "ACTIVE",
+    "license_tier": "T5_security",
+    "license_seat_count": 259,
+    "annual_cost_per_seat_usd": 60,
+    "created": "2023-09-03"
+  },
+  {
+    "id": "okta-app-00146",
+    "label": "HelixHub-146",
+    "status": "ACTIVE",
+    "license_tier": "T5_security",
+    "license_seat_count": 577,
+    "annual_cost_per_seat_usd": 60,
+    "created": "2022-04-26"
+  },
+  {
+    "id": "okta-app-00147",
+    "label": "CatalystStack-147",
+    "status": "ACTIVE",
+    "license_tier": "T7_support",
+    "license_seat_count": 28,
+    "annual_cost_per_seat_usd": 1200,
+    "created": "2022-12-23"
+  },
+  {
+    "id": "okta-app-00148",
+    "label": "InsightsSuite-148",
+    "status": "ACTIVE",
+    "license_tier": "T5_security",
+    "license_seat_count": 373,
+    "annual_cost_per_seat_usd": 60,
+    "created": "2022-07-20"
+  },
+  {
+    "id": "okta-app-00149",
+    "label": "PulseCloud-149",
+    "status": "ACTIVE",
+    "license_tier": "T7_support",
+    "license_seat_count": 57,
+    "annual_cost_per_seat_usd": 1200,
+    "created": "2023-08-02"
+  },
+  {
+    "id": "okta-app-00150",
+    "label": "BeaconLab-150",
+    "status": "ACTIVE",
+    "license_tier": "T7_support",
+    "license_seat_count": 53,
+    "annual_cost_per_seat_usd": 1200,
+    "created": "2022-07-10"
+  },
+  {
+    "id": "okta-app-00151",
+    "label": "BeaconLab-151",
+    "status": "ACTIVE",
+    "license_tier": "T6_storage_data",
+    "license_seat_count": 30,
+    "annual_cost_per_seat_usd": 600,
+    "created": "2022-01-29"
+  },
+  {
+    "id": "okta-app-00152",
+    "label": "InsightsPlatform-152",
+    "status": "ACTIVE",
+    "license_tier": "T6_storage_data",
+    "license_seat_count": 110,
+    "annual_cost_per_seat_usd": 600,
+    "created": "2023-04-26"
+  },
+  {
+    "id": "okta-app-00153",
+    "label": "PulseStack-153",
+    "status": "ACTIVE",
+    "license_tier": "T5_security",
+    "license_seat_count": 328,
+    "annual_cost_per_seat_usd": 60,
+    "created": "2022-10-09"
+  },
+  {
+    "id": "okta-app-00154",
+    "label": "StreamIO-154",
+    "status": "ACTIVE",
+    "license_tier": "T7_support",
+    "license_seat_count": 33,
+    "annual_cost_per_seat_usd": 1200,
+    "created": "2022-07-29"
+  },
+  {
+    "id": "okta-app-00155",
+    "label": "AtlasSuite-155",
+    "status": "ACTIVE",
+    "license_tier": "T7_support",
+    "license_seat_count": 58,
+    "annual_cost_per_seat_usd": 1200,
+    "created": "2022-06-19"
+  },
+  {
+    "id": "okta-app-00156",
+    "label": "DataSyncSuite-156",
+    "status": "ACTIVE",
+    "license_tier": "T6_storage_data",
+    "license_seat_count": 76,
+    "annual_cost_per_seat_usd": 600,
+    "created": "2024-02-22"
+  },
+  {
+    "id": "okta-app-00157",
+    "label": "DataSyncIO-157",
+    "status": "ACTIVE",
+    "license_tier": "T3_sales_marketing",
+    "license_seat_count": 83,
+    "annual_cost_per_seat_usd": 1800,
+    "created": "2023-11-22"
+  },
+  {
+    "id": "okta-app-00158",
+    "label": "DataSyncStack-158",
+    "status": "ACTIVE",
+    "license_tier": "T3_sales_marketing",
+    "license_seat_count": 45,
+    "annual_cost_per_seat_usd": 1800,
+    "created": "2024-05-06"
+  },
+  {
+    "id": "okta-app-00159",
+    "label": "HelixHub-159",
+    "status": "ACTIVE",
+    "license_tier": "T6_storage_data",
+    "license_seat_count": 37,
+    "annual_cost_per_seat_usd": 600,
+    "created": "2024-03-01"
+  },
+  {
+    "id": "okta-app-00160",
+    "label": "BridgeStack-160",
+    "status": "ACTIVE",
+    "license_tier": "T4_hr_finance",
+    "license_seat_count": 72,
+    "annual_cost_per_seat_usd": 144,
+    "created": "2023-07-18"
+  },
+  {
+    "id": "okta-app-00161",
+    "label": "WorkflowCoCloud-161",
+    "status": "ACTIVE",
+    "license_tier": "T2_engineering",
+    "license_seat_count": 98,
+    "annual_cost_per_seat_usd": 240,
+    "created": "2022-05-15"
+  },
+  {
+    "id": "okta-app-00162",
+    "label": "MeshPlatform-162",
+    "status": "ACTIVE",
+    "license_tier": "T4_hr_finance",
+    "license_seat_count": 10,
+    "annual_cost_per_seat_usd": 144,
+    "created": "2022-10-02"
+  },
+  {
+    "id": "okta-app-00163",
+    "label": "CascadeOps-163",
+    "status": "ACTIVE",
+    "license_tier": "T4_hr_finance",
+    "license_seat_count": 56,
+    "annual_cost_per_seat_usd": 144,
+    "created": "2024-08-27"
+  },
+  {
+    "id": "okta-app-00164",
+    "label": "InsightsOps-164",
+    "status": "ACTIVE",
+    "license_tier": "T1_collaboration",
+    "license_seat_count": 503,
+    "annual_cost_per_seat_usd": 96,
+    "created": "2023-07-04"
+  },
+  {
+    "id": "okta-app-00165",
+    "label": "BeaconAI-165",
+    "status": "ACTIVE",
+    "license_tier": "T2_engineering",
+    "license_seat_count": 152,
+    "annual_cost_per_seat_usd": 240,
+    "created": "2022-12-14"
+  },
+  {
+    "id": "okta-app-00166",
+    "label": "HelixOps-166",
+    "status": "ACTIVE",
+    "license_tier": "T1_collaboration",
+    "license_seat_count": 617,
+    "annual_cost_per_seat_usd": 96,
+    "created": "2025-04-25"
+  },
+  {
+    "id": "okta-app-00167",
+    "label": "StreamIO-167",
+    "status": "ACTIVE",
+    "license_tier": "T4_hr_finance",
+    "license_seat_count": 68,
+    "annual_cost_per_seat_usd": 144,
+    "created": "2024-07-27"
+  },
+  {
+    "id": "okta-app-00168",
+    "label": "VertexOps-168",
+    "status": "ACTIVE",
+    "license_tier": "T1_collaboration",
+    "license_seat_count": 239,
+    "annual_cost_per_seat_usd": 96,
+    "created": "2023-06-24"
+  },
+  {
+    "id": "okta-app-00169",
+    "label": "PulseSuite-169",
+    "status": "ACTIVE",
+    "license_tier": "T5_security",
+    "license_seat_count": 418,
+    "annual_cost_per_seat_usd": 60,
+    "created": "2025-05-26"
+  },
+  {
+    "id": "okta-app-00170",
+    "label": "HelixOps-170",
+    "status": "ACTIVE",
+    "license_tier": "T5_security",
+    "license_seat_count": 440,
+    "annual_cost_per_seat_usd": 60,
+    "created": "2023-11-10"
+  },
+  {
+    "id": "okta-app-00171",
+    "label": "MeshHub-171",
+    "status": "ACTIVE",
+    "license_tier": "T2_engineering",
+    "license_seat_count": 147,
+    "annual_cost_per_seat_usd": 240,
+    "created": "2023-06-20"
+  },
+  {
+    "id": "okta-app-00172",
+    "label": "CatalystIO-172",
+    "status": "ACTIVE",
+    "license_tier": "T7_support",
+    "license_seat_count": 17,
+    "annual_cost_per_seat_usd": 1200,
+    "created": "2024-11-18"
+  },
+  {
+    "id": "okta-app-00173",
+    "label": "NimbusAI-173",
+    "status": "ACTIVE",
+    "license_tier": "T5_security",
+    "license_seat_count": 520,
+    "annual_cost_per_seat_usd": 60,
+    "created": "2024-08-29"
+  },
+  {
+    "id": "okta-app-00174",
+    "label": "CascadeCloud-174",
+    "status": "ACTIVE",
+    "license_tier": "T6_storage_data",
+    "license_seat_count": 53,
+    "annual_cost_per_seat_usd": 600,
+    "created": "2023-12-12"
+  },
+  {
+    "id": "okta-app-00175",
+    "label": "BridgeLab-175",
+    "status": "ACTIVE",
+    "license_tier": "T1_collaboration",
+    "license_seat_count": 638,
+    "annual_cost_per_seat_usd": 96,
+    "created": "2024-07-19"
+  },
+  {
+    "id": "okta-app-00176",
+    "label": "BeaconOps-176",
+    "status": "ACTIVE",
+    "license_tier": "T1_collaboration",
+    "license_seat_count": 433,
+    "annual_cost_per_seat_usd": 96,
+    "created": "2023-05-02"
+  },
+  {
+    "id": "okta-app-00177",
+    "label": "PivotApp-177",
+    "status": "ACTIVE",
+    "license_tier": "T7_support",
+    "license_seat_count": 22,
+    "annual_cost_per_seat_usd": 1200,
+    "created": "2023-02-23"
+  },
+  {
+    "id": "okta-app-00178",
+    "label": "WorkflowCoHub-178",
+    "status": "ACTIVE",
+    "license_tier": "T5_security",
+    "license_seat_count": 548,
+    "annual_cost_per_seat_usd": 60,
+    "created": "2025-01-14"
+  },
+  {
+    "id": "okta-app-00179",
+    "label": "ConduitHub-179",
+    "status": "ACTIVE",
+    "license_tier": "T7_support",
+    "license_seat_count": 38,
+    "annual_cost_per_seat_usd": 1200,
+    "created": "2023-04-20"
+  },
+  {
+    "id": "okta-app-00180",
+    "label": "ConduitLab-180",
+    "status": "ACTIVE",
+    "license_tier": "T7_support",
+    "license_seat_count": 16,
+    "annual_cost_per_seat_usd": 1200,
+    "created": "2024-07-12"
+  },
+  {
+    "id": "okta-app-00181",
+    "label": "TrailSuite-181",
+    "status": "ACTIVE",
+    "license_tier": "T4_hr_finance",
+    "license_seat_count": 54,
+    "annual_cost_per_seat_usd": 144,
+    "created": "2024-11-16"
+  },
+  {
+    "id": "okta-app-00182",
+    "label": "CatalystApp-182",
+    "status": "ACTIVE",
+    "license_tier": "T1_collaboration",
+    "license_seat_count": 721,
+    "annual_cost_per_seat_usd": 96,
+    "created": "2023-11-05"
+  },
+  {
+    "id": "okta-app-00183",
+    "label": "InsightsApp-183",
+    "status": "ACTIVE",
+    "license_tier": "T6_storage_data",
+    "license_seat_count": 83,
+    "annual_cost_per_seat_usd": 600,
+    "created": "2025-05-22"
+  },
+  {
+    "id": "okta-app-00184",
+    "label": "InsightsOps-184",
+    "status": "ACTIVE",
+    "license_tier": "T3_sales_marketing",
+    "license_seat_count": 41,
+    "annual_cost_per_seat_usd": 1800,
+    "created": "2024-10-01"
+  },
+  {
+    "id": "okta-app-00185",
+    "label": "NimbusLab-185",
+    "status": "ACTIVE",
+    "license_tier": "T4_hr_finance",
+    "license_seat_count": 57,
+    "annual_cost_per_seat_usd": 144,
+    "created": "2024-04-26"
+  },
+  {
+    "id": "okta-app-00186",
+    "label": "BridgeCloud-186",
+    "status": "ACTIVE",
+    "license_tier": "T5_security",
+    "license_seat_count": 326,
+    "annual_cost_per_seat_usd": 60,
+    "created": "2022-09-01"
+  },
+  {
+    "id": "okta-app-00187",
+    "label": "StreamSuite-187",
+    "status": "ACTIVE",
+    "license_tier": "T7_support",
+    "license_seat_count": 58,
+    "annual_cost_per_seat_usd": 1200,
+    "created": "2023-05-31"
+  },
+  {
+    "id": "okta-app-00188",
+    "label": "HelixApp-188",
+    "status": "ACTIVE",
+    "license_tier": "T4_hr_finance",
+    "license_seat_count": 39,
+    "annual_cost_per_seat_usd": 144,
+    "created": "2022-02-20"
+  },
+  {
+    "id": "okta-app-00189",
+    "label": "LoopOps-189",
+    "status": "ACTIVE",
+    "license_tier": "T3_sales_marketing",
+    "license_seat_count": 54,
+    "annual_cost_per_seat_usd": 1800,
+    "created": "2022-05-29"
+  },
+  {
+    "id": "okta-app-00190",
+    "label": "DataSyncIO-190",
+    "status": "ACTIVE",
+    "license_tier": "T1_collaboration",
+    "license_seat_count": 296,
+    "annual_cost_per_seat_usd": 96,
+    "created": "2023-07-01"
+  },
+  {
+    "id": "okta-app-00191",
+    "label": "CascadePlatform-191",
+    "status": "ACTIVE",
+    "license_tier": "T6_storage_data",
+    "license_seat_count": 90,
+    "annual_cost_per_seat_usd": 600,
+    "created": "2025-06-18"
+  },
+  {
+    "id": "okta-app-00192",
+    "label": "DataSyncLab-192",
+    "status": "ACTIVE",
+    "license_tier": "T3_sales_marketing",
+    "license_seat_count": 102,
+    "annual_cost_per_seat_usd": 1800,
+    "created": "2025-05-16"
+  },
+  {
+    "id": "okta-app-00193",
+    "label": "BridgeIO-193",
+    "status": "ACTIVE",
+    "license_tier": "T2_engineering",
+    "license_seat_count": 150,
+    "annual_cost_per_seat_usd": 240,
+    "created": "2025-02-25"
+  },
+  {
+    "id": "okta-app-00194",
+    "label": "VertexPlatform-194",
+    "status": "ACTIVE",
+    "license_tier": "T3_sales_marketing",
+    "license_seat_count": 44,
+    "annual_cost_per_seat_usd": 1800,
+    "created": "2025-06-21"
+  },
+  {
+    "id": "okta-app-00195",
+    "label": "BeaconPlatform-195",
+    "status": "ACTIVE",
+    "license_tier": "T3_sales_marketing",
+    "license_seat_count": 93,
+    "annual_cost_per_seat_usd": 1800,
+    "created": "2025-03-15"
+  },
+  {
+    "id": "okta-app-00196",
+    "label": "CatalystSuite-196",
+    "status": "ACTIVE",
+    "license_tier": "T7_support",
+    "license_seat_count": 17,
+    "annual_cost_per_seat_usd": 1200,
+    "created": "2023-06-30"
+  },
+  {
+    "id": "okta-app-00197",
+    "label": "VelocityStack-197",
+    "status": "ACTIVE",
+    "license_tier": "T2_engineering",
+    "license_seat_count": 58,
+    "annual_cost_per_seat_usd": 240,
+    "created": "2025-04-23"
+  },
+  {
+    "id": "okta-app-00198",
+    "label": "VertexIO-198",
+    "status": "ACTIVE",
+    "license_tier": "T5_security",
+    "license_seat_count": 520,
+    "annual_cost_per_seat_usd": 60,
+    "created": "2023-09-27"
+  },
+  {
+    "id": "okta-app-00199",
+    "label": "WorkflowCoIO-199",
+    "status": "ACTIVE",
+    "license_tier": "T3_sales_marketing",
+    "license_seat_count": 127,
+    "annual_cost_per_seat_usd": 1800,
+    "created": "2022-08-23"
+  }
+]

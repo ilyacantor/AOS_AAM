@@ -1,0 +1,122 @@
+{
+  "scenario": "finops_saas_spending",
+  "data_dir": "tests/fixtures/harness/finops_saas_data",
+  "sample_size_per_pipe": 2000,
+  "vendors": {
+    "workato": {
+      "health_state": "reachable",
+      "auth_required": true,
+      "recipes": [
+        {
+          "id": "wk-netsuite-vendors",
+          "name": "NetSuite -> AOS Vendor Master Sync",
+          "active": true,
+          "source_system": "NetSuite",
+          "target_system": "AOS",
+          "trigger": "external_event",
+          "records_file": "vendors_netsuite.json",
+          "key_field": "vendor_id",
+          "domain": "vendor",
+          "schema": [
+            {"name": "internal_id", "type": "number"},
+            {"name": "vendor_id", "type": "string", "is_key": true},
+            {"name": "vendor_name", "type": "string"},
+            {"name": "category", "type": "string"},
+            {"name": "currency", "type": "string"},
+            {"name": "subsidiary", "type": "string"},
+            {"name": "is_1099", "type": "boolean"}
+          ]
+        },
+        {
+          "id": "wk-netsuite-ap-invoices",
+          "name": "NetSuite -> AOS AP Invoice Stream",
+          "active": true,
+          "source_system": "NetSuite",
+          "target_system": "AOS",
+          "trigger": "external_event",
+          "records_file": "ap_invoices_netsuite.json",
+          "key_field": "bill_no",
+          "domain": "ap_invoice",
+          "sample_size": 4800,
+          "schema": [
+            {"name": "internal_id", "type": "number"},
+            {"name": "bill_no", "type": "string", "is_key": true},
+            {"name": "vendor_id", "type": "string"},
+            {"name": "vendor_name", "type": "string"},
+            {"name": "due_date", "type": "date"},
+            {"name": "amount", "type": "number"},
+            {"name": "currency", "type": "string"},
+            {"name": "status", "type": "string"},
+            {"name": "subsidiary", "type": "string"},
+            {"name": "posting_period", "type": "string"}
+          ]
+        }
+      ]
+    },
+    "boomi": {
+      "health_state": "reachable",
+      "auth_required": true,
+      "processes": [
+        {
+          "id": "bm-okta-apps",
+          "name": "Okta -> AOS App Catalog Sync",
+          "active": true,
+          "source_system": "Okta",
+          "target_system": "AOS",
+          "trigger": "external_event",
+          "records_file": "apps_okta.json",
+          "key_field": "id",
+          "domain": "saas_app",
+          "schema": [
+            {"name": "id", "type": "string", "is_key": true},
+            {"name": "label", "type": "string"},
+            {"name": "status", "type": "string"},
+            {"name": "license_tier", "type": "string"},
+            {"name": "license_seat_count", "type": "number"},
+            {"name": "annual_cost_per_seat_usd", "type": "number"},
+            {"name": "created", "type": "date"}
+          ]
+        },
+        {
+          "id": "bm-okta-users",
+          "name": "Okta -> AOS User Directory Sync",
+          "active": true,
+          "source_system": "Okta",
+          "target_system": "AOS",
+          "trigger": "external_event",
+          "records_file": "users_okta.json",
+          "key_field": "id",
+          "domain": "user",
+          "schema": [
+            {"name": "id", "type": "string", "is_key": true},
+            {"name": "profile_email", "type": "string"},
+            {"name": "profile_first_name", "type": "string"},
+            {"name": "profile_last_name", "type": "string"},
+            {"name": "status", "type": "string"},
+            {"name": "department", "type": "string"}
+          ]
+        },
+        {
+          "id": "bm-okta-assignments",
+          "name": "Okta -> AOS App Assignment Telemetry",
+          "active": true,
+          "source_system": "Okta",
+          "target_system": "AOS",
+          "trigger": "external_event",
+          "records_file": "assignments_okta.json",
+          "key_field": "id",
+          "domain": "assignment",
+          "sample_size": 30000,
+          "schema": [
+            {"name": "id", "type": "string", "is_key": true},
+            {"name": "user_id", "type": "string"},
+            {"name": "app_id", "type": "string"},
+            {"name": "assignment_date", "type": "date"},
+            {"name": "last_login", "type": "date"},
+            {"name": "active_in_last_30d", "type": "boolean"}
+          ]
+        }
+      ]
+    }
+  }
+}

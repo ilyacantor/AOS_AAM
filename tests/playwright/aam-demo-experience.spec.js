@@ -1,108 +1,99 @@
-// Operator-visible outcome: a FinOps user opens /ask.html on port 3001, clicks Ask, and the FinOps page renders a 5-row combined Q3 AR aging table with non-zero workato + boomi + combined columns, a vendor consolidation table with at least one row, and a pending-review match at 71%. From the same answer page, opening /ui/demo/consumer-view on port 8002 renders the same totals; the Pipe Catalog lists 8 pipes (4 NetSuite + 4 Sage); the Semantic Mapping page surfaces a 78%-confidence field that becomes 99% after the operator clicks Confirm; the Identity Resolution page shows one pending-review row that empties after the operator clicks Approve.
+// Operator-visible outcome: a FinOps user opens /ask.html on port 3001, clicks Ask, and the FinOps page renders the SaaS-utilization answer with at least 10 ranked subscription rows, a non-zero total projected savings amount in $ and a pending-review match at 71% (LinkedIn Sales Navigator ↔ LinkedIn Sales Nav.). From AAM directly: /ui/demo/consumer-view renders the same answer with both NetSuite and Okta drill buttons that load triple-detail rows; /ui/demo/pipe-catalog lists 5 pipes (2 NetSuite + 3 Okta); /ui/demo/semantic-mapping shows the NetSuite AP-invoice "amount" field at 78% confidence that flips to 99% after Confirm; /ui/demo/identity-resolution shows one pending-review row at 71% that empties after Approve.
 // @ts-check
 const { test, expect } = require('@playwright/test');
 
 const AAM_URL = process.env.AAM_URL || 'http://localhost:8002';
 const FINOPS_URL = process.env.FINOPS_URL || 'http://localhost:3001';
 const STUB_URL = process.env.STUB_URL || 'http://127.0.0.1:8902';
-const Q3_QUESTION = 'Show me combined Q3 AR aging across both entities, with vendors that appear in both books flagged for consolidation';
+const Q = 'Show me SaaS subscriptions where actual utilization is below 50% of paid licenses, ranked by potential annual savings';
 
 test.beforeEach(async ({ request }) => {
-  // Hermetic per-test starting state: load combined_financials scenario in the
-  // stub (read-only on PG state) and clear the demo UI's in-memory approvals.
-  // Both endpoints are setup, not the action under test.
-  await request.post(`${STUB_URL}/stub/load_scenario`, { data: { scenario: 'combined_financials' } });
+  await request.post(`${STUB_URL}/stub/load_scenario`, { data: { scenario: 'finops_saas_spending' } });
   await request.post(`${AAM_URL}/api/aam/demo/reset`, { data: {} });
 });
 
-test('FinOps agent answers the combined Q3 AR aging question with provenance', async ({ page }) => {
+test('FinOps agent answers the SaaS utilization question with savings ranking', async ({ page }) => {
   await page.goto(`${FINOPS_URL}/ask.html?aos=${encodeURIComponent(AAM_URL)}`);
   await page.waitForLoadState('domcontentloaded');
 
-  const input = page.locator('[data-testid="finops-question-input"]');
-  await expect(input).toHaveValue(Q3_QUESTION);
-
+  await expect(page.locator('[data-testid="finops-question-input"]')).toHaveValue(Q);
   await page.locator('[data-testid="finops-btn-ask"]').click();
 
-  // The answer table renders 5 buckets with non-zero combined totals.
-  const answerTable = page.locator('[data-testid="finops-answer-table"]');
-  await expect(answerTable.locator('tbody tr[data-testid="finops-answer-row"]')).toHaveCount(5, { timeout: 20000 });
+  // At least 10 ranked subscription rows render (the dataset has 25 under-used).
+  const rows = page.locator('[data-testid="finops-answer-row"]');
+  await expect(rows.nth(9)).toBeAttached({ timeout: 20000 });
 
-  // Combined totals are non-zero strings starting with '$'.
-  const combinedCells = answerTable.locator('[data-testid="finops-combined-cell"]');
-  await expect(combinedCells.first()).toContainText('$');
-  // Sum of combined cells > 0 — pull text, parse, assert.
-  const combinedTexts = await combinedCells.allInnerTexts();
-  const totalCombined = combinedTexts.reduce((acc, t) => acc + Number(t.replace(/[^0-9.-]/g, '')), 0);
-  expect(totalCombined).toBeGreaterThan(0);
+  // Top row shows non-trivial savings ($ + comma).
+  await expect(rows.first().locator('[data-testid="finops-savings"]')).toContainText('$');
+  await expect(rows.first().locator('[data-testid="finops-savings"]')).toContainText(',');
 
-  // Vendor consolidation table renders with at least one auto-accepted row.
-  const vendorRows = page.locator('[data-testid="finops-vendor-row"]');
-  await expect(vendorRows.first()).toBeAttached();
-  const vendorCount = await vendorRows.count();
-  expect(vendorCount).toBeGreaterThan(0);
+  // Total savings non-empty ($) — pulled from the totals bar.
+  await expect(page.locator('[data-testid="finops-total-savings"]')).toContainText('$');
+  const savingsText = await page.locator('[data-testid="finops-total-savings"]').textContent();
+  expect(Number((savingsText || '').replace(/[^0-9.-]/g, ''))).toBeGreaterThan(100000);
 
-  // The pending-review match at 71% appears.
+  // Pending-review match at 71% (LinkedIn Sales Navigator ↔ LinkedIn Sales Nav.)
   await expect(page.locator('[data-testid="finops-review-confidence"]')).toContainText('71%');
 });
 
-test('Consumer View on AAM shows same answer with provenance drill-through', async ({ page }) => {
+test('Consumer View on AAM renders the same answer with drill-through to source triples', async ({ page }) => {
   await page.goto(`${AAM_URL}/ui/demo/consumer-view`);
   await page.waitForLoadState('domcontentloaded');
 
-  // Auto-fired ask renders the answer table.
+  // Answer table renders at least 10 rows.
   await expect(page.locator('[data-testid="answer-table"]')).toBeAttached({ timeout: 20000 });
-  await expect(page.locator('[data-testid="answer-bucket"]').first()).toContainText('Current');
+  await expect(page.locator('[data-testid="answer-row"]').nth(9)).toBeAttached();
 
-  // The text answer includes the dollar amounts.
-  await expect(page.locator('[data-testid="answer-text"]')).toContainText('AR Aging');
+  // Answer text mentions SaaS.
+  await expect(page.locator('[data-testid="answer-text"]')).toContainText('SaaS');
 
-  // Drill-through tables render.
-  await expect(page.locator('[data-testid="drill-workato"]')).toBeAttached();
-  await expect(page.locator('[data-testid="drill-boomi"]')).toBeAttached();
+  // Drill table renders both NetSuite and Okta buttons per subscription row.
+  const netsuiteButtons = page.locator('[data-testid="btn-drill-netsuite"]');
+  const oktaButtons = page.locator('[data-testid="btn-drill-okta"]');
+  await expect(netsuiteButtons.first()).toBeAttached({ timeout: 10000 });
+  await expect(oktaButtons.first()).toBeAttached({ timeout: 10000 });
 
-  // Operator clicks a drill row — triple detail renders for that customer+pipe.
-  const drillRow = page.locator('[data-testid="drill-row"]').first();
-  await drillRow.click();
-  await expect(page.locator('[data-testid="triple-detail-table"]')).toBeAttached({ timeout: 10000 });
-  // Triple detail has at least one source-field column populated.
+  // Operator clicks the NetSuite drill on the top row — triple detail renders.
+  // Use waitForResponse to wait for the actual provenance fetch to complete.
+  const provenancePromise = page.waitForResponse(r => r.url().includes('/api/aam/demo/provenance'));
+  await netsuiteButtons.first().click();
+  const resp = await provenancePromise;
+  expect(resp.status()).toBe(200);
+  await expect(page.locator('[data-testid="triple-detail-table"]')).toBeAttached({ timeout: 15000 });
   await expect(page.locator('[data-testid="triple-detail-row"]').first()).toBeAttached();
+  await expect(page.locator('[data-testid="triple-detail-title"]')).toContainText('NetSuite');
 });
 
-test('Pipe Catalog lists 8 demo pipes across both vendors', async ({ page }) => {
+test('Pipe Catalog lists 5 demo pipes across NetSuite + Okta', async ({ page }) => {
   await page.goto(`${AAM_URL}/ui/demo/pipe-catalog`);
   await page.waitForLoadState('domcontentloaded');
   await expect(page.locator('[data-testid="pipe-catalog-table"]')).toBeAttached();
-  await expect(page.locator('[data-testid="pipe-count"]')).toContainText('8 pipes discovered', { timeout: 10000 });
+  await expect(page.locator('[data-testid="pipe-count"]')).toContainText('5 pipes discovered', { timeout: 10000 });
 });
 
 test('Semantic Mapping surfaces 78% mid-confidence field; click promotes it to 99%', async ({ page }) => {
   await page.goto(`${AAM_URL}/ui/demo/semantic-mapping`);
   await page.waitForLoadState('domcontentloaded');
 
-  // The page renders multiple pipes' mapping cards.
   await expect(page.locator('[data-testid="mapping-pipe"]').first()).toBeAttached({ timeout: 10000 });
 
-  // The mid-confidence row is the NetSuite invoice entity_id field at 78%.
-  const midRow = page.locator('[data-testid="mapping-field-entity_id"]').nth(1);
-  await expect(midRow.locator('[data-testid="confidence-pill"]')).toContainText('78%');
+  // The mid-confidence row is on the NetSuite AP-invoice "amount" field.
+  const midRow = page.locator('[data-testid="mapping-field-amount"]');
+  await expect(midRow.locator('[data-testid="confidence-pill"]').first()).toContainText('78%');
 
-  // Operator clicks Confirm — the row promotes to 99%.
-  await midRow.locator('[data-testid="btn-approve-mapping"]').click();
-  await expect(midRow.locator('[data-testid="confidence-pill"]')).toContainText('99%', { timeout: 10000 });
+  await midRow.locator('[data-testid="btn-approve-mapping"]').first().click();
+  await expect(midRow.locator('[data-testid="confidence-pill"]').first()).toContainText('99%', { timeout: 10000 });
 });
 
 test('Identity Resolution shows one 71% review case; click empties the queue', async ({ page }) => {
   await page.goto(`${AAM_URL}/ui/demo/identity-resolution`);
   await page.waitForLoadState('domcontentloaded');
 
-  // One pending-review row with 71% confidence.
   const reviewRows = page.locator('[data-testid="review-row"]');
   await expect(reviewRows).toHaveCount(1, { timeout: 10000 });
   await expect(reviewRows.locator('[data-testid="review-confidence"]')).toContainText('71%');
-  await expect(reviewRows.locator('[data-testid="review-domain"]')).toContainText('customer');
+  await expect(reviewRows.locator('[data-testid="review-domain"]')).toContainText('saas_subscription');
 
-  // Operator approves — queue becomes empty.
   await reviewRows.locator('[data-testid="btn-approve-match"]').click();
   await expect(page.locator('[data-testid="review-empty"]')).toBeAttached({ timeout: 10000 });
 });

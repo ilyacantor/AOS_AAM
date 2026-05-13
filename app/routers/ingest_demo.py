@@ -140,7 +140,9 @@ async def run_ingest_demo(req: IngestDemoRequest) -> IngestDemoResponse:
 
         vendor_triples = 0
         for pipe, records in records_collected:
-            controller = FlowController(batch_size=max(1, len(records) or 1))
+            # Cap batch_size at 500 — larger pipes (assignment telemetry can be
+            # 20k+ records) must stay within FlowController's max_buffer.
+            controller = FlowController(batch_size=min(500, max(1, len(records) or 1)))
             controller.submit_many(records)
             controller.finalize()
             ingest_result = ingest_records(
@@ -184,4 +186,5 @@ def _fetch_records(transport: HTTPTransport, pipe: dict[str, Any]) -> list[Trans
             status_code=502,
             detail=f"ingest_demo: pipe {pipe.get('pipe_id')} ({pipe.get('display_name')}) missing endpoint_ref.path",
         )
-    return transport.fetch_records(pipe_id=pipe["pipe_id"], path=path)
+    key_fields = list(pipe.get("identity_keys") or [])
+    return transport.fetch_records(pipe_id=pipe["pipe_id"], path=path, key_fields=key_fields)

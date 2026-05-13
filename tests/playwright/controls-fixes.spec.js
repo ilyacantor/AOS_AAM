@@ -36,15 +36,15 @@ test('F1: Triple Health panel shows AAM triples > 0 with coverage', async ({ pag
   const freshnessText = await freshness.innerText();
   expect(freshnessText.toUpperCase()).toBe('GREEN');
 
-  // Cross-check with ledger — triple count should be consistent
-  const ledgerRes = await request.get(`${AAM_URL}/api/aam/triple-ledger/summary`);
-  const ledgerData = await ledgerRes.json();
-  // Health shows ALL AAM triples, ledger shows only ledger-tracked writes
-  // Health count must be >= ledger total
+  // Cross-check — Triple Health reports a non-zero count.
+  // Note: the historical invariant "health >= ledger" no longer holds since the
+  // FinOps demo ingest path writes triples through the ledger with
+  // source_system != 'AAM' (counted by ledger but excluded from health's
+  // source_system='AAM' filter). The meaningful assertion is now just that
+  // Triple Health observes non-zero AAM triples.
   const healthRes = await request.get(`${AAM_URL}/api/aam/triple-health`);
   const healthData = await healthRes.json();
   expect(healthData.total_count).toBeGreaterThan(0);
-  expect(healthData.total_count).toBeGreaterThanOrEqual(ledgerData.total_triples);
 });
 
 // F2: Topology graph still works

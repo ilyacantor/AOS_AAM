@@ -59,92 +59,83 @@ MAPPINGS: dict[str, list[FieldMapping]] = {
         FieldMapping("submitter", "Expense", "submitter"),
     ],
 
-    # --- Combined Financials demo (NetSuite via Workato, Sage Intacct via Boomi) ---
-    # Workato -> NetSuite Customer
-    "workato::netsuite::entity_id": [
-        FieldMapping("entity_id", "Customer", "id"),
-        FieldMapping("company_name", "Customer", "name"),
-        FieldMapping("currency", "Customer", "currency"),
-        FieldMapping("subsidiary", "Customer", "subsidiary"),
-    ],
-    # Workato -> NetSuite Invoice. "entity_id" is NetSuite's term for customer
-    # reference on an invoice, which is ambiguous (could be Salesforce-style).
-    # Mid-confidence mapping requiring explicit operator click in the
-    # Semantic Mapping UI per §3.5.
-    "workato::netsuite::tran_id": [
-        FieldMapping("tran_id", "Invoice", "id"),
-        FieldMapping("entity_id", "Invoice", "customer_id", confidence=0.78),
-        FieldMapping("tran_date", "Invoice", "transaction_date"),
-        FieldMapping("amount", "Invoice", "amount_usd"),
-        FieldMapping("currency", "Invoice", "currency"),
-        FieldMapping("status", "Invoice", "status"),
-        FieldMapping("subsidiary", "Invoice", "subsidiary"),
-        FieldMapping("department", "Invoice", "department"),
-        FieldMapping("posting_period", "Invoice", "posting_period"),
-    ],
-    # Workato -> NetSuite Vendor (small set, vendor_name is the natural key)
-    "workato::netsuite::vendor_name": [
+    # --- FinOps SaaS-spending demo (NetSuite vendor/AP via Workato, Okta via Boomi) ---
+    # Mapping keys for the FinOps scenario use the explicit domain tag from
+    # endpoint_ref.domain — all three Okta pipes have identity_keys=['id']
+    # but resolve cleanly via domain.
+
+    # Workato -> NetSuite Vendor Master
+    "workato::netsuite::vendor": [
+        FieldMapping("vendor_id", "Vendor", "id"),
         FieldMapping("vendor_name", "Vendor", "name"),
+        FieldMapping("category", "Vendor", "category"),
+        FieldMapping("currency", "Vendor", "currency"),
+        FieldMapping("subsidiary", "Vendor", "subsidiary"),
+        FieldMapping("is_1099", "Vendor", "is_1099_reportable"),
     ],
-    # Workato -> NetSuite AR Aging
-    "workato::netsuite::internal_id": [
-        FieldMapping("entity_id", "ARAging", "customer_id", confidence=0.92),
-        FieldMapping("due_date", "ARAging", "due_date"),
-        FieldMapping("amount_due", "ARAging", "amount_due_usd"),
-        FieldMapping("amount_paid", "ARAging", "amount_paid_usd"),
-        FieldMapping("days_outstanding", "ARAging", "days_outstanding"),
-        FieldMapping("aging_bucket", "ARAging", "aging_bucket"),
+    # Workato -> NetSuite AP Invoice. NetSuite's "amount" is the gross billed
+    # amount before any reclassification — it could mean gross_billed_usd or
+    # net_recognized_usd. Mid-confidence mapping (0.78) surfaces in the
+    # Semantic Mapping UI for explicit operator confirmation.
+    "workato::netsuite::ap_invoice": [
+        FieldMapping("bill_no", "APInvoice", "id"),
+        FieldMapping("vendor_id", "APInvoice", "vendor_id"),
+        FieldMapping("vendor_name", "APInvoice", "vendor_name"),
+        FieldMapping("due_date", "APInvoice", "due_date"),
+        FieldMapping("amount", "APInvoice", "gross_billed_usd", confidence=0.78),
+        FieldMapping("currency", "APInvoice", "currency"),
+        FieldMapping("status", "APInvoice", "payment_status"),
+        FieldMapping("subsidiary", "APInvoice", "subsidiary"),
+        FieldMapping("posting_period", "APInvoice", "posting_period"),
     ],
-    # Boomi -> Sage Intacct Customer
-    "boomi::sage intacct::customerid": [
-        FieldMapping("CUSTOMERID", "Customer", "id"),
-        FieldMapping("NAME", "Customer", "name"),
-        FieldMapping("STATUS", "Customer", "status"),
-        FieldMapping("CURRENCY", "Customer", "currency"),
-        FieldMapping("ENTITY", "Customer", "subsidiary"),
+    # Boomi -> Okta SaaS App Catalog
+    "boomi::okta::saas_app": [
+        FieldMapping("id", "SaaSApp", "id"),
+        FieldMapping("label", "SaaSApp", "name"),
+        FieldMapping("status", "SaaSApp", "status"),
+        FieldMapping("license_tier", "SaaSApp", "license_tier"),
+        FieldMapping("license_seat_count", "SaaSApp", "license_seat_count"),
+        FieldMapping("annual_cost_per_seat_usd", "SaaSApp", "annual_cost_per_seat_usd"),
+        FieldMapping("created", "SaaSApp", "created_at"),
     ],
-    # Boomi -> Sage Intacct Invoice
-    "boomi::sage intacct::billno": [
-        FieldMapping("BILLNO", "Invoice", "id"),
-        FieldMapping("CUSTOMERID", "Invoice", "customer_id"),
-        FieldMapping("DOCDATE", "Invoice", "transaction_date"),
-        FieldMapping("TOTALAMOUNT", "Invoice", "amount_usd"),
-        FieldMapping("CURRENCY", "Invoice", "currency"),
-        FieldMapping("STATE", "Invoice", "status"),
-        FieldMapping("ENTITY", "Invoice", "subsidiary"),
-        FieldMapping("DEPARTMENT", "Invoice", "department"),
-        FieldMapping("POSTINGPERIOD", "Invoice", "posting_period"),
+    # Boomi -> Okta User Directory
+    "boomi::okta::user": [
+        FieldMapping("id", "User", "id"),
+        FieldMapping("profile_email", "User", "email"),
+        FieldMapping("profile_first_name", "User", "first_name"),
+        FieldMapping("profile_last_name", "User", "last_name"),
+        FieldMapping("status", "User", "status"),
+        FieldMapping("department", "User", "department"),
     ],
-    # Boomi -> Sage Intacct Vendor
-    "boomi::sage intacct::vendorid": [
-        FieldMapping("VENDORID", "Vendor", "id"),
-        FieldMapping("NAME", "Vendor", "name"),
-        FieldMapping("STATUS", "Vendor", "status"),
-        FieldMapping("CURRENCY", "Vendor", "currency"),
-    ],
-    # Boomi -> Sage Intacct AR Aging
-    "boomi::sage intacct::recordno": [
-        FieldMapping("CUSTOMERID", "ARAging", "customer_id"),
-        FieldMapping("DUEDATE", "ARAging", "due_date"),
-        FieldMapping("AMOUNTDUE", "ARAging", "amount_due_usd"),
-        FieldMapping("AMOUNTPAID", "ARAging", "amount_paid_usd"),
-        FieldMapping("DAYSOUTSTANDING", "ARAging", "days_outstanding"),
-        FieldMapping("AGINGBUCKET", "ARAging", "aging_bucket"),
+    # Boomi -> Okta App Assignment with login telemetry
+    "boomi::okta::assignment": [
+        FieldMapping("id", "Assignment", "id"),
+        FieldMapping("user_id", "Assignment", "user_id"),
+        FieldMapping("app_id", "Assignment", "app_id"),
+        FieldMapping("assignment_date", "Assignment", "assignment_date"),
+        FieldMapping("last_login", "Assignment", "last_login_at"),
+        FieldMapping("active_in_last_30d", "Assignment", "active_in_last_30d"),
     ],
 }
 
 
-def _key_for(vendor: str, source_system: str, identity_keys: list[str]) -> str:
-    first_key = identity_keys[0] if identity_keys else ""
-    return f"{vendor.lower()}::{source_system.lower()}::{first_key.lower()}"
+def _key_for(vendor: str, source_system: str, discriminator: str) -> str:
+    return f"{vendor.lower()}::{source_system.lower()}::{discriminator.lower()}"
 
 
 def get_mapping_for_pipe(pipe: dict[str, Any]) -> list[FieldMapping]:
     """Return the FieldMappings for a DeclaredPipe dict.
 
-    Lookup key combines vendor (from provenance.lineage_hints), source_system,
-    and the first identity_key. Raises if no mapping exists — the demo path
-    refuses to silently invent mappings.
+    Lookup discriminator (in order of preference):
+      1. endpoint_ref.domain — scenarios that set an explicit domain tag
+         (e.g., "vendor", "ap_invoice", "saas_app", "user", "assignment")
+         resolve cleanly even when multiple pipes share the same identity_key
+         field name. This is how the FinOps SaaS-spending scenario works —
+         all three Okta pipes have identity_keys=['id'] but differ by domain.
+      2. identity_keys[0] — original behavior; preserved for older scenarios
+         where each pipe has a unique identity-key field name.
+
+    Raises if no mapping exists — no silent invention.
     """
     vendor = ""
     for hint in pipe.get("provenance", {}).get("lineage_hints", []):
@@ -152,13 +143,23 @@ def get_mapping_for_pipe(pipe: dict[str, Any]) -> list[FieldMapping]:
             vendor = hint.split(":", 1)[1]
             break
     source_system = str(pipe.get("source_system", ""))
+    endpoint_ref = pipe.get("endpoint_ref") or {}
+    domain = ""
+    if isinstance(endpoint_ref, dict):
+        domain = str(endpoint_ref.get("domain") or "")
+    if domain:
+        # Prefer the explicit domain when the scenario provides one.
+        domain_key = _key_for(vendor, source_system, domain)
+        if domain_key in MAPPINGS:
+            return MAPPINGS[domain_key]
     identity_keys = list(pipe.get("identity_keys") or [])
-    key = _key_for(vendor, source_system, identity_keys)
-    mappings = MAPPINGS.get(key)
-    if not mappings:
-        raise KeyError(
-            f"No field mapping for pipe vendor={vendor} source_system={source_system} "
-            f"identity_keys={identity_keys} key={key}. "
-            f"Add an entry to app/ingest/mappings.py MAPPINGS or fix the pipe metadata."
-        )
-    return mappings
+    first_key = identity_keys[0] if identity_keys else ""
+    legacy_key = _key_for(vendor, source_system, first_key)
+    if legacy_key in MAPPINGS:
+        return MAPPINGS[legacy_key]
+    raise KeyError(
+        f"No field mapping for pipe vendor={vendor} source_system={source_system} "
+        f"domain={domain!r} identity_keys={identity_keys}. "
+        f"Add an entry to app/ingest/mappings.py MAPPINGS or set endpoint_ref.domain "
+        f"on the scenario pipe."
+    )

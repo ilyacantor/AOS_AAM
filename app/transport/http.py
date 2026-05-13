@@ -98,11 +98,15 @@ class HTTPTransport:
             time.sleep(min(0.5 * attempt, 2.0))
         raise HTTPTransportError(f"poll_pipeline: never reached terminal state url={url} last={last}")
 
-    def fetch_records(self, pipe_id: str, path: str, params: dict[str, Any] | None = None) -> list[TransportRecord]:
+    def fetch_records(self, pipe_id: str, path: str, params: dict[str, Any] | None = None,
+                      key_fields: list[str] | None = None) -> list[TransportRecord]:
         """Demo path — call the callable endpoint, expect a records[] response.
 
         Returns TransportRecord objects with pipe_id, record_key, payload,
         offset, source_system. Used by the flow controller.
+
+        key_fields: ordered list of payload field names to try as record_key.
+        Falls back to id / key / record_key / synthesized index.
         """
         if not pipe_id:
             raise HTTPTransportError("fetch_records requires non-empty pipe_id")
@@ -115,11 +119,19 @@ class HTTPTransport:
                 f"fetch_records: response missing records[] pipe_id={pipe_id} path={path} keys={list(response.keys())}"
             )
         source_system = str(response.get("source_system") or response.get("vendor") or "")
+        ordered_keys = list(key_fields or []) + ["id", "key", "record_key"]
         out: list[TransportRecord] = []
         for idx, rec in enumerate(records_raw):
             if not isinstance(rec, dict):
                 continue
-            record_key = str(rec.get("id") or rec.get("key") or rec.get("record_key") or f"rec-{idx}")
+            record_key = ""
+            for k in ordered_keys:
+                v = rec.get(k)
+                if v is not None and v != "":
+                    record_key = str(v)
+                    break
+            if not record_key:
+                record_key = f"rec-{idx}"
             offset = str(rec.get("_offset") or rec.get("offset") or idx)
             ts = str(rec.get("_timestamp") or rec.get("timestamp") or "")
             payload = {k: v for k, v in rec.items() if not k.startswith("_")}
