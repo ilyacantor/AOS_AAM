@@ -30,6 +30,9 @@ from fastapi import FastAPI, Header, HTTPException, Request
 _log = logging.getLogger("aam.harness.ipaas_stub")
 
 _SCENARIOS_DIR = Path(__file__).parent / "scenarios"
+_REPO_ROOT = Path(__file__).parent.parent.parent.parent  # aam/
+
+_RECORDS_CACHE: dict[str, list[dict[str, Any]]] = {}
 
 
 def load_scenario(name: str) -> dict[str, Any]:
@@ -38,6 +41,33 @@ def load_scenario(name: str) -> dict[str, Any]:
         available = sorted(p.stem for p in _SCENARIOS_DIR.glob("*.json"))
         raise FileNotFoundError(f"ipaas_stub: scenario '{name}' not found in {_SCENARIOS_DIR}. Available: {available}")
     return json.loads(path.read_text())
+
+
+def _load_records_file(data_dir: str, filename: str, limit: int | None = None) -> list[dict[str, Any]]:
+    """Lazy-load a JSON file of records relative to the AAM repo root. Cached."""
+    cache_key = f"{data_dir}/{filename}"
+    cached = _RECORDS_CACHE.get(cache_key)
+    if cached is None:
+        path = _REPO_ROOT / data_dir / filename
+        if not path.exists():
+            raise FileNotFoundError(f"ipaas_stub: records file not found {path}")
+        cached = json.loads(path.read_text())
+        if not isinstance(cached, list):
+            raise ValueError(f"ipaas_stub: records file {path} did not contain a JSON list")
+        _RECORDS_CACHE[cache_key] = cached
+    return cached if limit is None else cached[:limit]
+
+
+def _records_for(pipe: dict[str, Any], scenario_data: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return the records for a pipe — inline records[] or lazy-loaded from records_file."""
+    if "records" in pipe:
+        return pipe["records"]
+    records_file = pipe.get("records_file")
+    if not records_file:
+        return []
+    data_dir = scenario_data.get("data_dir") or "tests/fixtures/harness"
+    limit = scenario_data.get("sample_size_per_pipe")
+    return _load_records_file(data_dir, records_file, limit=limit)
 
 
 def _state(scenario_name: str) -> dict[str, Any]:
@@ -147,7 +177,7 @@ def create_stub_app(scenario: str = "healthy") -> FastAPI:
             "source_system": recipe.get("source_system", "Workato"),
             "vendor": "Workato",
             "recipe_id": recipe_id,
-            "records": recipe.get("records", []),
+            "records": _records_for(recipe, state["data"]),
         }
 
     @app.get("/workato/api/jobs/{job_id}")
@@ -201,7 +231,7 @@ def create_stub_app(scenario: str = "healthy") -> FastAPI:
             "source_system": process.get("source_system", "Boomi"),
             "vendor": "Boomi",
             "process_id": process_id,
-            "records": process.get("records", []),
+            "records": _records_for(process, state["data"]),
         }
 
     @app.get("/boomi/api/executions/{exec_id}")

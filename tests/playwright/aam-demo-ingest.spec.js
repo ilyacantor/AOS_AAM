@@ -3,6 +3,21 @@
 const { test, expect } = require('@playwright/test');
 
 const AAM_URL = process.env.AAM_URL || 'http://localhost:8002';
+const STUB_URL = process.env.STUB_URL || 'http://127.0.0.1:8902';
+
+test.beforeEach(async ({ request }) => {
+  // The combined-financials suite leaves the stub in that scenario. The
+  // original demo-ingest assertions were written against the healthy
+  // scenario, so reload it as test setup (not the action under test).
+  const r = await request.post(`${STUB_URL}/stub/load_scenario`, { data: { scenario: 'healthy' } });
+  const j = await r.json();
+  // Verify the load actually took effect — health echoes scenario_name.
+  const h = await request.get(`${STUB_URL}/health`);
+  const hb = await h.json();
+  if (hb.scenario !== 'healthy') {
+    throw new Error(`stub failed to load healthy scenario: got ${hb.scenario} (load returned ${JSON.stringify(j)})`);
+  }
+});
 
 test('Demo Ingest: real click drives Workato + Boomi through ipaas_stub into triples', async ({ page }) => {
   // Sanity (read-only, page.request.get is allowed): factory must be in stub mode.

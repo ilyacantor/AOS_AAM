@@ -186,6 +186,10 @@ def ingest_records(
     all_triples: list[dict[str, Any]] = []
     by_vendor: dict[str, int] = {}
     for r in records:
+        # Per-record source_run_tag so downstream readers can reconstruct
+        # the original record from its property triples. The batch tag is
+        # still derivable as everything before the '::' separator.
+        record_tag = f"{source_run_tag}::{r.record_key}"
         triples = build_triples(
             r,
             pipe=pipe,
@@ -193,7 +197,7 @@ def ingest_records(
             tenant_id=tenant_id,
             entity_id=entity_id,
             aam_inference_id=inference_id,
-            source_run_tag=source_run_tag,
+            source_run_tag=record_tag,
             vendor=vendor,
         )
         all_triples.extend(triples)

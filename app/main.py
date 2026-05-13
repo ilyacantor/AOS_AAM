@@ -116,6 +116,22 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# CORS: the FinOps app (localhost:3001) reaches in for the demo answer endpoint.
+# Locked to localhost dev origins; production deployments tighten this further.
+from fastapi.middleware.cors import CORSMiddleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
+        "http://localhost:3005",
+        "http://127.0.0.1:3005",
+        "http://localhost:8002",
+    ],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+)
+
 # Serve static assets (favicon, etc.)
 _static_dir = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
@@ -146,6 +162,7 @@ from .routers.controls import router as controls_router
 from .routers.controls_ui import router as controls_ui_router
 from .routers.aam_ui_actions import router as aam_ui_actions_router
 from .routers.ingest_demo import router as ingest_demo_router
+from .routers.demo import router as demo_router
 
 app.include_router(handoff_router)
 app.include_router(fabric_router)
@@ -166,6 +183,7 @@ app.include_router(controls_router)
 app.include_router(controls_ui_router)
 app.include_router(aam_ui_actions_router)
 app.include_router(ingest_demo_router)
+app.include_router(demo_router)
 app.include_router(ui_pages_router)
 
 

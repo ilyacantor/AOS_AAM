@@ -1,0 +1,174 @@
+{
+  "scenario": "combined_financials",
+  "data_dir": "tests/fixtures/harness/combined_financials_data",
+  "sample_size_per_pipe": 250,
+  "vendors": {
+    "workato": {
+      "health_state": "reachable",
+      "auth_required": true,
+      "recipes": [
+        {
+          "id": "wk-netsuite-customers",
+          "name": "NetSuite -> AOS Customer Sync",
+          "active": true,
+          "source_system": "NetSuite",
+          "target_system": "AOS",
+          "trigger": "external_event",
+          "records_file": "customers_netsuite.json",
+          "key_field": "entity_id",
+          "domain": "customer",
+          "schema": [
+            {"name": "internal_id", "type": "number", "is_key": false},
+            {"name": "entity_id", "type": "string", "is_key": true},
+            {"name": "company_name", "type": "string"},
+            {"name": "currency", "type": "string"},
+            {"name": "subsidiary", "type": "string"}
+          ]
+        },
+        {
+          "id": "wk-netsuite-invoices",
+          "name": "NetSuite -> AOS Invoice Sync",
+          "active": true,
+          "source_system": "NetSuite",
+          "target_system": "AOS",
+          "trigger": "external_event",
+          "records_file": "invoices_netsuite.json",
+          "key_field": "tran_id",
+          "domain": "invoice",
+          "schema": [
+            {"name": "internal_id", "type": "number", "is_key": false},
+            {"name": "tran_id", "type": "string", "is_key": true},
+            {"name": "entity_id", "type": "string"},
+            {"name": "tran_date", "type": "date"},
+            {"name": "amount", "type": "number"},
+            {"name": "currency", "type": "string"},
+            {"name": "status", "type": "string"},
+            {"name": "subsidiary", "type": "string"},
+            {"name": "department", "type": "string"},
+            {"name": "posting_period", "type": "string"}
+          ]
+        },
+        {
+          "id": "wk-netsuite-vendors",
+          "name": "NetSuite -> AOS Vendor Sync",
+          "active": true,
+          "source_system": "NetSuite",
+          "target_system": "AOS",
+          "trigger": "external_event",
+          "records_file": "vendors_netsuite.json",
+          "key_field": "vendor_name",
+          "domain": "vendor",
+          "schema": [
+            {"name": "vendor_name", "type": "string", "is_key": true}
+          ]
+        },
+        {
+          "id": "wk-netsuite-ar-aging",
+          "name": "NetSuite -> AOS AR Aging Snapshot",
+          "active": true,
+          "source_system": "NetSuite",
+          "target_system": "AOS",
+          "trigger": "scheduled",
+          "records_file": "ar_aging_netsuite.json",
+          "key_field": "internal_id",
+          "domain": "ar_aging",
+          "schema": [
+            {"name": "internal_id", "type": "number", "is_key": true},
+            {"name": "entity_id", "type": "string"},
+            {"name": "due_date", "type": "date"},
+            {"name": "amount_due", "type": "number"},
+            {"name": "amount_paid", "type": "number"},
+            {"name": "days_outstanding", "type": "number"},
+            {"name": "aging_bucket", "type": "string"}
+          ]
+        }
+      ]
+    },
+    "boomi": {
+      "health_state": "reachable",
+      "auth_required": true,
+      "processes": [
+        {
+          "id": "bm-sage-customers",
+          "name": "Sage Intacct -> AOS Customer Sync",
+          "active": true,
+          "source_system": "Sage Intacct",
+          "target_system": "AOS",
+          "trigger": "external_event",
+          "records_file": "customers_sage.json",
+          "key_field": "CUSTOMERID",
+          "domain": "customer",
+          "schema": [
+            {"name": "RECORDNO", "type": "number"},
+            {"name": "CUSTOMERID", "type": "string", "is_key": true},
+            {"name": "NAME", "type": "string"},
+            {"name": "STATUS", "type": "string"},
+            {"name": "CURRENCY", "type": "string"},
+            {"name": "ENTITY", "type": "string"}
+          ]
+        },
+        {
+          "id": "bm-sage-invoices",
+          "name": "Sage Intacct -> AOS Invoice Sync",
+          "active": true,
+          "source_system": "Sage Intacct",
+          "target_system": "AOS",
+          "trigger": "external_event",
+          "records_file": "invoices_sage.json",
+          "key_field": "BILLNO",
+          "domain": "invoice",
+          "schema": [
+            {"name": "RECORDNO", "type": "number"},
+            {"name": "BILLNO", "type": "string", "is_key": true},
+            {"name": "CUSTOMERID", "type": "string"},
+            {"name": "DOCDATE", "type": "date"},
+            {"name": "TOTALAMOUNT", "type": "number"},
+            {"name": "CURRENCY", "type": "string"},
+            {"name": "STATE", "type": "string"},
+            {"name": "ENTITY", "type": "string"},
+            {"name": "DEPARTMENT", "type": "string"},
+            {"name": "POSTINGPERIOD", "type": "string"}
+          ]
+        },
+        {
+          "id": "bm-sage-vendors",
+          "name": "Sage Intacct -> AOS Vendor Sync",
+          "active": true,
+          "source_system": "Sage Intacct",
+          "target_system": "AOS",
+          "trigger": "external_event",
+          "records_file": "vendors_sage.json",
+          "key_field": "VENDORID",
+          "domain": "vendor",
+          "schema": [
+            {"name": "RECORDNO", "type": "number"},
+            {"name": "VENDORID", "type": "string", "is_key": true},
+            {"name": "NAME", "type": "string"},
+            {"name": "STATUS", "type": "string"},
+            {"name": "CURRENCY", "type": "string"}
+          ]
+        },
+        {
+          "id": "bm-sage-ar-aging",
+          "name": "Sage Intacct -> AOS AR Aging Snapshot",
+          "active": true,
+          "source_system": "Sage Intacct",
+          "target_system": "AOS",
+          "trigger": "scheduled",
+          "records_file": "ar_aging_sage.json",
+          "key_field": "RECORDNO",
+          "domain": "ar_aging",
+          "schema": [
+            {"name": "RECORDNO", "type": "number", "is_key": true},
+            {"name": "CUSTOMERID", "type": "string"},
+            {"name": "DUEDATE", "type": "date"},
+            {"name": "AMOUNTDUE", "type": "number"},
+            {"name": "AMOUNTPAID", "type": "number"},
+            {"name": "DAYSOUTSTANDING", "type": "number"},
+            {"name": "AGINGBUCKET", "type": "string"}
+          ]
+        }
+      ]
+    }
+  }
+}

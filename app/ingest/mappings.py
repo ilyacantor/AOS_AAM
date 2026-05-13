@@ -58,6 +58,79 @@ MAPPINGS: dict[str, list[FieldMapping]] = {
         FieldMapping("category", "Expense", "category"),
         FieldMapping("submitter", "Expense", "submitter"),
     ],
+
+    # --- Combined Financials demo (NetSuite via Workato, Sage Intacct via Boomi) ---
+    # Workato -> NetSuite Customer
+    "workato::netsuite::entity_id": [
+        FieldMapping("entity_id", "Customer", "id"),
+        FieldMapping("company_name", "Customer", "name"),
+        FieldMapping("currency", "Customer", "currency"),
+        FieldMapping("subsidiary", "Customer", "subsidiary"),
+    ],
+    # Workato -> NetSuite Invoice. "entity_id" is NetSuite's term for customer
+    # reference on an invoice, which is ambiguous (could be Salesforce-style).
+    # Mid-confidence mapping requiring explicit operator click in the
+    # Semantic Mapping UI per §3.5.
+    "workato::netsuite::tran_id": [
+        FieldMapping("tran_id", "Invoice", "id"),
+        FieldMapping("entity_id", "Invoice", "customer_id", confidence=0.78),
+        FieldMapping("tran_date", "Invoice", "transaction_date"),
+        FieldMapping("amount", "Invoice", "amount_usd"),
+        FieldMapping("currency", "Invoice", "currency"),
+        FieldMapping("status", "Invoice", "status"),
+        FieldMapping("subsidiary", "Invoice", "subsidiary"),
+        FieldMapping("department", "Invoice", "department"),
+        FieldMapping("posting_period", "Invoice", "posting_period"),
+    ],
+    # Workato -> NetSuite Vendor (small set, vendor_name is the natural key)
+    "workato::netsuite::vendor_name": [
+        FieldMapping("vendor_name", "Vendor", "name"),
+    ],
+    # Workato -> NetSuite AR Aging
+    "workato::netsuite::internal_id": [
+        FieldMapping("entity_id", "ARAging", "customer_id", confidence=0.92),
+        FieldMapping("due_date", "ARAging", "due_date"),
+        FieldMapping("amount_due", "ARAging", "amount_due_usd"),
+        FieldMapping("amount_paid", "ARAging", "amount_paid_usd"),
+        FieldMapping("days_outstanding", "ARAging", "days_outstanding"),
+        FieldMapping("aging_bucket", "ARAging", "aging_bucket"),
+    ],
+    # Boomi -> Sage Intacct Customer
+    "boomi::sage intacct::customerid": [
+        FieldMapping("CUSTOMERID", "Customer", "id"),
+        FieldMapping("NAME", "Customer", "name"),
+        FieldMapping("STATUS", "Customer", "status"),
+        FieldMapping("CURRENCY", "Customer", "currency"),
+        FieldMapping("ENTITY", "Customer", "subsidiary"),
+    ],
+    # Boomi -> Sage Intacct Invoice
+    "boomi::sage intacct::billno": [
+        FieldMapping("BILLNO", "Invoice", "id"),
+        FieldMapping("CUSTOMERID", "Invoice", "customer_id"),
+        FieldMapping("DOCDATE", "Invoice", "transaction_date"),
+        FieldMapping("TOTALAMOUNT", "Invoice", "amount_usd"),
+        FieldMapping("CURRENCY", "Invoice", "currency"),
+        FieldMapping("STATE", "Invoice", "status"),
+        FieldMapping("ENTITY", "Invoice", "subsidiary"),
+        FieldMapping("DEPARTMENT", "Invoice", "department"),
+        FieldMapping("POSTINGPERIOD", "Invoice", "posting_period"),
+    ],
+    # Boomi -> Sage Intacct Vendor
+    "boomi::sage intacct::vendorid": [
+        FieldMapping("VENDORID", "Vendor", "id"),
+        FieldMapping("NAME", "Vendor", "name"),
+        FieldMapping("STATUS", "Vendor", "status"),
+        FieldMapping("CURRENCY", "Vendor", "currency"),
+    ],
+    # Boomi -> Sage Intacct AR Aging
+    "boomi::sage intacct::recordno": [
+        FieldMapping("CUSTOMERID", "ARAging", "customer_id"),
+        FieldMapping("DUEDATE", "ARAging", "due_date"),
+        FieldMapping("AMOUNTDUE", "ARAging", "amount_due_usd"),
+        FieldMapping("AMOUNTPAID", "ARAging", "amount_paid_usd"),
+        FieldMapping("DAYSOUTSTANDING", "ARAging", "days_outstanding"),
+        FieldMapping("AGINGBUCKET", "ARAging", "aging_bucket"),
+    ],
 }
 
 
