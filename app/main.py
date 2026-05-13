@@ -214,7 +214,7 @@ async def custom_swagger_ui():
     </style>
 </head>
 <body>
-    {NAV_HTML.format(pipes_active="", candidates_active="", drift_active="", guide_active="", docs_active=" active")}
+    {NAV_HTML.format(pipes_active="", candidates_active="", drift_active="", demo_active="", guide_active="", docs_active=" active")}
     <div id="swagger-ui"></div>
     <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
     <script>
@@ -246,7 +246,7 @@ async def custom_redoc():
     </style>
 </head>
 <body>
-    {NAV_HTML.format(pipes_active="", candidates_active="", drift_active="", guide_active="", docs_active="")}
+    {NAV_HTML.format(pipes_active="", candidates_active="", drift_active="", demo_active="", guide_active="", docs_active="")}
     <redoc spec-url='/openapi.json'></redoc>
     <script src="https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js"></script>
 </body>

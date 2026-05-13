@@ -35,7 +35,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from ..db import supabase_client as sb
-from ..ui.styles import NAV_HTML, NAV_STYLE
+from ..ui.styles import NAV_HTML, NAV_STYLE, ui_nav
 from ..ingest.mappings import MAPPINGS, FieldMapping
 
 router = APIRouter(tags=["demo"])
@@ -657,7 +657,7 @@ def _wrap_page(title: str, body: str) -> str:
   </style>
 </head>
 <body>
-  {NAV_HTML}
+  {ui_nav('demo')}
   <div class="demo-shell">
     {body}
   </div>
