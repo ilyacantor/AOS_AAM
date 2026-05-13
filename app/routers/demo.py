@@ -657,7 +657,7 @@ def _wrap_page(title: str, body: str) -> str:
   </style>
 </head>
 <body>
-  {NAV_HTML.replace('class=\"nav-pill\"', 'class=\"nav-pill\"')}
+  {NAV_HTML}
   <div class="demo-shell">
     {body}
   </div>
