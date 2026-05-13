@@ -86,9 +86,11 @@ test('F3: Topology actions panel shows new-architecture buttons only', async ({ 
   await page.waitForLoadState('domcontentloaded');
   await page.waitForTimeout(3000);
 
-  // All six old-pipeline buttons must be absent from the DOM
+  // All five old-pipeline buttons must be absent from the DOM. Note:
+  // #btn-run-inference is excluded because the new-architecture page renders
+  // a button with id="btn-run-inference" data-testid="btn-run-inference" —
+  // T1 in aam-topology-fixes.spec.js asserts that button exists.
   await expect(page.locator('#fetch-aod-btn')).toHaveCount(0);
-  await expect(page.locator('#btn-run-inference')).toHaveCount(0);
   await expect(page.locator('#btn-full-pipeline')).toHaveCount(0);
   await expect(page.locator('#btn-export-dcl')).toHaveCount(0);
   await expect(page.locator('#btn-dispatch-all')).toHaveCount(0);

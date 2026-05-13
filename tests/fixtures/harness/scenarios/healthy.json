@@ -1,0 +1,69 @@
+{
+  "scenario": "healthy",
+  "vendors": {
+    "workato": {
+      "health_state": "reachable",
+      "auth_required": true,
+      "recipes": [
+        {
+          "id": "wk-recipe-101",
+          "name": "Salesforce -> NetSuite Account Sync",
+          "active": true,
+          "source_system": "Salesforce",
+          "target_system": "NetSuite",
+          "trigger": "external_event",
+          "schema": [
+            {"name": "account_id", "type": "string", "is_key": true},
+            {"name": "account_name", "type": "string"},
+            {"name": "annual_revenue", "type": "number"},
+            {"name": "industry", "type": "string"}
+          ],
+          "records": [
+            {"account_id": "ACC-001", "account_name": "Globex Corp", "annual_revenue": 12500000, "industry": "Manufacturing"},
+            {"account_id": "ACC-002", "account_name": "Initech LLC", "annual_revenue": 4200000, "industry": "Software"}
+          ]
+        },
+        {
+          "id": "wk-recipe-102",
+          "name": "Workday -> Snowflake HR Sync",
+          "active": true,
+          "source_system": "Workday",
+          "target_system": "Snowflake",
+          "trigger": "scheduled",
+          "schema": [
+            {"name": "employee_id", "type": "string", "is_key": true},
+            {"name": "department", "type": "string"},
+            {"name": "salary", "type": "number"}
+          ],
+          "records": [
+            {"employee_id": "EMP-501", "department": "Engineering", "salary": 145000}
+          ]
+        }
+      ]
+    },
+    "boomi": {
+      "health_state": "reachable",
+      "auth_required": true,
+      "processes": [
+        {
+          "id": "bm-proc-201",
+          "name": "ServiceNow -> Salesforce Ticket Sync",
+          "active": true,
+          "source_system": "ServiceNow",
+          "target_system": "Salesforce",
+          "trigger": "event_stream",
+          "schema": [
+            {"name": "ticket_id", "type": "string", "is_key": true},
+            {"name": "subject", "type": "string"},
+            {"name": "priority", "type": "string"},
+            {"name": "status", "type": "string"}
+          ],
+          "records": [
+            {"ticket_id": "INC-9001", "subject": "Email outage", "priority": "P1", "status": "Open"},
+            {"ticket_id": "INC-9002", "subject": "Printer offline", "priority": "P3", "status": "Resolved"}
+          ]
+        }
+      ]
+    }
+  }
+}

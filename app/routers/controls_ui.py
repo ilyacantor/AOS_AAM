@@ -146,6 +146,16 @@ def _build_dashboard_html() -> str:
                 Connection health monitoring activates when live fabric plane connections are established.
             </div>
         </div>
+
+        <!-- PANEL H: Demo Ingest (Workato + Boomi) -->
+        <div class="panel" id="demo-ingest-panel" data-testid="panel-demo-ingest">
+            <div class="panel-title">Demo Ingest (Workato + Boomi)</div>
+            <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px;">
+                <button class="sb-btn sb-btn-primary" id="btn-run-demo-ingest" data-testid="btn-run-demo-ingest">Run Demo Ingest</button>
+                <span id="demo-ingest-status" data-testid="demo-ingest-status" style="color: #94a3b8; font-size: 0.9rem; align-self: center;"></span>
+            </div>
+            <div id="demo-ingest-result" data-testid="demo-ingest-result"></div>
+        </div>
     </div>
 
     <script>
@@ -455,6 +465,56 @@ def _build_dashboard_html() -> str:
         }}
     }}
 
+    // ---- Panel H: Demo Ingest ----
+    async function runDemoIngest() {{
+        var btn = document.getElementById('btn-run-demo-ingest');
+        var status = document.getElementById('demo-ingest-status');
+        var resultDiv = document.getElementById('demo-ingest-result');
+        btn.disabled = true;
+        status.textContent = 'Running...';
+        resultDiv.innerHTML = '';
+        try {{
+            var res = await fetch('/api/aam/ingest/demo', {{
+                method: 'POST',
+                headers: {{ 'Content-Type': 'application/json' }},
+                body: JSON.stringify({{ vendors: ['workato', 'boomi'] }})
+            }});
+            if (!res.ok) {{
+                var detail = '';
+                try {{ var j = await res.json(); detail = j.detail || JSON.stringify(j); }} catch(e) {{ detail = res.statusText; }}
+                status.textContent = 'Failed: ' + detail;
+                status.style.color = '#f87171';
+                return;
+            }}
+            var data = await res.json();
+            status.textContent = 'Complete';
+            status.style.color = '#10b981';
+            var html = '<div class="stats" data-testid="demo-ingest-summary">';
+            html += '<div class="stat-card"><div class="stat-value" data-testid="demo-total-pipes">' + (data.total_pipes || 0) + '</div><div class="stat-label">Pipes Discovered</div></div>';
+            html += '<div class="stat-card"><div class="stat-value" data-testid="demo-total-records">' + (data.total_records || 0) + '</div><div class="stat-label">Records Fetched</div></div>';
+            html += '<div class="stat-card"><div class="stat-value" data-testid="demo-total-triples">' + (data.total_triples || 0) + '</div><div class="stat-label">Triples Written</div></div>';
+            html += '</div>';
+            html += '<table data-testid="demo-vendor-table" style="margin-top: 16px;"><thead><tr><th>Vendor</th><th>Pipes</th><th>Records</th><th>Triples</th></tr></thead><tbody>';
+            (data.results || []).forEach(function(r) {{
+                var vId = String(r.vendor).toLowerCase();
+                html += '<tr data-testid="demo-vendor-row-' + esc(vId) + '">';
+                html += '<td data-testid="demo-vendor-name">' + esc(r.vendor) + '</td>';
+                html += '<td data-testid="demo-vendor-pipes">' + (r.pipes_discovered || 0) + '</td>';
+                html += '<td data-testid="demo-vendor-records">' + (r.records_fetched || 0) + '</td>';
+                html += '<td data-testid="demo-vendor-triples">' + (r.triples_written || 0) + '</td>';
+                html += '</tr>';
+            }});
+            html += '</tbody></table>';
+            html += '<div style="margin-top: 12px; font-size: 0.85rem; color: #94a3b8;" data-testid="demo-inference-id">aam_inference_id: ' + esc(data.aam_inference_id) + '</div>';
+            resultDiv.innerHTML = html;
+        }} catch(e) {{
+            status.textContent = 'Failed: ' + e.message;
+            status.style.color = '#f87171';
+        }} finally {{
+            btn.disabled = false;
+        }}
+    }}
+
     // ---- Load all panels on page load ----
     document.addEventListener('DOMContentLoaded', function() {{
         loadMode();
@@ -462,6 +522,8 @@ def _build_dashboard_html() -> str:
         loadHealth();
         loadDrift();
         loadPipes();
+        var demoBtn = document.getElementById('btn-run-demo-ingest');
+        if (demoBtn) demoBtn.addEventListener('click', runDemoIngest);
     }});
     </script>
 </body>

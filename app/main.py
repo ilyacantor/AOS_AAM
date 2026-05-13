@@ -145,6 +145,7 @@ from .routers.mai import router as mai_router
 from .routers.controls import router as controls_router
 from .routers.controls_ui import router as controls_ui_router
 from .routers.aam_ui_actions import router as aam_ui_actions_router
+from .routers.ingest_demo import router as ingest_demo_router
 
 app.include_router(handoff_router)
 app.include_router(fabric_router)
@@ -164,6 +165,7 @@ app.include_router(mai_router)
 app.include_router(controls_router)
 app.include_router(controls_ui_router)
 app.include_router(aam_ui_actions_router)
+app.include_router(ingest_demo_router)
 app.include_router(ui_pages_router)
 
 

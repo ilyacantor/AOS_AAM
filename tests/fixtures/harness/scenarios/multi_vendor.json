@@ -1,0 +1,54 @@
+{
+  "scenario": "multi_vendor",
+  "vendors": {
+    "workato": {
+      "health_state": "reachable",
+      "auth_required": true,
+      "recipes": [
+        {
+          "id": "wk-recipe-301",
+          "name": "Stripe -> NetSuite Revenue Sync",
+          "active": true,
+          "source_system": "Stripe",
+          "target_system": "NetSuite",
+          "trigger": "external_event",
+          "schema": [
+            {"name": "charge_id", "type": "string", "is_key": true},
+            {"name": "amount_cents", "type": "number"},
+            {"name": "currency", "type": "string"},
+            {"name": "customer_id", "type": "string"}
+          ],
+          "records": [
+            {"charge_id": "ch_001", "amount_cents": 4999, "currency": "USD", "customer_id": "cus_A"},
+            {"charge_id": "ch_002", "amount_cents": 19900, "currency": "USD", "customer_id": "cus_B"},
+            {"charge_id": "ch_003", "amount_cents": 99000, "currency": "USD", "customer_id": "cus_C"}
+          ]
+        }
+      ]
+    },
+    "boomi": {
+      "health_state": "reachable",
+      "auth_required": true,
+      "processes": [
+        {
+          "id": "bm-proc-401",
+          "name": "Concur -> NetSuite Expense Sync",
+          "active": true,
+          "source_system": "Concur",
+          "target_system": "NetSuite",
+          "trigger": "scheduled",
+          "schema": [
+            {"name": "expense_id", "type": "string", "is_key": true},
+            {"name": "amount", "type": "number"},
+            {"name": "category", "type": "string"},
+            {"name": "submitter", "type": "string"}
+          ],
+          "records": [
+            {"expense_id": "EXP-7001", "amount": 250.5, "category": "Travel", "submitter": "jdoe"},
+            {"expense_id": "EXP-7002", "amount": 89.0, "category": "Meals", "submitter": "asmith"}
+          ]
+        }
+      ]
+    }
+  }
+}

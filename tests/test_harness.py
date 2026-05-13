@@ -16,12 +16,13 @@ Usage:
 
 import argparse
 import json
+import os
 import requests
 import sys
 import time
 from collections import defaultdict
 
-BASE_URL = "http://localhost:5000"
+BASE_URL = os.environ.get("AAM_URL", os.environ.get("AAM_BASE_URL", "http://localhost:5000"))
 MAX_ITERATIONS = 1
 
 
@@ -651,7 +652,7 @@ def run_phase_tests(phase, run_id, fetch_data):
     print("=" * 70)
 
     print("\n--- Fetch AOD ---")
-    _, r = test_retention_fetch_aod()
+    _, r = test_retention_fetch_aod(run_id)
     results.append(r)
     # Re-fetch to get fresh run_id
     fetch_resp = api("post", "/api/handoff/aod/fetch")
@@ -663,10 +664,10 @@ def run_phase_tests(phase, run_id, fetch_data):
     results.append(r)
 
     print("\n--- Export to DCL ---")
-    results.append(test_retention_export_dcl())
+    results.append(test_retention_export_dcl(fresh_run_id))
 
     print("\n--- Visualization ---")
-    results.append(test_retention_visualization())
+    results.append(test_retention_visualization(fresh_run_id))
 
     print("\n--- Reconciliation Truthfulness ---")
     results.append(test_retention_reconciliation(fresh_run_id))
@@ -691,9 +692,9 @@ def run_phase_tests(phase, run_id, fetch_data):
         print("PHASE 2 TESTS: Data Integrity")
         print("=" * 70)
         print("\n--- No Mock Data ---")
-        results.append(test_phase2_no_mock_data())
+        results.append(test_phase2_no_mock_data(fresh_run_id))
         print("\n--- Single Source of Truth ---")
-        results.append(test_phase2_single_source_of_truth())
+        results.append(test_phase2_single_source_of_truth(fresh_run_id))
 
     if phase >= 3:
         print("\n" + "=" * 70)
@@ -708,9 +709,9 @@ def run_phase_tests(phase, run_id, fetch_data):
         print("PHASE 4 TESTS: UI & Cleanup")
         print("=" * 70)
         print("\n--- Drift UI States ---")
-        results.append(test_phase4_drift_ui_states())
+        results.append(test_phase4_drift_ui_states(fresh_run_id))
         print("\n--- Frontend Error Handling ---")
-        results.append(test_phase4_frontend_no_js_errors())
+        results.append(test_phase4_frontend_no_js_errors(fresh_run_id))
 
     return results
 
