@@ -6,11 +6,6 @@ expects (dcl/backend/api/routes/ingest_triples.py:57-75 TriplePayload).
 Differs from the legacy builder in app/ingest/triples.py:
   - Output keys map DCL's column vocabulary (no aam_inference_id field —
     that lives on the request envelope, not on each triple).
-  - Concept names are canonicalized to ontology-valid lowercase roots
-    (e.g., "Vendor" -> "vendor", "SaaSApp" -> "it_asset.saas_app") so the
-    DCL concept registry accepts them. AAM operator-facing names in
-    app/ingest/mappings.py stay readable; the canonicalizer translates at
-    the write boundary.
   - source_system is derived from the pipe's source_product (NetSuite,
     Okta, Salesforce, ...) — never literal "AAM". Validates the
     vendor↔source-product pair against an explicit map; ambiguous pairs
@@ -21,6 +16,10 @@ Differs from the legacy builder in app/ingest/triples.py:
   - resolution_method is translated to DCL's vocabulary
     {deterministic, fuzzy, manual} via _RESOLUTION_METHOD_TO_PG (re-exported
     from app/ingest/triples.py — single source of truth for the mapping).
+
+Concept names are sourced directly from FieldMapping.concept, which is
+already lowercase and aligned with DCL's canonical ontology IDs (see
+app/ingest/mappings.py docstring). No runtime translation.
 
 The builder owns no I/O. The orchestrator hands the triples to DCLPusher.
 """
@@ -57,64 +56,6 @@ def _to_uuid_or_none(val: Any) -> Optional[str]:
         return s
     except ValueError:
         return str(uuid.uuid5(uuid.NAMESPACE_URL, s))
-
-
-# ---------------------------------------------------------------------------
-# Concept canonicalization
-# ---------------------------------------------------------------------------
-# DCL validates triple concepts in two places:
-#   1. backend/registry/concept_registry.py — concept root must be a known
-#      ontology concept id (151 entries in config/ontology_concepts.yaml).
-#   2. backend/api/routes/ingest_triples.py:156-172 — concept root must be in
-#      _MAPPED_DOMAIN_PREFIXES (built from config/persona_domains.yaml).
-#
-# AAM's FieldMapping uses operator-friendly capitalized names (Vendor, Customer,
-# SaaSApp). Translate to lowercase ontology roots at the write boundary. This
-# is the equivalent of _RESOLUTION_METHOD_TO_PG: keep the in-process vocabulary
-# expressive, narrow at the DCL seam.
-_CONCEPT_TO_DCL_ROOT: dict[str, str] = {
-    "Customer": "customer",
-    "Employee": "employee",
-    "Vendor": "vendor",
-    "Transaction": "revenue",          # stripe charges -> revenue domain
-    "Incident": "support",             # ServiceNow tickets -> support
-    "Expense": "opex",                 # Concur expenses -> opex
-    "APInvoice": "invoice",            # NetSuite AP invoices -> invoice
-    "SaaSApp": "it_asset",             # Okta apps -> it_asset (registered + persona-mapped)
-    "User": "employee",                # Okta users surface as employee identities
-    "Assignment": "it_asset",          # Okta app assignment = user-app linkage
-}
-
-
-def _canonical_concept(concept: str) -> str:
-    """Translate an AAM mapping concept to a DCL-valid concept.
-
-    Mapping concepts are like "Customer", "Vendor", "SaaSApp" (PascalCase).
-    DCL requires the root segment (before the first dot) to be a registered
-    ontology concept AND a mapped persona domain prefix.
-
-    The translator keeps the AAM property name as a sub-segment so the triple
-    semantic stays unambiguous: "Vendor" + property "name" becomes
-    concept="vendor.name". DCL's prefix-based validator
-    (ConceptRegistry.is_valid_concept) accepts any concept whose root segment
-    is a registered id, so "vendor.name", "vendor.subsidiary", etc. all pass.
-    """
-    if not concept:
-        raise ValueError("triple_builder: concept must be a non-empty string")
-    if concept in _CONCEPT_TO_DCL_ROOT:
-        return _CONCEPT_TO_DCL_ROOT[concept]
-    # Already lowercase / pre-canonicalized — let it through unchanged. If
-    # DCL rejects it, the loud-fail error from the pusher will surface the
-    # root, and the operator can add the explicit mapping here.
-    root = concept.split(".", 1)[0]
-    if root.islower() and root.isascii():
-        return concept
-    raise ValueError(
-        f"triple_builder: concept {concept!r} has no entry in "
-        f"_CONCEPT_TO_DCL_ROOT and is not already lowercase. "
-        f"Add an explicit mapping in app/ingest/triple_builder.py before "
-        f"sending this concept to DCL."
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -270,9 +211,16 @@ def build_dcl_triples(
                 field_name, record.pipe_id, record.record_key,
             )
             continue
-        # m.concept = "Vendor"; m.property = "name". DCL concept = "vendor.name".
-        dcl_root = _canonical_concept(m.concept)
-        dcl_concept = f"{dcl_root}.{m.property}"
+        # m.concept is already a DCL-canonical lowercase root (e.g. "vendor",
+        # "it_asset.saas_app"). Compose with property: concept="vendor",
+        # property="name" -> dcl_concept="vendor.name". DCL validates the
+        # first segment against the ontology registry + persona domain prefixes.
+        if not m.concept:
+            raise ValueError(
+                f"build_dcl_triples: empty concept in mapping for field "
+                f"{m.source_field!r} (pipe_id={record.pipe_id})"
+            )
+        dcl_concept = f"{m.concept}.{m.property}"
         # Resolver confidence (when present and lower than the field-mapping
         # confidence) takes precedence — a fuzzy resolution can't push a
         # downstream triple to higher certainty than the resolution itself.

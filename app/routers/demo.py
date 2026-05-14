@@ -468,17 +468,22 @@ async def demo_answer(
     )
 
 
-def _latest_run_for(entity_id: str, concept: str) -> str | None:
+def _latest_run_for(entity_id: str, concept_prefix: str) -> str | None:
+    """Return the latest AAM-sourced run_id whose triples include this concept
+    prefix. concept_prefix is the canonical lowercase ontology root (e.g.
+    "it_asset.saas_app"). semantic_triples stores `concept_prefix.<property>`,
+    so we match by prefix LIKE.
+    """
     rows = sb._execute_composed(
         psql.SQL("""
             SELECT run_id, MAX(created_at) AS ts
               FROM semantic_triples
-             WHERE entity_id = %s AND concept = %s AND source_table LIKE 'aam_via:%%'
+             WHERE entity_id = %s AND concept LIKE %s AND source_table LIKE 'aam_via:%%'
              GROUP BY run_id
              ORDER BY ts DESC
              LIMIT 1
         """),
-        params=(entity_id, concept),
+        params=(entity_id, concept_prefix + ".%"),
         fetch=True,
     )
     return str(rows[0]["run_id"]) if rows else None
@@ -518,9 +523,9 @@ async def _answer_saas_utilization(entity_id: str, question: str) -> dict[str, A
     suffix from the triple builder.
     """
     # Latest runs per concept so we only see the most recent ingestion.
-    app_run = _latest_run_for(entity_id, "SaaSApp")
-    assign_run = _latest_run_for(entity_id, "Assignment")
-    invoice_run = _latest_run_for(entity_id, "APInvoice")
+    app_run = _latest_run_for(entity_id, "it_asset.saas_app")
+    assign_run = _latest_run_for(entity_id, "it_asset.assignment")
+    invoice_run = _latest_run_for(entity_id, "invoice")
 
     if not (app_run and assign_run and invoice_run):
         return {
@@ -540,7 +545,7 @@ async def _answer_saas_utilization(entity_id: str, question: str) -> dict[str, A
                    MAX(CASE WHEN property = 'license_seat_count' THEN value::text END) AS seat_count,
                    MAX(CASE WHEN property = 'annual_cost_per_seat_usd' THEN value::text END) AS per_seat
               FROM semantic_triples
-             WHERE entity_id = %s AND concept = 'SaaSApp' AND run_id = %s
+             WHERE entity_id = %s AND concept LIKE 'it_asset.saas_app.%%' AND run_id = %s
              GROUP BY source_run_tag
         """),
         params=(entity_id, app_run),
@@ -581,7 +586,7 @@ async def _answer_saas_utilization(entity_id: str, question: str) -> dict[str, A
         psql.SQL("""
             SELECT source_run_tag, property, value::text AS value
               FROM semantic_triples
-             WHERE entity_id = %s AND concept = 'Assignment' AND run_id = %s
+             WHERE entity_id = %s AND concept LIKE 'it_asset.assignment.%%' AND run_id = %s
                AND property IN ('app_id', 'active_in_last_30d')
         """),
         params=(entity_id, assign_run),
@@ -603,7 +608,7 @@ async def _answer_saas_utilization(entity_id: str, question: str) -> dict[str, A
         psql.SQL("""
             SELECT MAX(value::text) AS latest_due
               FROM semantic_triples
-             WHERE entity_id = %s AND concept = 'APInvoice' AND run_id = %s AND property = 'due_date'
+             WHERE entity_id = %s AND concept LIKE 'invoice.%%' AND run_id = %s AND property = 'due_date'
         """),
         params=(entity_id, invoice_run),
         fetch=True,
@@ -621,7 +626,7 @@ async def _answer_saas_utilization(entity_id: str, question: str) -> dict[str, A
         psql.SQL("""
             SELECT source_run_tag, property, value::text AS value
               FROM semantic_triples
-             WHERE entity_id = %s AND concept = 'APInvoice' AND run_id = %s
+             WHERE entity_id = %s AND concept LIKE 'invoice.%%' AND run_id = %s
                AND property IN ('vendor_id', 'gross_billed_usd', 'due_date')
         """),
         params=(entity_id, invoice_run),

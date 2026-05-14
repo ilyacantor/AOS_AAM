@@ -4,6 +4,32 @@ const { test, expect } = require('@playwright/test');
 const AAM_URL = process.env.AAM_URL || 'http://localhost:8002';
 
 // F1: Triple Health matches Ledger
+//
+// CANONICAL INVARIANT (do not "restore" the older literal):
+//   health.total_count >= latestLedgerEntry.triple_count
+//
+// This is the run-scoped variant of an earlier literal invariant —
+// `health.total_count >= ledger.total_triples` — which DID NOT HOLD by
+// construction and is not a regression to fix. Two things diverge over time:
+//
+//   1. health.total_count is the count of CURRENTLY ACTIVE AAM triples
+//      (the latest run's writes; old runs are deactivated). Bounded.
+//   2. ledger.total_triples is the SUM across ALL historical AAM ledger
+//      entries since DB inception. Unbounded — grows every run forever.
+//
+// A bounded count can never be >= an unbounded sum once enough runs accumulate.
+// The literal was structurally unholdable. The bounded variant says: the
+// latest committed AAM ledger entry's triples must appear in the active
+// health view. That's the real "ledger committed it, dashboard sees it"
+// contract. Do not change the assertion below to compare against
+// ledger.total_triples or any cumulative sum.
+//
+// Background: WP4 moved the FinOps demo ingest path off the AAM ledger
+// (writes now go directly to DCL via HTTP). The AAM ledger now tracks only
+// AAM-owned writes — /api/aam/infer, drift, fabric_planes — all
+// source_system='AAM'. The health view filter source_system='AAM' aligns
+// with that set, so the run-scoped bound is the meaningful one. History
+// in aam_deferred_work.md entries #6 and #8.
 test('F1: Triple Health panel shows AAM triples > 0 with coverage', async ({ page, request }) => {
   // Fresh-DB safety: seed an AOD handoff via /fetch (replays the saved payload)
   // so /api/aam/infer has candidates to process. Without this, a brand-new
@@ -47,15 +73,8 @@ test('F1: Triple Health panel shows AAM triples > 0 with coverage', async ({ pag
   const freshnessText = await freshness.innerText();
   expect(freshnessText.toUpperCase()).toBe('GREEN');
 
-  // Cross-check — Triple Health count is at least the latest ledger entry's
-  // triple_count. After WP4 the demo ingest path pushes triples to DCL via
-  // HTTP and does NOT touch the AAM ledger; only AAM-owned writes
-  // (/api/aam/infer, drift, fabric_planes) go through write_triples_with_ledger.
-  // The latest committed AAM run must show up in the active health view —
-  // this is the real "ledger committed it, dashboard sees it" invariant.
-  // (Ledger summary across all historical runs accumulates unbounded; the
-  // active set is bounded by the latest run, so the run-scoped invariant is
-  // the meaningful one.)
+  // Bounded invariant: health.total_count >= latest committed AAM ledger
+  // entry's triple_count. See header comment for full rationale.
   const healthRes = await request.get(`${AAM_URL}/api/aam/triple-health`);
   const healthData = await healthRes.json();
   const ledgerEntriesRes = await request.get(`${AAM_URL}/api/aam/triple-ledger?status=committed&limit=1`);

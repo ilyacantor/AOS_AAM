@@ -1,7 +1,8 @@
 """Unit tests for app.ingest.triple_builder.
 
 Coverage:
-  - concept canonicalization translates PascalCase -> DCL-valid lowercase roots
+  - concept = f"{m.concept}.{m.property}" — FieldMapping.concept is already
+    a DCL-canonical lowercase root (no runtime translation)
   - source_system is lowercased from the record (never literal "AAM")
   - resolver metadata propagates: canonical_id, resolution_method (translated to
     DCL vocab), resolution_confidence
@@ -20,7 +21,6 @@ import pytest
 from app.ingest.mappings import FieldMapping
 from app.ingest.triple_builder import (
     VENDOR_TO_SOURCE_SYSTEM,
-    _canonical_concept,
     build_dcl_triples,
     expected_source_system,
 )
@@ -43,29 +43,49 @@ def _pipe(pipe_id="wk-recipe-101", fabric_plane="IPAAS"):
     return {"pipe_id": pipe_id, "fabric_plane": fabric_plane}
 
 
-def test_canonical_concept_translates_pascalcase():
-    """Known PascalCase concepts map to ontology-valid lowercase roots."""
-    assert _canonical_concept("Vendor") == "vendor"
-    assert _canonical_concept("Customer") == "customer"
-    assert _canonical_concept("SaaSApp") == "it_asset"
-    assert _canonical_concept("APInvoice") == "invoice"
-    assert _canonical_concept("User") == "employee"
-
-
-def test_canonical_concept_passes_through_lowercase():
-    """Already-lowercase concepts are accepted as-is."""
-    assert _canonical_concept("vendor") == "vendor"
-    assert _canonical_concept("invoice.amount") == "invoice.amount"
-
-
-def test_canonical_concept_raises_on_unknown():
-    """Unknown PascalCase concept surfaces a readable error so the operator
-    can add an explicit mapping rather than letting DCL reject it.
+def test_concept_compounded_from_mapping_root_and_property():
+    """FieldMapping.concept is the canonical lowercase root; triple_builder
+    composes with property to produce the DCL concept string.
     """
-    with pytest.raises(ValueError) as exc:
-        _canonical_concept("MysteryThing")
-    assert "MysteryThing" in str(exc.value)
-    assert "_CONCEPT_TO_DCL_ROOT" in str(exc.value)
+    rec = _record(payload={"vendor_id": "V-1"}, source_system="NetSuite")
+    triples = build_dcl_triples(
+        rec, pipe=_pipe(),
+        mappings=[FieldMapping("vendor_id", "vendor", "id")],
+        tenant_id="00000000-0000-0000-0000-000000000001",
+        entity_id="e",
+        vendor="workato",
+    )
+    assert triples[0]["concept"] == "vendor.id"
+
+
+def test_concept_compound_root_preserved_for_distinguishable_domains():
+    """Compound roots like "it_asset.saas_app" pass through to DCL as
+    "it_asset.saas_app.<property>" — DCL validates the first segment
+    (it_asset) against the ontology registry while AAM preserves the
+    SaaSApp/Assignment distinction.
+    """
+    rec = _record(payload={"id": "okta-app-1"}, source_system="Okta")
+    triples = build_dcl_triples(
+        rec, pipe=_pipe(),
+        mappings=[FieldMapping("id", "it_asset.saas_app", "id")],
+        tenant_id="00000000-0000-0000-0000-000000000001",
+        entity_id="e",
+        vendor="boomi",
+    )
+    assert triples[0]["concept"] == "it_asset.saas_app.id"
+
+
+def test_empty_concept_in_mapping_raises():
+    """Empty concept on FieldMapping surfaces a loud error."""
+    rec = _record(payload={"vendor_id": "V"}, source_system="NetSuite")
+    with pytest.raises(ValueError, match="empty concept"):
+        build_dcl_triples(
+            rec, pipe=_pipe(),
+            mappings=[FieldMapping("vendor_id", "", "id")],
+            tenant_id="00000000-0000-0000-0000-000000000001",
+            entity_id="e",
+            vendor="workato",
+        )
 
 
 def test_vendor_source_system_map_covers_demo_scenarios():
@@ -95,8 +115,8 @@ def test_build_dcl_triples_happy_path():
         source_system="NetSuite",
     )
     mappings = [
-        FieldMapping("vendor_id", "Vendor", "id"),
-        FieldMapping("vendor_name", "Vendor", "name"),
+        FieldMapping("vendor_id", "vendor", "id"),
+        FieldMapping("vendor_name", "vendor", "name"),
     ]
     triples = build_dcl_triples(
         rec, pipe=_pipe(), mappings=mappings,
@@ -135,7 +155,7 @@ def test_build_dcl_triples_propagates_resolver_metadata():
             }
         },
     )
-    mappings = [FieldMapping("vendor_name", "Vendor", "name", confidence=0.95)]
+    mappings = [FieldMapping("vendor_name", "vendor", "name", confidence=0.95)]
     triples = build_dcl_triples(
         rec, pipe=_pipe(), mappings=mappings,
         tenant_id="00000000-0000-0000-0000-000000000001",
@@ -176,7 +196,7 @@ def test_build_dcl_triples_translates_resolver_method_to_dcl_vocab():
         )
         triples = build_dcl_triples(
             rec, pipe=_pipe(),
-            mappings=[FieldMapping("vendor_name", "Vendor", "name")],
+            mappings=[FieldMapping("vendor_name", "vendor", "name")],
             tenant_id="00000000-0000-0000-0000-000000000001",
             entity_id="test-entity",
             vendor="workato",
@@ -189,7 +209,7 @@ def test_build_dcl_triples_translates_resolver_method_to_dcl_vocab():
 def test_build_dcl_triples_loud_fail_missing_identity():
     """Missing tenant_id or entity_id raises immediately — no silent default."""
     rec = _record(payload={"vendor_name": "X"}, source_system="NetSuite")
-    mappings = [FieldMapping("vendor_name", "Vendor", "name")]
+    mappings = [FieldMapping("vendor_name", "vendor", "name")]
     with pytest.raises(ValueError, match="tenant_id and entity_id"):
         build_dcl_triples(
             rec, pipe=_pipe(), mappings=mappings,
@@ -208,7 +228,7 @@ def test_build_dcl_triples_loud_fail_missing_source_system():
     with pytest.raises(ValueError, match="source_system is empty"):
         build_dcl_triples(
             rec, pipe=_pipe(),
-            mappings=[FieldMapping("vendor_name", "Vendor", "name")],
+            mappings=[FieldMapping("vendor_name", "vendor", "name")],
             tenant_id="00000000-0000-0000-0000-000000000001",
             entity_id="test-entity",
             vendor="workato",
@@ -225,7 +245,7 @@ def test_build_dcl_triples_skips_unmapped_fields():
     )
     triples = build_dcl_triples(
         rec, pipe=_pipe(),
-        mappings=[FieldMapping("vendor_name", "Vendor", "name")],
+        mappings=[FieldMapping("vendor_name", "vendor", "name")],
         tenant_id="00000000-0000-0000-0000-000000000001",
         entity_id="test-entity",
         vendor="workato",

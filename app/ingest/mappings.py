@@ -5,6 +5,12 @@ Platform repo). For the demo, deterministic mappings cover the two vendor
 schemas defined in scenarios/healthy.json and scenarios/multi_vendor.json.
 
 confidence_score is 0.95 — these are explicit, exact mappings.
+
+Concept names follow DCL's canonical lowercase ontology IDs (151 entries in
+dcl/config/ontology_concepts.yaml). Compound names like "it_asset.saas_app"
+share the registered root concept ("it_asset") for DCL validation while
+preserving the AAM-side distinction between SaaSApp and Assignment, which
+both belong to the same DCL domain but produce different triples.
 """
 
 from __future__ import annotations
@@ -26,37 +32,37 @@ class FieldMapping:
 MAPPINGS: dict[str, list[FieldMapping]] = {
     # Workato — Salesforce Account
     "workato::salesforce::account_id": [
-        FieldMapping("account_id", "Customer", "id"),
-        FieldMapping("account_name", "Customer", "name"),
-        FieldMapping("annual_revenue", "Customer", "revenue_usd"),
-        FieldMapping("industry", "Customer", "industry"),
+        FieldMapping("account_id", "customer", "id"),
+        FieldMapping("account_name", "customer", "name"),
+        FieldMapping("annual_revenue", "customer", "revenue_usd"),
+        FieldMapping("industry", "customer", "industry"),
     ],
     # Workato — Workday HR
     "workato::workday::employee_id": [
-        FieldMapping("employee_id", "Employee", "id"),
-        FieldMapping("department", "Employee", "department"),
-        FieldMapping("salary", "Employee", "compensation_usd"),
+        FieldMapping("employee_id", "employee", "id"),
+        FieldMapping("department", "employee", "department"),
+        FieldMapping("salary", "employee", "compensation_usd"),
     ],
     # Workato — Stripe revenue
     "workato::stripe::charge_id": [
-        FieldMapping("charge_id", "Transaction", "id"),
-        FieldMapping("amount_cents", "Transaction", "amount_cents"),
-        FieldMapping("currency", "Transaction", "currency"),
-        FieldMapping("customer_id", "Transaction", "customer_id"),
+        FieldMapping("charge_id", "revenue", "id"),
+        FieldMapping("amount_cents", "revenue", "amount_cents"),
+        FieldMapping("currency", "revenue", "currency"),
+        FieldMapping("customer_id", "revenue", "customer_id"),
     ],
     # Boomi — ServiceNow tickets
     "boomi::servicenow::ticket_id": [
-        FieldMapping("ticket_id", "Incident", "id"),
-        FieldMapping("subject", "Incident", "subject"),
-        FieldMapping("priority", "Incident", "priority"),
-        FieldMapping("status", "Incident", "status"),
+        FieldMapping("ticket_id", "support", "id"),
+        FieldMapping("subject", "support", "subject"),
+        FieldMapping("priority", "support", "priority"),
+        FieldMapping("status", "support", "status"),
     ],
     # Boomi — Concur expenses
     "boomi::concur::expense_id": [
-        FieldMapping("expense_id", "Expense", "id"),
-        FieldMapping("amount", "Expense", "amount_usd"),
-        FieldMapping("category", "Expense", "category"),
-        FieldMapping("submitter", "Expense", "submitter"),
+        FieldMapping("expense_id", "opex", "id"),
+        FieldMapping("amount", "opex", "amount_usd"),
+        FieldMapping("category", "opex", "category"),
+        FieldMapping("submitter", "opex", "submitter"),
     ],
 
     # --- FinOps SaaS-spending demo (NetSuite vendor/AP via Workato, Okta via Boomi) ---
@@ -66,55 +72,60 @@ MAPPINGS: dict[str, list[FieldMapping]] = {
 
     # Workato -> NetSuite Vendor Master
     "workato::netsuite::vendor": [
-        FieldMapping("vendor_id", "Vendor", "id"),
-        FieldMapping("vendor_name", "Vendor", "name"),
-        FieldMapping("category", "Vendor", "category"),
-        FieldMapping("currency", "Vendor", "currency"),
-        FieldMapping("subsidiary", "Vendor", "subsidiary"),
-        FieldMapping("is_1099", "Vendor", "is_1099_reportable"),
+        FieldMapping("vendor_id", "vendor", "id"),
+        FieldMapping("vendor_name", "vendor", "name"),
+        FieldMapping("category", "vendor", "category"),
+        FieldMapping("currency", "vendor", "currency"),
+        FieldMapping("subsidiary", "vendor", "subsidiary"),
+        FieldMapping("is_1099", "vendor", "is_1099_reportable"),
     ],
     # Workato -> NetSuite AP Invoice. NetSuite's "amount" is the gross billed
     # amount before any reclassification — it could mean gross_billed_usd or
     # net_recognized_usd. Mid-confidence mapping (0.78) surfaces in the
     # Semantic Mapping UI for explicit operator confirmation.
     "workato::netsuite::ap_invoice": [
-        FieldMapping("bill_no", "APInvoice", "id"),
-        FieldMapping("vendor_id", "APInvoice", "vendor_id"),
-        FieldMapping("vendor_name", "APInvoice", "vendor_name"),
-        FieldMapping("due_date", "APInvoice", "due_date"),
-        FieldMapping("amount", "APInvoice", "gross_billed_usd", confidence=0.78),
-        FieldMapping("currency", "APInvoice", "currency"),
-        FieldMapping("status", "APInvoice", "payment_status"),
-        FieldMapping("subsidiary", "APInvoice", "subsidiary"),
-        FieldMapping("posting_period", "APInvoice", "posting_period"),
+        FieldMapping("bill_no", "invoice", "id"),
+        FieldMapping("vendor_id", "invoice", "vendor_id"),
+        FieldMapping("vendor_name", "invoice", "vendor_name"),
+        FieldMapping("due_date", "invoice", "due_date"),
+        FieldMapping("amount", "invoice", "gross_billed_usd", confidence=0.78),
+        FieldMapping("currency", "invoice", "currency"),
+        FieldMapping("status", "invoice", "payment_status"),
+        FieldMapping("subsidiary", "invoice", "subsidiary"),
+        FieldMapping("posting_period", "invoice", "posting_period"),
     ],
-    # Boomi -> Okta SaaS App Catalog
+    # Boomi -> Okta SaaS App Catalog (compound it_asset.saas_app keeps the
+    # AAM-side distinction from Assignment while sharing DCL's registered
+    # it_asset root concept)
     "boomi::okta::saas_app": [
-        FieldMapping("id", "SaaSApp", "id"),
-        FieldMapping("label", "SaaSApp", "name"),
-        FieldMapping("status", "SaaSApp", "status"),
-        FieldMapping("license_tier", "SaaSApp", "license_tier"),
-        FieldMapping("license_seat_count", "SaaSApp", "license_seat_count"),
-        FieldMapping("annual_cost_per_seat_usd", "SaaSApp", "annual_cost_per_seat_usd"),
-        FieldMapping("created", "SaaSApp", "created_at"),
+        FieldMapping("id", "it_asset.saas_app", "id"),
+        FieldMapping("label", "it_asset.saas_app", "name"),
+        FieldMapping("status", "it_asset.saas_app", "status"),
+        FieldMapping("license_tier", "it_asset.saas_app", "license_tier"),
+        FieldMapping("license_seat_count", "it_asset.saas_app", "license_seat_count"),
+        FieldMapping("annual_cost_per_seat_usd", "it_asset.saas_app", "annual_cost_per_seat_usd"),
+        FieldMapping("created", "it_asset.saas_app", "created_at"),
     ],
-    # Boomi -> Okta User Directory
+    # Boomi -> Okta User Directory (employee root — Okta user accounts share
+    # the same DCL domain as Workday Employee; source_system + property
+    # discriminate at query time)
     "boomi::okta::user": [
-        FieldMapping("id", "User", "id"),
-        FieldMapping("profile_email", "User", "email"),
-        FieldMapping("profile_first_name", "User", "first_name"),
-        FieldMapping("profile_last_name", "User", "last_name"),
-        FieldMapping("status", "User", "status"),
-        FieldMapping("department", "User", "department"),
+        FieldMapping("id", "employee", "id"),
+        FieldMapping("profile_email", "employee", "email"),
+        FieldMapping("profile_first_name", "employee", "first_name"),
+        FieldMapping("profile_last_name", "employee", "last_name"),
+        FieldMapping("status", "employee", "status"),
+        FieldMapping("department", "employee", "department"),
     ],
-    # Boomi -> Okta App Assignment with login telemetry
+    # Boomi -> Okta App Assignment with login telemetry (compound
+    # it_asset.assignment shares the it_asset root with SaaSApp)
     "boomi::okta::assignment": [
-        FieldMapping("id", "Assignment", "id"),
-        FieldMapping("user_id", "Assignment", "user_id"),
-        FieldMapping("app_id", "Assignment", "app_id"),
-        FieldMapping("assignment_date", "Assignment", "assignment_date"),
-        FieldMapping("last_login", "Assignment", "last_login_at"),
-        FieldMapping("active_in_last_30d", "Assignment", "active_in_last_30d"),
+        FieldMapping("id", "it_asset.assignment", "id"),
+        FieldMapping("user_id", "it_asset.assignment", "user_id"),
+        FieldMapping("app_id", "it_asset.assignment", "app_id"),
+        FieldMapping("assignment_date", "it_asset.assignment", "assignment_date"),
+        FieldMapping("last_login", "it_asset.assignment", "last_login_at"),
+        FieldMapping("active_in_last_30d", "it_asset.assignment", "active_in_last_30d"),
     ],
 }
 
