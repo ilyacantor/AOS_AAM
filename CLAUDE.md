@@ -56,7 +56,7 @@ AutonomOS is an AI-native enterprise platform that delivers unified context for 
 **AOS and Convergence are strict separation of concerns with no shared plumbing.** Unit of work is the stage, not the pipeline. No shared code paths between AOS and Convergence pipelines.
 
 - **Entities:** Transitional fixture configs (Meridian, Cascadia) are superseded by convergence_transition_master WP2. Entity is a tag — no split brain.
-- **Farm configs:** Current fixture configs will be eradicated per convergence_transition_master. Any numbers at $35M or $124M scale are broken.
+- **Farm configs:** `industry_templates/saas_consultancy.yaml` ($5B consultancy, "Meridian" tag) and `industry_templates/bpm_services.yaml` ($1B BPM, "Cascadia" tag), loaded via `business_data_orchestrator.generate_multi_entity()`. Slated for full eradication per convergence_transition_master WP2. Any numbers at $35M or $124M scale are broken.
 - **No demo mode.** fact_base.json is removed. If data is missing, fail loudly.
 
 ### Terminology

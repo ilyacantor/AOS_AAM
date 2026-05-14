@@ -43,3 +43,9 @@ vite.config.ts.*
 # Binary documents
 *.xlsx
 .env.development
+
+# Test artifacts
+test-results/
+tests/e2e/screenshots/
+tests/e2e/artifacts/*.png
+.last-run.json
