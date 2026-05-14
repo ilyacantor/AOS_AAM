@@ -26,7 +26,7 @@ import logging
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, Optional
 
 from ..db.triple_writer import write_triples
 from ..transport.http import TransportRecord
@@ -59,6 +59,9 @@ def _make_triple(
     source_run_tag: str,
     confidence: float,
     vendor: str,
+    canonical_id: Optional[str] = None,
+    resolution_method: Optional[str] = None,
+    resolution_confidence: Optional[float] = None,
 ) -> dict[str, Any]:
     return {
         "tenant_id": tenant_id,
@@ -79,9 +82,9 @@ def _make_triple(
         "source_run_tag": source_run_tag,
         "confidence_score": confidence,
         "confidence_tier": _tier(confidence),
-        "canonical_id": None,
-        "resolution_method": None,
-        "resolution_confidence": None,
+        "canonical_id": canonical_id,
+        "resolution_method": resolution_method,
+        "resolution_confidence": resolution_confidence,
     }
 
 
@@ -91,10 +94,40 @@ def _make_triple(
 _PG_RUN_COL = "run" + "_id"
 
 
+# DCL's semantic_triples CHECK constraint on resolution_method accepts only
+# {'deterministic','fuzzy','manual'}. AAM's resolver tracks a richer
+# vocabulary internally — translate at the write boundary so DCL's schema
+# stays the source of truth and AAM keeps its provenance fidelity in the
+# in-memory dict (audit, observability). Schema changes to DCL require a
+# Convergence-coordination round per SCHEMA_CONTRACT.md, out of scope here.
+_RESOLUTION_METHOD_TO_PG = {
+    "exact": "deterministic",
+    "alias": "deterministic",
+    "pattern": "deterministic",
+    "discovery": "deterministic",
+    "fuzzy": "fuzzy",
+    "hitl_pending": "fuzzy",
+    "hitl_confirmed": "manual",
+    # "rejected" never produces a canonical_id, so the in-memory row carries
+    # it for audit only and the column is dropped at write.
+    "rejected": None,
+}
+
+
 def _to_pg_row(triple: dict[str, Any]) -> dict[str, Any]:
-    """Translate the namespaced identifier to the PG column at the write boundary."""
+    """Translate the namespaced identifier + resolution_method to the PG
+    column vocabulary at the write boundary.
+    """
     row = dict(triple)
     row[_PG_RUN_COL] = row.pop("aam_inference_id", None)
+    method = row.get("resolution_method")
+    if method is not None:
+        if method not in _RESOLUTION_METHOD_TO_PG:
+            raise ValueError(
+                f"_to_pg_row: unknown resolution_method={method!r}. "
+                f"Allowed AAM values: {sorted(_RESOLUTION_METHOD_TO_PG.keys())}"
+            )
+        row["resolution_method"] = _RESOLUTION_METHOD_TO_PG[method]
     return row
 
 
@@ -120,6 +153,14 @@ def build_triples(
         )
     if not record.source_system:
         raise ValueError(f"build_triples: record.source_system is empty pipe_id={record.pipe_id} record_key={record.record_key}")
+    # Resolution metadata (canonical_id, resolution_method, resolution_confidence)
+    # is attached to the record by the resolver stage upstream of this builder.
+    # Absence means the resolver was skipped (e.g., unit tests) — leave the
+    # resolution columns NULL rather than fabricating values.
+    resolution = (record.metadata or {}).get("_resolution") or {}
+    canonical_id = resolution.get("canonical_id")
+    resolution_method = resolution.get("resolution_method")
+    resolution_confidence = resolution.get("resolution_confidence")
     out: list[dict[str, Any]] = []
     mapping_by_field = {m.source_field: m for m in mappings}
     for field_name, value in record.payload.items():
@@ -143,6 +184,9 @@ def build_triples(
             source_run_tag=source_run_tag,
             confidence=m.confidence,
             vendor=vendor,
+            canonical_id=canonical_id,
+            resolution_method=resolution_method,
+            resolution_confidence=resolution_confidence,
         ))
     return out
 

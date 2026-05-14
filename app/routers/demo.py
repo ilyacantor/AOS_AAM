@@ -34,7 +34,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
-from ..db import supabase_client as sb
+from ..db import hitl_store, supabase_client as sb
 from ..ui.styles import NAV_HTML, NAV_STYLE, ui_nav
 from ..ingest.mappings import MAPPINGS, FieldMapping
 
@@ -49,18 +49,25 @@ _IDENTITY_REVIEW_STATE: dict[str, str] = {}  # canonical_id -> "approved" | "rej
 
 
 @router.post("/api/aam/demo/reset")
-async def demo_reset() -> dict[str, Any]:
-    """Clear in-memory mapping approvals + identity review decisions.
+async def demo_reset(tenant_id: str | None = Query(default=None)) -> dict[str, Any]:
+    """Clear in-memory mapping approvals + (optionally) the HITL queue for a tenant.
 
-    Used by Playwright suites that need a clean per-test starting state. Does
-    not touch persisted triples or pipes — only the demo's interactive UI
-    state.
+    Used by Playwright suites that need a clean per-test starting state.
+    Mapping approvals live in-memory only. The HITL queue is persisted in
+    SQLite — reset is scoped to a single tenant so it never wipes cross-tenant
+    state. If no tenant_id is provided, the SQLite reset is skipped and only
+    the in-memory mapping cache is cleared.
     """
     cleared_mappings = len(_MAPPING_APPROVALS)
-    cleared_reviews = len(_IDENTITY_REVIEW_STATE)
     _MAPPING_APPROVALS.clear()
     _IDENTITY_REVIEW_STATE.clear()
-    return {"cleared_mappings": cleared_mappings, "cleared_reviews": cleared_reviews}
+    cleared_hitl = 0
+    if tenant_id:
+        cleared_hitl = hitl_store.reset_for_tenant(tenant_id.strip())
+    return {
+        "cleared_mappings": cleared_mappings,
+        "cleared_hitl_rows": cleared_hitl,
+    }
 
 
 def _load_json(name: str) -> Any:
@@ -195,37 +202,203 @@ async def demo_mappings_approve(req: ApproveMappingRequest) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 class IdentityResolveRequest(BaseModel):
-    canonical_id: str
+    canonical_id: str | None = None
+    hitl_queue_id: str | None = None
     decision: str = Field(..., description="approved | rejected")
+    decided_by: str | None = None
 
 
 @router.get("/api/aam/demo/identity-matches")
-async def demo_identity_matches() -> dict[str, Any]:
-    """Return the pre-computed identity matches. Applies any in-memory review
-    decisions for the demo so the queue collapses as the operator approves.
+async def demo_identity_matches(
+    tenant_id: str | None = Query(default=None),
+    entity_id: str | None = Query(default=None),
+) -> dict[str, Any]:
+    """Return identity matches produced by the live resolver.
+
+    Sources:
+      - pending HITL rows: from resolver_hitl_queue (status='pending')
+      - auto-accepted matches: from semantic_triples where the same
+        canonical_id appears across two distinct pipe_ids (NetSuite vendor
+        pipe + Okta SaaS-app pipe), with resolution_method in DCL's
+        vocabulary ('deterministic','fuzzy','manual'). The resolver's
+        richer internal taxonomy is translated at the write boundary.
+
+    tenant_id is required for HITL pulls; if missing we default to the most
+    recent ingest's tenant (so the demo UI works without query params).
     """
-    matches = _load_json("identity_matches.json")
-    out: list[dict[str, Any]] = []
-    for m in matches:
-        cid = m.get("canonical_id")
-        decision = _IDENTITY_REVIEW_STATE.get(cid)
-        rec = dict(m)
-        if decision == "approved" and m.get("review_status") == "pending_review":
-            rec["review_status"] = "auto_accepted"
-            rec["confidence"] = 0.99
-        if decision == "rejected":
-            rec["review_status"] = "rejected"
-        out.append(rec)
-    pending = sum(1 for m in out if m.get("review_status") == "pending_review")
-    return {"matches": out, "count": len(out), "pending_review": pending}
+    eid = _resolve_entity_id(entity_id)
+    tenant_id = (tenant_id or "").strip()
+    if not tenant_id:
+        # Best-effort: use the most recent semantic_triples row for this entity.
+        rows = sb._execute_composed(
+            psql.SQL("""
+                SELECT tenant_id::text AS tenant_id
+                  FROM semantic_triples
+                 WHERE entity_id = %s
+                   AND source_table LIKE 'aam_via:%%'
+                 ORDER BY created_at DESC
+                 LIMIT 1
+            """),
+            params=(eid,),
+            fetch=True,
+        )
+        tenant_id = (rows[0]["tenant_id"] if rows else "") or ""
+    pending_rows = (
+        hitl_store.get_pending(tenant_id=tenant_id, entity_id=eid, domain="saas_subscription", limit=500)
+        if tenant_id else []
+    )
+    pending = [
+        {
+            "domain": r["domain"],
+            "left_pipe": r["left_pipe_id"],
+            "left_record_key": r["left_record_key"],
+            "left_display_name": r["left_value"],
+            "right_pipe": r["right_pipe_id"] or "",
+            "right_record_key": r["right_record_key"] or "",
+            "right_display_name": r["right_value"],
+            "canonical_id": r["proposed_canonical_id"],
+            "confidence": r["confidence"],
+            "match_method": "fuzzy_name",
+            "review_status": "pending_review",
+            "hitl_queue_id": r["hitl_queue_id"],
+            "reason": (r.get("extra") or {}).get(
+                "input_value",
+                f"Resolver scored this pair at {r['confidence']:.2f} — operator review required.",
+            ),
+        }
+        for r in pending_rows
+    ]
+    # Auto-accepted matches: canonical_ids that appear under two distinct
+    # pipes for the same tenant/entity. DCL's resolution_method vocabulary is
+    # {'deterministic','fuzzy','manual'} (see app/ingest/triples.py
+    # _RESOLUTION_METHOD_TO_PG) — those are the values that show up here.
+    auto_rows = sb._execute_composed(
+        psql.SQL("""
+            WITH per_canonical AS (
+                SELECT canonical_id::text AS canonical_id,
+                       MAX(CASE WHEN source_field IN ('vendor_name','vendor_id') THEN value::text END) AS left_value,
+                       MAX(CASE WHEN source_field IN ('label','id') THEN value::text END) AS right_value,
+                       MAX(CASE WHEN source_field IN ('vendor_id') THEN value::text END) AS left_key,
+                       MAX(CASE WHEN source_field IN ('id') THEN value::text END) AS right_key,
+                       MAX(resolution_method) AS resolution_method,
+                       MAX(resolution_confidence) AS resolution_confidence,
+                       COUNT(DISTINCT pipe_id) AS pipe_count
+                  FROM semantic_triples
+                 WHERE entity_id = %s
+                   AND canonical_id IS NOT NULL
+                   AND source_table LIKE 'aam_via:%%'
+                   AND resolution_method IN ('deterministic','fuzzy','manual')
+                 GROUP BY canonical_id
+            )
+            SELECT * FROM per_canonical
+             WHERE pipe_count >= 2
+             ORDER BY resolution_confidence DESC NULLS LAST
+             LIMIT 500
+        """),
+        params=(eid,),
+        fetch=True,
+    )
+    def _unquote(s):
+        if s is None:
+            return ""
+        return str(s).strip('"')
+    auto_accepted: list[dict[str, Any]] = []
+    for r in auto_rows:
+        method = (r.get("resolution_method") or "").strip()
+        confidence = float(r.get("resolution_confidence") or 0.0)
+        auto_accepted.append({
+            "domain": "saas_subscription",
+            "left_pipe": "workato_netsuite",
+            "left_record_key": _unquote(r.get("left_key")),
+            "left_display_name": _unquote(r.get("left_value")),
+            "right_pipe": "boomi_okta",
+            "right_record_key": _unquote(r.get("right_key")),
+            "right_display_name": _unquote(r.get("right_value")),
+            "canonical_id": r["canonical_id"],
+            "confidence": confidence,
+            "match_method": method,
+            "review_status": "auto_accepted",
+        })
+    matches = pending + auto_accepted
+    return {
+        "matches": matches,
+        "count": len(matches),
+        "pending_review": len(pending),
+        "tenant_id": tenant_id,
+        "entity_id": eid,
+    }
 
 
 @router.post("/api/aam/demo/identity-matches/resolve")
 async def demo_identity_resolve(req: IdentityResolveRequest) -> dict[str, Any]:
+    """Demo passthrough — forward operator decisions to the real resolver
+    endpoint so the HITL queue + semantic_triples both reflect the decision.
+
+    The demo UI carries hitl_queue_id on each review row; if absent we look
+    up by proposed_canonical_id (defensive — should not happen in normal flow).
+    """
     if req.decision not in ("approved", "rejected"):
         raise HTTPException(status_code=400, detail="decision must be 'approved' or 'rejected'")
-    _IDENTITY_REVIEW_STATE[req.canonical_id] = req.decision
-    return {"canonical_id": req.canonical_id, "decision": req.decision}
+    if not req.hitl_queue_id:
+        # Resolve by canonical_id — the UI sends it for backwards compat with
+        # the old in-memory implementation.
+        if not req.canonical_id:
+            raise HTTPException(status_code=422, detail="hitl_queue_id or canonical_id required")
+        # The hitl_store iterates pending rows; find by proposed canonical_id.
+        # For the demo we assume a single tenant pending the same canonical_id.
+        rows = sb._execute_composed(
+            psql.SQL("""
+                SELECT DISTINCT tenant_id::text AS tenant_id
+                  FROM semantic_triples
+                 WHERE canonical_id::text = %s
+                   AND source_table LIKE 'aam_via:%%'
+                 LIMIT 1
+            """),
+            params=(req.canonical_id,),
+            fetch=True,
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail=f"canonical_id {req.canonical_id} not found")
+        tenant_id = rows[0]["tenant_id"]
+        pending = hitl_store.list_all(tenant_id=tenant_id, status="pending")
+        match = next((r for r in pending if r["proposed_canonical_id"] == req.canonical_id), None)
+        if not match:
+            raise HTTPException(status_code=404,
+                                detail=f"no pending HITL row for canonical_id {req.canonical_id}")
+        hitl_queue_id = match["hitl_queue_id"]
+    else:
+        hitl_queue_id = req.hitl_queue_id
+    decided = hitl_store.decide(
+        hitl_queue_id=hitl_queue_id,
+        decision=req.decision,
+        decided_by=req.decided_by or "demo-operator",
+    )
+    triples_promoted = 0
+    if req.decision == "approved":
+        # Reuse the canonical promotion path on the resolver router so the
+        # vocab translation (fuzzy -> manual) and audit semantics stay in one
+        # place. Avoids drift between demo + production promotion code.
+        from .resolver import _promote_triples_to_confirmed
+        triples_promoted = _promote_triples_to_confirmed(
+            tenant_id=decided["tenant_id"],
+            entity_id=decided["entity_id"],
+            canonical_id=decided["proposed_canonical_id"],
+        )
+        hitl_store.append_audit(
+            hitl_queue_id=hitl_queue_id,
+            event="triples_promoted",
+            details={"updated_triples": triples_promoted,
+                     "new_method": "manual",
+                     "new_confidence": 0.99},
+            actor="aam.demo",
+        )
+    return {
+        "canonical_id": decided["proposed_canonical_id"],
+        "hitl_queue_id": hitl_queue_id,
+        "decision": req.decision,
+        "status": decided["status"],
+        "triples_promoted": triples_promoted,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -249,7 +422,7 @@ async def demo_answer(
     eid = _resolve_entity_id(entity_id)
     q = question.lower()
     if "utilization" in q or "saas" in q or "subscriptions" in q or "licenses" in q:
-        return _answer_saas_utilization(eid, question)
+        return await _answer_saas_utilization(eid, question)
     return JSONResponse(
         status_code=200,
         content={
@@ -303,7 +476,7 @@ def _resolve_pipe_ids_by_domain() -> dict[str, str]:
     return out
 
 
-def _answer_saas_utilization(entity_id: str, question: str) -> dict[str, Any]:
+async def _answer_saas_utilization(entity_id: str, question: str) -> dict[str, Any]:
     """Answer the FinOps SaaS-utilization demo question.
 
     Uses SQL aggregation against `semantic_triples` (latest run per concept)
@@ -444,8 +617,11 @@ def _answer_saas_utilization(entity_id: str, question: str) -> dict[str, Any]:
     netsuite_vendor_pipe_id = pipe_ids_by_domain.get("vendor", "")
     okta_app_pipe_id = pipe_ids_by_domain.get("saas_app", "")
 
-    # Identity matches: vendor.left_record_key (NetSuite vendor_id) ↔ saas_app.right_record_key (Okta app id)
-    matches_doc = _load_json("identity_matches.json")
+    # Identity matches: source of truth is the live resolver output, not a
+    # pre-computed JSON. We pull auto-accepted matches by joining triples on
+    # canonical_id where the same id appears under two pipes for this entity,
+    # and pending review matches from the HITL queue.
+    matches_doc = (await demo_identity_matches(tenant_id=None, entity_id=entity_id))["matches"]
     saas_matches = [m for m in matches_doc if m.get("domain") == "saas_subscription"]
     auto_matches = [m for m in saas_matches if m.get("review_status") == "auto_accepted"]
     pending_matches = [m for m in saas_matches if m.get("review_status") == "pending_review"]

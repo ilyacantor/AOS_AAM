@@ -30,7 +30,6 @@
     "ap_invoices_netsuite": 4800,
     "apps_okta": 200,
     "users_okta": 600,
-    "assignments_okta": 27345,
-    "identity_matches": 200
+    "assignments_okta": 27345
   }
 }

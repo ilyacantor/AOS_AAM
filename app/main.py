@@ -97,6 +97,9 @@ async def lifespan(app):
     # Initialize the triple write ledger (SQLite, AAM-local)
     from .db.ledger import init_ledger_db
     init_ledger_db()
+    # Initialize the resolver HITL queue (SQLite, AAM-local)
+    from .db.hitl_store import init_hitl_db
+    init_hitl_db()
     # Log operating mode at startup
     from .utils.operating_mode import get_operating_mode
     mode = get_operating_mode()
@@ -163,6 +166,7 @@ from .routers.controls_ui import router as controls_ui_router
 from .routers.aam_ui_actions import router as aam_ui_actions_router
 from .routers.ingest_demo import router as ingest_demo_router
 from .routers.demo import router as demo_router
+from .routers.resolver import router as resolver_router
 
 app.include_router(handoff_router)
 app.include_router(fabric_router)
@@ -184,6 +188,7 @@ app.include_router(controls_ui_router)
 app.include_router(aam_ui_actions_router)
 app.include_router(ingest_demo_router)
 app.include_router(demo_router)
+app.include_router(resolver_router)
 app.include_router(ui_pages_router)
 
 

@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 from ..adapters.factory import get_mcp_pair_for_vendor, supported_vendors
 from ..db import supabase_client as sb
 from ..ingest.flow_controller import FlowController
+from ..ingest.resolver import CanonicalRegistry, RecordResolver, ResolutionResult
 from ..ingest.triples import ingest_records
 from ..mcp.translator import ToolOutputTranslator
 from ..transport.http import HTTPTransport, TransportRecord
@@ -54,6 +55,7 @@ class IngestDemoResponse(BaseModel):
     total_pipes: int
     total_records: int
     total_triples: int
+    resolver_summary: dict[str, int] = Field(default_factory=dict)
 
 
 def _resolve_identity(req: IngestDemoRequest) -> tuple[str, str]:
@@ -114,6 +116,8 @@ async def run_ingest_demo(req: IngestDemoRequest) -> IngestDemoResponse:
     total_records = 0
     total_triples = 0
 
+    # Phase A: fetch per (vendor, pipe).
+    all_vendor_runs: list[tuple[str, list[tuple[dict, list[TransportRecord]]]]] = []
     for vendor in req.vendors:
         try:
             discovery, transport = get_mcp_pair_for_vendor(vendor)
@@ -132,14 +136,72 @@ async def run_ingest_demo(req: IngestDemoRequest) -> IngestDemoResponse:
             )
 
         records_collected: list[tuple[dict, list[TransportRecord]]] = []
-        vendor_records = 0
         for pipe in pipes:
             records = _fetch_records(transport, pipe)
-            vendor_records += len(records)
             records_collected.append((pipe, records))
+        all_vendor_runs.append((vendor, records_collected))
 
+    # Phase B: run resolver. SaaS-subscription identity is the NetSuite vendor
+    # (domain=vendor) <-> Okta SaaS app (domain=saas_app) join. The resolver
+    # seeds its registry from vendor records first, then resolves Okta app
+    # records against it. Other domains (ap_invoice, user, assignment) pass
+    # through unresolved — they don't need identity unification for the demo.
+    registry = CanonicalRegistry()
+    resolver = RecordResolver(registry)
+    resolver_summary = {
+        "exact": 0, "alias": 0, "pattern": 0, "fuzzy": 0,
+        "hitl_pending": 0, "discovery": 0, "rejected": 0,
+    }
+
+    for vendor, vendor_pipes in all_vendor_runs:
+        for pipe, records in vendor_pipes:
+            domain = _pipe_domain(pipe)
+            if domain not in ("vendor", "saas_app"):
+                continue
+            value_field = "vendor_name" if domain == "vendor" else "label"
+            record_key_field = "vendor_id" if domain == "vendor" else "id"
+            pipe_id_str = str(pipe.get("pipe_id") or "")
+            for record in records:
+                payload = record.payload or {}
+                if value_field not in payload:
+                    raise HTTPException(
+                        status_code=502,
+                        detail=(
+                            f"ingest_demo: pipe {pipe_id_str} ({pipe.get('display_name')}) "
+                            f"record_key={record.record_key} missing identity field {value_field!r} — "
+                            f"present keys: {list(payload.keys())}"
+                        ),
+                    )
+                try:
+                    res: ResolutionResult = resolver.resolve(
+                        payload,
+                        domain="saas_subscription",
+                        pipe_id=pipe_id_str,
+                        tenant_id=tenant_id,
+                        entity_id=entity_id,
+                        value_field=value_field,
+                        record_key_field=record_key_field,
+                    )
+                except ValueError as exc:
+                    raise HTTPException(status_code=422, detail=str(exc)) from exc
+                # Attach to the record metadata so the triple builder can
+                # propagate canonical_id / resolution_method / confidence.
+                record.metadata = dict(record.metadata or {})
+                record.metadata["_resolution"] = {
+                    "canonical_id": res.canonical_id,
+                    "resolution_method": res.resolution_method,
+                    "resolution_confidence": res.resolution_confidence,
+                    "hitl_queue_id": res.hitl_queue_id,
+                }
+                resolver_summary[res.resolution_method] = resolver_summary.get(
+                    res.resolution_method, 0) + 1
+
+    # Phase C: build + write triples (records now carry _resolution metadata).
+    for vendor, vendor_pipes in all_vendor_runs:
+        vendor_records_count = 0
         vendor_triples = 0
-        for pipe, records in records_collected:
+        for pipe, records in vendor_pipes:
+            vendor_records_count += len(records)
             # Cap batch_size at 500 — larger pipes (assignment telemetry can be
             # 20k+ records) must stay within FlowController's max_buffer.
             controller = FlowController(batch_size=min(500, max(1, len(records) or 1)))
@@ -155,15 +217,15 @@ async def run_ingest_demo(req: IngestDemoRequest) -> IngestDemoResponse:
             )
             vendor_triples += ingest_result.triples_written
 
-        total_pipes += len(pipes)
-        total_records += vendor_records
+        total_pipes += len(vendor_pipes)
+        total_records += vendor_records_count
         total_triples += vendor_triples
         results.append(VendorResult(
             vendor=vendor,
-            pipes_discovered=len(pipes),
-            records_fetched=vendor_records,
+            pipes_discovered=len(vendor_pipes),
+            records_fetched=vendor_records_count,
             triples_written=vendor_triples,
-            pipe_ids=[p["pipe_id"] for p in pipes],
+            pipe_ids=[p["pipe_id"] for p, _ in vendor_pipes],
         ))
 
     return IngestDemoResponse(
@@ -174,7 +236,16 @@ async def run_ingest_demo(req: IngestDemoRequest) -> IngestDemoResponse:
         total_pipes=total_pipes,
         total_records=total_records,
         total_triples=total_triples,
+        resolver_summary=resolver_summary,
     )
+
+
+def _pipe_domain(pipe: dict[str, Any]) -> str:
+    """Extract domain tag from pipe.endpoint_ref. Empty string when absent."""
+    ref = pipe.get("endpoint_ref") or {}
+    if isinstance(ref, dict):
+        return str(ref.get("domain") or "")
+    return ""
 
 
 def _fetch_records(transport: HTTPTransport, pipe: dict[str, Any]) -> list[TransportRecord]:
