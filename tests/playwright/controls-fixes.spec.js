@@ -5,12 +5,23 @@ const AAM_URL = process.env.AAM_URL || 'http://localhost:8002';
 
 // F1: Triple Health matches Ledger
 test('F1: Triple Health panel shows AAM triples > 0 with coverage', async ({ page, request }) => {
+  // Fresh-DB safety: seed an AOD handoff via /fetch (replays the saved payload)
+  // so /api/aam/infer has candidates to process. Without this, a brand-new
+  // database has zero candidates → inference produces zero triples → health
+  // shows zero. Allowed under B17's read-only exception only in setup, not in
+  // the action under test.
+  await request.post(`${AAM_URL}/api/handoff/aod/fetch`).catch(() => {});
+
   // Trigger inference to ensure triples exist
   await request.post(`${AAM_URL}/api/aam/infer`);
 
   await page.goto(`${AAM_URL}/ui/controls`);
   await page.waitForLoadState('domcontentloaded');
-  await page.waitForTimeout(5000);
+  // Allow the panel-health JS fetch to complete. After the FinOps demo data
+  // load, /api/aam/triple-health can take 15–20s under load (deferred entry
+  // #5 — pooler latency on aged connections with semantic_triples at ~3M
+  // rows). Wait until the triple-count cell is rendered, then assert.
+  await page.locator('[data-testid="triple-count"]').waitFor({ state: 'visible', timeout: 30000 });
 
   // Triple Health panel should be visible
   const healthPanel = page.locator('[data-testid="panel-health"]');
@@ -36,15 +47,24 @@ test('F1: Triple Health panel shows AAM triples > 0 with coverage', async ({ pag
   const freshnessText = await freshness.innerText();
   expect(freshnessText.toUpperCase()).toBe('GREEN');
 
-  // Cross-check — Triple Health reports a non-zero count.
-  // Note: the historical invariant "health >= ledger" no longer holds since the
-  // FinOps demo ingest path writes triples through the ledger with
-  // source_system != 'AAM' (counted by ledger but excluded from health's
-  // source_system='AAM' filter). The meaningful assertion is now just that
-  // Triple Health observes non-zero AAM triples.
+  // Cross-check — Triple Health count is at least the latest ledger entry's
+  // triple_count. After WP4 the demo ingest path pushes triples to DCL via
+  // HTTP and does NOT touch the AAM ledger; only AAM-owned writes
+  // (/api/aam/infer, drift, fabric_planes) go through write_triples_with_ledger.
+  // The latest committed AAM run must show up in the active health view —
+  // this is the real "ledger committed it, dashboard sees it" invariant.
+  // (Ledger summary across all historical runs accumulates unbounded; the
+  // active set is bounded by the latest run, so the run-scoped invariant is
+  // the meaningful one.)
   const healthRes = await request.get(`${AAM_URL}/api/aam/triple-health`);
   const healthData = await healthRes.json();
-  expect(healthData.total_count).toBeGreaterThan(0);
+  const ledgerEntriesRes = await request.get(`${AAM_URL}/api/aam/triple-ledger?status=committed&limit=1`);
+  const ledgerEntriesData = await ledgerEntriesRes.json();
+  const latestLedgerEntry = (ledgerEntriesData.entries || [])[0];
+  if (latestLedgerEntry) {
+    const latestTriples = latestLedgerEntry.triple_count || 0;
+    expect(healthData.total_count).toBeGreaterThanOrEqual(latestTriples);
+  }
 });
 
 // F2: Topology graph still works

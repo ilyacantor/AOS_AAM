@@ -5,7 +5,12 @@ POST /api/aam/ingest/demo
 
 Runs the WP-1 + WP-2 + WP-6 + WP-8 chain end-to-end through ipaas_stub:
   factory -> discovery -> DeclaredPipes -> HTTPTransport.fetch_records ->
-  FlowController -> triple builder -> semantic_triples.
+  FlowController -> DCL triple builder -> DCLPusher -> semantic_triples.
+
+WP4: triples are POSTed to DCL via /api/dcl/ingest-triples. The direct-PG
+write path (write_triples / write_triples_with_ledger) is no longer reachable
+from this orchestrator. If DCL is unreachable or rejects the batch, the
+ingest run fails loudly — no fallback to direct-PG.
 
 No vendor branching downstream of the factory. The same orchestrator loop
 runs Workato and Boomi.
@@ -16,21 +21,48 @@ from __future__ import annotations
 import logging
 import os
 import uuid
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from ..adapters.factory import get_mcp_pair_for_vendor, supported_vendors
+from ..config import settings
 from ..db import supabase_client as sb
+from ..ingest.dcl_pusher import DCLPusher, DCLPushError, DCLPushRequest, make_dcl_ingest_id
 from ..ingest.flow_controller import FlowController
+from ..ingest.mappings import get_mapping_for_pipe
 from ..ingest.resolver import CanonicalRegistry, RecordResolver, ResolutionResult
-from ..ingest.triples import ingest_records
+from ..ingest.triple_builder import build_dcl_triples
 from ..mcp.translator import ToolOutputTranslator
 from ..transport.http import HTTPTransport, TransportRecord
 
 router = APIRouter(tags=["ingest_demo"])
 _log = logging.getLogger("aam.routers.ingest_demo")
+
+
+def _dcl_base_url() -> str:
+    """Resolve the DCL base URL from settings.DCL_INGEST_URL.
+
+    Settings derive every DCL endpoint from the DCL_URL env var; here we want
+    the base (without the /api/dcl/ingest suffix used by the legacy runner
+    dispatcher).
+    """
+    full = getattr(settings, "DCL_INGEST_URL", "")
+    if not full:
+        raise HTTPException(
+            status_code=502,
+            detail="ingest_demo: DCL_URL is not configured. "
+                   "AAM cannot push triples to DCL without a configured endpoint.",
+        )
+    # DCL_INGEST_URL ends in "/api/dcl/ingest" — strip to get the base.
+    suffix = "/api/dcl/ingest"
+    if full.endswith(suffix):
+        return full[: -len(suffix)]
+    # Strip any /api/* tail conservatively
+    idx = full.find("/api/")
+    return full[:idx] if idx > 0 else full
 
 
 class IngestDemoRequest(BaseModel):
@@ -49,6 +81,7 @@ class VendorResult(BaseModel):
 
 class IngestDemoResponse(BaseModel):
     aam_inference_id: str
+    dcl_ingest_id: str
     tenant_id: str
     entity_id: str
     results: list[VendorResult]
@@ -56,6 +89,7 @@ class IngestDemoResponse(BaseModel):
     total_records: int
     total_triples: int
     resolver_summary: dict[str, int] = Field(default_factory=dict)
+    dcl_latency_ms: int = 0
 
 
 def _resolve_identity(req: IngestDemoRequest) -> tuple[str, str]:
@@ -196,7 +230,15 @@ async def run_ingest_demo(req: IngestDemoRequest) -> IngestDemoResponse:
                 resolver_summary[res.resolution_method] = resolver_summary.get(
                     res.resolution_method, 0) + 1
 
-    # Phase C: build + write triples (records now carry _resolution metadata).
+    # Phase C: build DCL TriplePayloads (records now carry _resolution metadata).
+    # Triples accumulate per-vendor for accounting, then go to DCL in one push
+    # so the ingest run has a single dcl_ingest_id covering every pipe.
+    dcl_ingest_id = make_dcl_ingest_id()
+    ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    source_run_tag = f"aam_ingest_{ts}_{aam_inference_id[:8]}"
+    all_triples: list[dict[str, Any]] = []
+    triples_per_vendor: dict[str, int] = {}
+
     for vendor, vendor_pipes in all_vendor_runs:
         vendor_records_count = 0
         vendor_triples = 0
@@ -207,19 +249,22 @@ async def run_ingest_demo(req: IngestDemoRequest) -> IngestDemoResponse:
             controller = FlowController(batch_size=min(500, max(1, len(records) or 1)))
             controller.submit_many(records)
             controller.finalize()
-            ingest_result = ingest_records(
-                records,
-                pipe=pipe,
-                tenant_id=tenant_id,
-                entity_id=entity_id,
-                vendor=vendor,
-                aam_inference_id=aam_inference_id,
-            )
-            vendor_triples += ingest_result.triples_written
+            mappings = get_mapping_for_pipe(pipe)
+            for r in records:
+                pipe_triples = build_dcl_triples(
+                    r,
+                    pipe=pipe,
+                    mappings=mappings,
+                    tenant_id=tenant_id,
+                    entity_id=entity_id,
+                    vendor=vendor,
+                )
+                all_triples.extend(pipe_triples)
+                vendor_triples += len(pipe_triples)
 
         total_pipes += len(vendor_pipes)
         total_records += vendor_records_count
-        total_triples += vendor_triples
+        triples_per_vendor[vendor] = vendor_triples
         results.append(VendorResult(
             vendor=vendor,
             pipes_discovered=len(vendor_pipes),
@@ -228,8 +273,47 @@ async def run_ingest_demo(req: IngestDemoRequest) -> IngestDemoResponse:
             pipe_ids=[p["pipe_id"] for p, _ in vendor_pipes],
         ))
 
+    # Phase D: push to DCL. Loud-fail on any error — no direct-PG fallback.
+    push_latency_ms = 0
+    if all_triples:
+        pusher = DCLPusher(base_url=_dcl_base_url())
+        push_req = DCLPushRequest(
+            tenant_id=tenant_id,
+            entity_id=entity_id,
+            dcl_ingest_id=dcl_ingest_id,
+            triples=all_triples,
+            run_mode="Dev",
+            source_run_tag=source_run_tag,
+            source_rows=total_records,
+        )
+        try:
+            push_result = pusher.push(push_req)
+        except DCLPushError as exc:
+            _log.error(
+                "ingest_demo: DCL push failed dcl_ingest_id=%s tenant_id=%s "
+                "entity_id=%s triples_built=%d err=%s",
+                dcl_ingest_id, tenant_id, entity_id, len(all_triples), exc,
+            )
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    f"ingest_demo: DCL ingest failed — {exc}. "
+                    f"AAM did NOT write any triples (no direct-PG fallback). "
+                    f"dcl_ingest_id={dcl_ingest_id} tenant_id={tenant_id} "
+                    f"entity_id={entity_id} triples_built={len(all_triples)}."
+                ),
+            ) from exc
+        total_triples = push_result.triples_written
+        push_latency_ms = push_result.latency_ms
+        _log.info(
+            "ingest_demo: DCL push OK dcl_ingest_id=%s triples_written=%d "
+            "latency_ms=%d batches=%d",
+            dcl_ingest_id, total_triples, push_latency_ms, push_result.batch_count,
+        )
+
     return IngestDemoResponse(
         aam_inference_id=aam_inference_id,
+        dcl_ingest_id=dcl_ingest_id,
         tenant_id=tenant_id,
         entity_id=entity_id,
         results=results,
@@ -237,6 +321,7 @@ async def run_ingest_demo(req: IngestDemoRequest) -> IngestDemoResponse:
         total_records=total_records,
         total_triples=total_triples,
         resolver_summary=resolver_summary,
+        dcl_latency_ms=push_latency_ms,
     )
 
 

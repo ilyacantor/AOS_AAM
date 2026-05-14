@@ -12,18 +12,35 @@ const Q = 'Show me SaaS subscriptions where actual utilization is below 50% of p
 // semantic_triples.canonical_id. The downstream specs read from those
 // surfaces — no static fixtures, no test-only endpoints (B5).
 test.beforeAll(async ({ browser, request }) => {
+  // beforeAll runs once for the whole spec — bump hook-level timeout so the
+  // FinOps demo ingest (~213k triples × HTTP-batched to DCL) fits inside one
+  // hook invocation. WP4 made the demo path push through /api/dcl/ingest-triples
+  // instead of direct-PG, so the wall-clock cost of the 33k-record run is now
+  // dominated by network round trips (~4–5 min) rather than a single bulk
+  // INSERT. The downstream demo-experience tests only depend on the resolver
+  // HITL row + canonical_id-bearing triples landing once before the suite,
+  // so the upfront cost is paid once and reused.
+  test.setTimeout(420000);
   await request.post(`${STUB_URL}/stub/load_scenario`, { data: { scenario: 'finops_saas_spending' } });
   const page = await browser.newPage();
+  page.setDefaultTimeout(360000);
   await page.goto(`${AAM_URL}/ui/controls`);
   await page.waitForLoadState('domcontentloaded');
   const button = page.locator('[data-testid="btn-run-demo-ingest"]');
   await button.click();
-  await expect(page.locator('[data-testid="demo-ingest-status"]')).toHaveText('Complete', { timeout: 60000 });
+  await expect(page.locator('[data-testid="demo-ingest-status"]')).toHaveText('Complete', { timeout: 360000 });
   await page.close();
 });
 
 test.beforeEach(async ({ request }) => {
   await request.post(`${STUB_URL}/stub/load_scenario`, { data: { scenario: 'finops_saas_spending' } });
+  // Clear in-memory mapping approvals + identity review state so each test
+  // starts from a known baseline. Without this, the Semantic Mapping test's
+  // own approve action persists into subsequent runs (or vice versa), causing
+  // the 78% mid-confidence row to render at 99% — the assertion fails on the
+  // value, not the feature. Reset is a control-plane action on the demo
+  // endpoint, not on production state.
+  await request.post(`${AAM_URL}/api/aam/demo/reset`).catch(() => {});
 });
 
 test('FinOps agent answers the SaaS utilization question with savings ranking', async ({ page }) => {

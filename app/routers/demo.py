@@ -78,9 +78,42 @@ def _load_json(name: str) -> Any:
 
 
 def _resolve_entity_id(req_entity_id: str | None = None) -> str:
+    """Resolve which entity_id the demo UI should pull data for.
+
+    Priority:
+      1. Explicit query-string entity_id (test-driven or operator-driven)
+      2. AOS_DEMO_ENTITY_ID env var (deployment override)
+      3. Most recent AAM ingest's entity_id from semantic_triples
+         (source_table LIKE 'aam_via:%') — the live system tells the demo
+         which entity it should ground-truth against, so tests stay green
+         across handoff churn without setting env vars.
+      4. Last-resort literal "harness-entity" — only when no AAM ingest has
+         ever run. This keeps the endpoint responsive instead of 500-ing on
+         a fresh DB.
+    """
     if req_entity_id and req_entity_id.strip():
         return req_entity_id.strip()
-    return os.environ.get("AOS_DEMO_ENTITY_ID", "harness-entity")
+    env_val = (os.environ.get("AOS_DEMO_ENTITY_ID") or "").strip()
+    if env_val:
+        return env_val
+    try:
+        rows = sb._execute_composed(
+            psql.SQL("""
+                SELECT entity_id
+                  FROM semantic_triples
+                 WHERE source_table LIKE 'aam_via:%%'
+                   AND entity_id IS NOT NULL
+                 ORDER BY created_at DESC
+                 LIMIT 1
+            """),
+            params=(),
+            fetch=True,
+        )
+        if rows and rows[0].get("entity_id"):
+            return str(rows[0]["entity_id"])
+    except Exception as exc:
+        _log.warning("demo: latest-entity lookup failed (%s); falling back", exc)
+    return "harness-entity"
 
 
 # ---------------------------------------------------------------------------
