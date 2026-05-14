@@ -4,6 +4,8 @@ AOD Handoff Router — endpoints for AOD→AAM data intake.
 import json
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 from starlette.responses import Response
 from typing import Optional
 
@@ -101,7 +103,20 @@ async def receive_aod_handoff(raw_request: Request):
     if raw_candidates:
         body["candidates"] = normalize_candidates(raw_candidates)
 
-    request = AODHandoffRequest(**body)
+    # Pydantic validation — identity pair (tenant_id + entity_id) is required per I2.
+    # We construct the model inside the handler (rather than via a parameter dependency)
+    # because of the pre-normalization above, so FastAPI's auto-422 doesn't fire.
+    # Translate ValidationError to the same 422 shape FastAPI emits for parameter models.
+    # No row is written to aod_handoff_log on validation failure — process_handoff is
+    # only reached after the model parses cleanly.
+    try:
+        request = AODHandoffRequest(**body)
+    except ValidationError as exc:
+        _log.warning(
+            "AOD handoff rejected: validation failed for aod_discovery_id=%s, errors=%s",
+            body.get("aod_discovery_id"), exc.errors(),
+        )
+        return JSONResponse(status_code=422, content={"detail": exc.errors()})
     _log.info(
         "Receive endpoint: aod_discovery_id=%s, candidates=%d, fabric_planes=%d, sors=%d",
         request.aod_discovery_id, len(request.candidates), len(request.fabric_planes), len(request.sors),

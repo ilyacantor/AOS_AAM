@@ -198,10 +198,15 @@ class SORDeclaration(BaseModel):
 
 
 class AODHandoffRequest(BaseModel):
-    """Batch handoff request from AOD"""
+    """Batch handoff request from AOD.
+
+    Identity pair (tenant_id + entity_id) is required per pipeline_identity_architecture_v1 I2.
+    Missing either field returns HTTP 422 at the receive endpoint — no silent fallback,
+    no row is created in aod_handoff_log.
+    """
     aod_discovery_id: str = Field(..., description="AOD discovery run ID (namespaced per I1)")
-    tenant_id: Optional[str] = Field(None, description="Tenant UUID — DB isolation key")
-    entity_id: Optional[str] = Field(None, description="Business entity key (e.g. 'meridian')")
+    tenant_id: str = Field(..., description="Tenant UUID — DB isolation key (required per I2, 422 if missing)")
+    entity_id: str = Field(..., description="Business entity key, e.g. 'NetHub-N5IU' (required per I2, 422 if missing)")
     snapshot_name: Optional[str] = Field(None, description="Deprecated: use entity_id. Kept for transition.")
     candidates: list[AODHandoffCandidate] = Field(..., description="Candidates to hand off")
     fabric_planes: list[FabricPlaneSummary] = Field(default_factory=list, description="Detected fabric planes")

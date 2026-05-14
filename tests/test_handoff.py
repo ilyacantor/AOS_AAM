@@ -1,5 +1,11 @@
 """Tests for AOD->AAM handoff service — idempotency and error classification."""
+import uuid as _uuid
 from datetime import datetime
+
+
+def _identity():
+    """Build a fresh tenant_id + entity_id pair (required per I2)."""
+    return str(_uuid.uuid4()), f"test-entity-{_uuid.uuid4().hex[:8]}"
 
 
 def _candidate(asset_key, vendor, display, category, aod_asset_id, run_id):
@@ -22,8 +28,11 @@ def test_handoff_basic_flow(db):
     from app.services.handoff_service import process_handoff
 
     run_id = "test-run-001"
+    tenant_id, entity_id = _identity()
     request = AODHandoffRequest(
         aod_discovery_id=run_id,
+        tenant_id=tenant_id,
+        entity_id=entity_id,
         snapshot_name="test-snapshot",
         handoff_timestamp=datetime.utcnow(),
         candidates=[
@@ -50,8 +59,11 @@ def test_handoff_idempotency(db):
     from app.services.handoff_service import process_handoff
 
     run_id = "idempotent-run-001"
+    tenant_id, entity_id = _identity()
     request = AODHandoffRequest(
         aod_discovery_id=run_id,
+        tenant_id=tenant_id,
+        entity_id=entity_id,
         snapshot_name="snap",
         handoff_timestamp=datetime.utcnow(),
         candidates=[
@@ -78,8 +90,11 @@ def test_handoff_does_not_infer_planes_from_categories(db):
     from app.services.handoff_service import process_handoff
 
     run_id = "sor-run-001"
+    tenant_id, entity_id = _identity()
     request = AODHandoffRequest(
         aod_discovery_id=run_id,
+        tenant_id=tenant_id,
+        entity_id=entity_id,
         snapshot_name="sor-snap",
         handoff_timestamp=datetime.utcnow(),
         candidates=[
@@ -103,8 +118,11 @@ def test_handoff_explicit_planes_stored_and_vendor_linked(db):
     from app.db import get_fabric_planes, list_candidates
 
     run_id = "planes-run-001"
+    tenant_id, entity_id = _identity()
     request = AODHandoffRequest(
         aod_discovery_id=run_id,
+        tenant_id=tenant_id,
+        entity_id=entity_id,
         snapshot_name="planes-snap",
         handoff_timestamp=datetime.utcnow(),
         candidates=[
@@ -143,8 +161,11 @@ def test_handoff_no_planes_when_aod_sends_none(db):
     from app.db import get_fabric_planes
 
     run_id = "no-planes-run-001"
+    tenant_id, entity_id = _identity()
     request = AODHandoffRequest(
         aod_discovery_id=run_id,
+        tenant_id=tenant_id,
+        entity_id=entity_id,
         snapshot_name="hint-snap",
         handoff_timestamp=datetime.utcnow(),
         candidates=[
