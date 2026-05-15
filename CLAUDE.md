@@ -239,6 +239,23 @@ Separate repos per module. All repos branch from `dev`. No feature branches unle
 - aos-dev project: `glmeqbnuahlkkbolkent` (Supabase). Schema prefixes separate prod projects: `shared_gdbmdr`, `shared_yuxrdo`, `shared_jhvxtl`, plus `console`, `maestra`, `mai_memory`, `aod`.
 - Connection strings in `.env.development` set `search_path` via the `options` query param so apps resolve tables transparently.
 
+### DCL two-process model — DO NOT MODE-SWITCH
+
+Two permanent pm2 DCL processes, never the same:
+
+| pm2 name      | Port | Env                | Supabase | Use for |
+|---------------|------|--------------------|----------|---------|
+| `dcl-backend` | 8004 | `.env`             | prod `gdbmdrouocxjxiohpixr` | All prod ops; default; FinOps/Console/Mai runtime path. |
+| `dcl-dev`     | 8104 | `.env.development` | aos-dev `glmeqbnuahlkkbolkent` | Test writes, seed_manifest regen, pytest suite. |
+
+**Never restart `dcl-backend` onto `.env.development` for a test.** Three CC sessions wrote test data to prod that way. The split exists to make the failure mode structurally impossible.
+
+- Test prompt needs dev DB → hit `http://localhost:8104`.
+- Prod ops → hit `http://localhost:8004`.
+- Pytest reads `.env.development` and connects directly to the dev pooler — keep `dcl-dev` running so the runtime surface matches.
+
+Launcher: `dcl/scripts/run_dcl_dev.sh`. Full doc: `dcl/DEV_ENV_NOTES.md`.
+
 ---
 
 ## FORBIDDEN PATTERNS
