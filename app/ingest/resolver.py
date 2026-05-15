@@ -23,9 +23,9 @@ Tiers:
                  binding to operators via the audit trail.
 
 The resolver owns no triple writes. It returns a `ResolutionResult` that the
-caller (ingest_demo orchestrator) attaches to each record before the triple
-builder runs. The triple builder copies canonical_id / resolution_method /
-resolution_confidence into the semantic_triples rows.
+caller (/api/aam/infer or any downstream ingest path) attaches to each record
+before the triple builder runs. The triple builder copies canonical_id /
+resolution_method / resolution_confidence into the semantic_triples rows.
 """
 
 from __future__ import annotations

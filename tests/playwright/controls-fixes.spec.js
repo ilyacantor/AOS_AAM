@@ -24,12 +24,13 @@ const AAM_URL = process.env.AAM_URL || 'http://localhost:8002';
 // contract. Do not change the assertion below to compare against
 // ledger.total_triples or any cumulative sum.
 //
-// Background: WP4 moved the FinOps demo ingest path off the AAM ledger
-// (writes now go directly to DCL via HTTP). The AAM ledger now tracks only
-// AAM-owned writes — /api/aam/infer, drift, fabric_planes — all
-// source_system='AAM'. The health view filter source_system='AAM' aligns
-// with that set, so the run-scoped bound is the meaningful one. History
-// in aam_deferred_work.md entries #6 and #8.
+// Background: the deprecated ingest path was retired in WP6 (writes that
+// used to flow through /api/aam/ingest/demo are gone; ingest now belongs
+// to Console + the underlying /api/aam/infer write path). The AAM ledger
+// now tracks only AAM-owned writes — /api/aam/infer, drift, fabric_planes
+// — all source_system='AAM'. The health view filter source_system='AAM'
+// aligns with that set, so the run-scoped bound is the meaningful one.
+// History in aam_deferred_work.md entries #6 and #8.
 test('F1: Triple Health panel shows AAM triples > 0 with coverage', async ({ page, request }) => {
   // Fresh-DB safety: seed an AOD handoff via /fetch (replays the saved payload)
   // so /api/aam/infer has candidates to process. Without this, a brand-new
@@ -43,10 +44,11 @@ test('F1: Triple Health panel shows AAM triples > 0 with coverage', async ({ pag
 
   await page.goto(`${AAM_URL}/ui/controls`);
   await page.waitForLoadState('domcontentloaded');
-  // Allow the panel-health JS fetch to complete. After the FinOps demo data
-  // load, /api/aam/triple-health can take 15–20s under load (deferred entry
-  // #5 — pooler latency on aged connections with semantic_triples at ~3M
-  // rows). Wait until the triple-count cell is rendered, then assert.
+  // Allow the panel-health JS fetch to complete. With a populated
+  // semantic_triples table, /api/aam/triple-health can take 15–20s under
+  // load (deferred entry #5 — pooler latency on aged connections at
+  // multi-million-row scale). Wait until the triple-count cell is
+  // rendered, then assert.
   await page.locator('[data-testid="triple-count"]').waitFor({ state: 'visible', timeout: 30000 });
 
   // Triple Health panel should be visible

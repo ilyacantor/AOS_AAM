@@ -119,16 +119,17 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS: the FinOps app (localhost:3001) reaches in for the demo answer endpoint.
+# CORS: Console (localhost:3009) is the primary consumer of AAM's pipe-discovery,
+# mapping, resolver, and infer endpoints. NLQ (localhost:3005) still reads health.
 # Locked to localhost dev origins; production deployments tighten this further.
 from fastapi.middleware.cors import CORSMiddleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:3001",
-        "http://127.0.0.1:3001",
         "http://localhost:3005",
         "http://127.0.0.1:3005",
+        "http://localhost:3009",
+        "http://127.0.0.1:3009",
         "http://localhost:8002",
     ],
     allow_methods=["GET", "POST", "OPTIONS"],
@@ -164,8 +165,7 @@ from .routers.mai import router as mai_router
 from .routers.controls import router as controls_router
 from .routers.controls_ui import router as controls_ui_router
 from .routers.aam_ui_actions import router as aam_ui_actions_router
-from .routers.ingest_demo import router as ingest_demo_router
-from .routers.demo import router as demo_router
+from .routers.mappings import router as mappings_router
 from .routers.resolver import router as resolver_router
 
 app.include_router(handoff_router)
@@ -186,8 +186,7 @@ app.include_router(mai_router)
 app.include_router(controls_router)
 app.include_router(controls_ui_router)
 app.include_router(aam_ui_actions_router)
-app.include_router(ingest_demo_router)
-app.include_router(demo_router)
+app.include_router(mappings_router)
 app.include_router(resolver_router)
 app.include_router(ui_pages_router)
 
@@ -219,7 +218,7 @@ async def custom_swagger_ui():
     </style>
 </head>
 <body>
-    {NAV_HTML.format(pipes_active="", candidates_active="", drift_active="", demo_active="", guide_active="", docs_active=" active")}
+    {NAV_HTML.format(pipes_active="", candidates_active="", drift_active="", guide_active="", docs_active=" active")}
     <div id="swagger-ui"></div>
     <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
     <script>
@@ -251,7 +250,7 @@ async def custom_redoc():
     </style>
 </head>
 <body>
-    {NAV_HTML.format(pipes_active="", candidates_active="", drift_active="", demo_active="", guide_active="", docs_active="")}
+    {NAV_HTML.format(pipes_active="", candidates_active="", drift_active="", guide_active="", docs_active="")}
     <redoc spec-url='/openapi.json'></redoc>
     <script src="https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js"></script>
 </body>

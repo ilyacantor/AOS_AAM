@@ -65,10 +65,10 @@ MAPPINGS: dict[str, list[FieldMapping]] = {
         FieldMapping("submitter", "opex", "submitter"),
     ],
 
-    # --- FinOps SaaS-spending demo (NetSuite vendor/AP via Workato, Okta via Boomi) ---
-    # Mapping keys for the FinOps scenario use the explicit domain tag from
-    # endpoint_ref.domain — all three Okta pipes have identity_keys=['id']
-    # but resolve cleanly via domain.
+    # --- Mappings keyed by endpoint_ref.domain (preferred over identity_keys[0])
+    # for systems where multiple pipes share the same identity-key name. The
+    # NetSuite + Okta packs below illustrate the pattern: three Okta pipes all
+    # use identity_keys=['id'] but distinguish at the domain tag.
 
     # Workato -> NetSuite Vendor Master
     "workato::netsuite::vendor": [
@@ -141,7 +141,7 @@ def get_mapping_for_pipe(pipe: dict[str, Any]) -> list[FieldMapping]:
       1. endpoint_ref.domain — scenarios that set an explicit domain tag
          (e.g., "vendor", "ap_invoice", "saas_app", "user", "assignment")
          resolve cleanly even when multiple pipes share the same identity_key
-         field name. This is how the FinOps SaaS-spending scenario works —
+         field name. This is how the NetSuite + Okta example pack works —
          all three Okta pipes have identity_keys=['id'] but differ by domain.
       2. identity_keys[0] — original behavior; preserved for older scenarios
          where each pipe has a unique identity-key field name.

@@ -6,10 +6,9 @@ America pair: real data flows through the resolver, scores in [0.65, 0.78],
 and lands in the HITL queue. An operator decision approval flips the
 downstream resolution_method to 'hitl_confirmed' at 0.99.
 
-These are unit tests against the resolver + HITL store directly. The
-ingest_demo end-to-end wiring is covered separately by test_ingest_demo_e2e
-(which exercises the orchestrator's resolver pass implicitly when
-identity-bearing pipes are part of the scenario).
+These are unit tests against the resolver + HITL store directly. End-to-end
+wiring against the /api/aam/infer write path is covered by test_smoke and
+test_inference_identity.
 """
 from __future__ import annotations
 
@@ -128,7 +127,7 @@ def test_approve_decision_flips_method_to_hitl_confirmed(seeded_registry, tenant
 
     The PG promotion step is a separate concern (its own DB write); we patch
     it out here and assert the call shape. Real promotion is covered by the
-    integration test (test_ingest_demo_e2e) when run against the live DB.
+    /api/aam/infer integration tests when run against the live DB.
     """
     from app.db import hitl_store
     from app.ingest.resolver import RecordResolver
