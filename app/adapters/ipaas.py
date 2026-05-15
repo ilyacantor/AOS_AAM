@@ -5,11 +5,21 @@ Connects to iPaaS platforms (Workato, MuleSoft, Boomi, Tray.io)
 to inventory integration flows and recipes.
 
 Modality: Webhooks/Signals from the iPaaS control plane.
+
+WP12a' — workato + boomi adapters now have real implementations against
+vendor REST contracts (Workato Platform API v2.0; Boomi AtomSphere REST v1).
+The vendor URL is read from env (WORKATO_BASE_URL / BOOMI_BASE_URL); pointing
+at Farm fabric sims (http://localhost:8003/sims/<vendor>) is a config swap,
+not a code change. mulesoft / tray.io / zapier remain unimplemented.
 """
 
+import base64
 import logging
-from typing import Dict, Any, List, Optional
+import os
 from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+import httpx
 
 from .base import FabricAdapter, AdapterStatus, PlaneHealth, PlaneDrift
 from ..parsers.ipaas_recipe import parse_workato_recipe, parse_tray_workflow
@@ -47,11 +57,83 @@ class IPaaSAdapter(FabricAdapter):
     def plane_vendor(self) -> str:
         return self._vendor
 
+    # ---- per-vendor env config ------------------------------------------
+
+    def _workato_base(self) -> str:
+        url = os.environ.get("WORKATO_BASE_URL", "").rstrip("/")
+        if not url:
+            raise RuntimeError("WORKATO_BASE_URL not set; point at Farm sim or vendor cloud")
+        return url
+
+    def _workato_token(self) -> str:
+        token = os.environ.get("WORKATO_API_TOKEN", "")
+        if not token:
+            raise RuntimeError("WORKATO_API_TOKEN not set")
+        return token
+
+    def _boomi_base(self) -> str:
+        url = os.environ.get("BOOMI_BASE_URL", "").rstrip("/")
+        if not url:
+            raise RuntimeError("BOOMI_BASE_URL not set; point at Farm sim or vendor cloud")
+        return url
+
+    def _boomi_basic_header(self) -> str:
+        user = os.environ.get("BOOMI_USERNAME", "")
+        token = os.environ.get("BOOMI_API_TOKEN", "")
+        if not user or not token:
+            raise RuntimeError("BOOMI_USERNAME and BOOMI_API_TOKEN must both be set")
+        encoded = base64.b64encode(f"{user}:{token}".encode("utf-8")).decode("ascii")
+        return f"Basic {encoded}"
+
+    def _boomi_account(self) -> str:
+        acct = os.environ.get("BOOMI_ACCOUNT_ID", "")
+        if not acct:
+            raise RuntimeError("BOOMI_ACCOUNT_ID not set")
+        return acct
+
+    # ---- connect ---------------------------------------------------------
+
     async def connect(self) -> bool:
-        """Connect to iPaaS control plane."""
+        """Connect: validate creds with a cheap GET against a known endpoint."""
+        if self._vendor == "workato":
+            base, token = self._workato_base(), self._workato_token()
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                r = await client.get(
+                    f"{base}/api/recipes",
+                    headers={"Authorization": f"Bearer {token}"},
+                    params={"per_page": 1},
+                )
+            if r.status_code == 401:
+                self._status = AdapterStatus.FAILED
+                self._error_message = "Workato auth rejected — check WORKATO_API_TOKEN"
+                return False
+            if r.status_code >= 400:
+                self._status = AdapterStatus.FAILED
+                self._error_message = f"Workato connect HTTP {r.status_code}: {r.text[:200]}"
+                return False
+            self._status = AdapterStatus.CONNECTED
+            return True
+        if self._vendor == "boomi":
+            base = self._boomi_base()
+            acct = self._boomi_account()
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                r = await client.get(
+                    f"{base}/api/rest/v1/{acct}/Process",
+                    headers={"Authorization": self._boomi_basic_header()},
+                )
+            if r.status_code == 401:
+                self._status = AdapterStatus.FAILED
+                self._error_message = "Boomi auth rejected — check BOOMI_USERNAME / BOOMI_API_TOKEN"
+                return False
+            if r.status_code >= 400:
+                self._status = AdapterStatus.FAILED
+                self._error_message = f"Boomi connect HTTP {r.status_code}: {r.text[:200]}"
+                return False
+            self._status = AdapterStatus.CONNECTED
+            return True
         raise NotImplementedError(
             f"IPaaSAdapter.connect() not implemented for vendor '{self._vendor}'. "
-            "Implement OAuth authentication and webhook registration before calling connect()."
+            "Workato and Boomi are implemented; other vendors require their own auth flow."
         )
 
     async def disconnect(self) -> bool:
@@ -61,22 +143,79 @@ class IPaaSAdapter(FabricAdapter):
         return True
 
     async def check_health(self) -> PlaneHealth:
-        """Check iPaaS control plane health."""
-        raise NotImplementedError(
-            f"IPaaSAdapter.check_health() not implemented for vendor '{self._vendor}'."
+        """Health check via the same endpoint as connect()."""
+        started = datetime.utcnow()
+        try:
+            ok = await self.connect()
+        except RuntimeError as exc:
+            self._status = AdapterStatus.FAILED
+            self._error_message = str(exc)
+            ok = False
+        latency_ms = (datetime.utcnow() - started).total_seconds() * 1000
+        self._last_health_check = datetime.utcnow()
+        return PlaneHealth(
+            status=self._status,
+            last_check=self._last_health_check,
+            latency_ms=round(latency_ms, 2),
+            error_message=None if ok else self._error_message,
         )
 
     async def discover_pipes(self) -> List[Dict[str, Any]]:
-        """Discover integration flows from iPaaS control plane."""
+        """List the recipes/processes available on the control plane."""
+        if self._vendor == "workato":
+            base, token = self._workato_base(), self._workato_token()
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                r = await client.get(
+                    f"{base}/api/recipes",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+            r.raise_for_status()
+            recipes = r.json()
+            self._flows_discovered = recipes
+            return [
+                {
+                    "vendor": "workato",
+                    "vendor_id": str(rec.get("id")),
+                    "name": rec.get("name"),
+                    "running": rec.get("running", False),
+                    "trigger_application": rec.get("trigger_application"),
+                }
+                for rec in recipes
+            ]
+        if self._vendor == "boomi":
+            base = self._boomi_base()
+            acct = self._boomi_account()
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                r = await client.get(
+                    f"{base}/api/rest/v1/{acct}/Process",
+                    headers={"Authorization": self._boomi_basic_header()},
+                )
+            r.raise_for_status()
+            processes = r.json()
+            self._flows_discovered = processes
+            return [
+                {
+                    "vendor": "boomi",
+                    "vendor_id": proc.get("id"),
+                    "name": proc.get("name"),
+                    "deployment_id": proc.get("deploymentId"),
+                    "trigger": proc.get("trigger"),
+                }
+                for proc in processes
+            ]
         raise NotImplementedError(
             f"IPaaSAdapter.discover_pipes() not implemented for vendor '{self._vendor}'."
         )
 
     async def self_heal(self, drift: PlaneDrift) -> bool:
-        """Self-heal iPaaS connection issues."""
+        """Self-heal iPaaS connection issues — re-auth on connection_lost."""
+        if drift.drift_type == "connection_lost" and self._vendor in ("workato", "boomi"):
+            self._status = AdapterStatus.HEALING
+            ok = await self.connect()
+            return ok
         raise NotImplementedError(
-            f"IPaaSAdapter.self_heal() not implemented for vendor '{self._vendor}'. "
-            f"Drift type: {drift.drift_type}"
+            f"IPaaSAdapter.self_heal() not implemented for vendor '{self._vendor}' "
+            f"+ drift_type='{drift.drift_type}'."
         )
 
     def extract_semantic_edges(self, recipes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
