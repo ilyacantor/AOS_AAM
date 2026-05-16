@@ -154,11 +154,15 @@ async def trigger_vendor(vendor: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=f"vendor {vendor!r} not implemented")
     farm_base = os.environ.get("FARM_URL", "http://localhost:8003").rstrip("/")
     url = f"{farm_base}/farm/fabric-sims/trigger/{vendor}"
+    # WS-2: 5 recipes/processes per vendor, up to 5K invoices each = ~75K
+    # triples through resolver + DCL push. 20s was the WS-1 setting; bump
+    # to 180s for WS-2 dataset volumes. Operator UI shows "triggering…"
+    # spinner during the wait; receipts auto-refresh on the page anyway.
     try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
+        async with httpx.AsyncClient(timeout=180.0) as client:
             resp = await client.post(url)
     except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"Farm trigger failed: {exc}")
+        raise HTTPException(status_code=502, detail=f"Farm trigger failed: {type(exc).__name__}: {exc}")
     if resp.status_code >= 400:
         raise HTTPException(
             status_code=502,

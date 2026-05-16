@@ -81,7 +81,6 @@ MAPPINGS: dict[str, list[FieldMapping]] = {
         FieldMapping("company_name", "customer", "name"),
         FieldMapping("address", "customer", "address"),
         FieldMapping("currency", "customer", "currency"),
-        FieldMapping("last_modified_utc", "customer", "last_modified_utc"),
     ],
     # Workato -> NetSuite Chart of Accounts. NetSuite uses 5-digit account
     # numbering, calendar fiscal year (Dec end).
@@ -144,8 +143,6 @@ MAPPINGS: dict[str, list[FieldMapping]] = {
         FieldMapping("company_name", "customer", "name"),
         FieldMapping("address", "customer", "address"),
         FieldMapping("currency", "customer", "currency"),
-        FieldMapping("parent_entity_id", "customer", "parent_entity_id"),
-        FieldMapping("last_modified_utc", "customer", "last_modified_utc"),
     ],
     # Boomi -> Sage Intacct Chart of Accounts. Sage Intacct uses 4-digit
     # account numbering with June fiscal year end — intentionally different

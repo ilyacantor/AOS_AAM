@@ -167,7 +167,7 @@ _DISPATCH: dict[str, dict[str, tuple]] = {
         "chart": (
             "NetSuite", "netsuite", "workato", "chart_of_account", ["account_number"], None,
         ),
-        "invoices": (
+        "ar_invoices": (
             "NetSuite", "netsuite", "workato", "invoice", ["invoice_number"], None,
         ),
         "vendor_master": (
@@ -188,7 +188,7 @@ _DISPATCH: dict[str, dict[str, tuple]] = {
         "chart": (
             "Sage Intacct", "sage_intacct", "boomi", "chart_of_account", ["account_number"], None,
         ),
-        "invoices": (
+        "ar_invoices": (
             "Sage Intacct", "sage_intacct", "boomi", "invoice", ["invoice_number"], None,
         ),
         "ap_invoices": (

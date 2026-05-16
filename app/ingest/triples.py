@@ -62,6 +62,7 @@ def _make_triple(
     canonical_id: Optional[str] = None,
     resolution_method: Optional[str] = None,
     resolution_confidence: Optional[float] = None,
+    period: Optional[str] = None,
 ) -> dict[str, Any]:
     return {
         "tenant_id": tenant_id,
@@ -69,7 +70,10 @@ def _make_triple(
         "concept": concept,
         "property": prop,
         "value": value,
-        "period": None,
+        # WS-2: period is stamped from the record's "period" field when the
+        # mapping declares one (so the DCL period column is queryable for
+        # cross-source aging by calendar quarter — Block 6 demo question).
+        "period": period,
         "currency": "USD",
         "unit": None,
         "source_system": source_system,
@@ -163,6 +167,19 @@ def build_triples(
     resolution_confidence = resolution.get("resolution_confidence")
     out: list[dict[str, Any]] = []
     mapping_by_field = {m.source_field: m for m in mappings}
+    # WS-2 B6: if the record carries a calendar period (e.g., "Q3-2025"),
+    # stamp it on every triple's `period` column so cross-source queries
+    # by calendar quarter work. Detected via the mapping that targets
+    # property="period" — that field's value is what DCL needs in its
+    # `period` column. Without this, the column is NULL and the demo
+    # "Combined Q3 AR aging" query has no temporal predicate.
+    record_period: Optional[str] = None
+    for m in mappings:
+        if m.property == "period":
+            v = record.payload.get(m.source_field)
+            if v is not None and str(v).strip():
+                record_period = str(v)
+            break
     for field_name, value in record.payload.items():
         m = mapping_by_field.get(field_name)
         if not m:
@@ -186,6 +203,7 @@ def build_triples(
             vendor=vendor,
             canonical_id=canonical_id,
             resolution_method=resolution_method,
+            period=record_period,
             resolution_confidence=resolution_confidence,
         ))
     return out
