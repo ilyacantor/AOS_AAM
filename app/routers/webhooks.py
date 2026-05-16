@@ -156,6 +156,20 @@ def _build_pipe(*, vendor, source_system, domain, identity_keys):
 # resolve_spec = (value_field, record_key_field, resolve_domain)
 _DISPATCH: dict[str, dict[str, tuple]] = {
     "workato": {
+        # WS-2 customer-side path. resolve_spec runs WP3 against the
+        # "company_name" field on the "customer" domain — that's where the
+        # Slide 8 Acme demo case lands a ~0.96 fuzzy match against the
+        # Sage Intacct counterpart.
+        "customers": (
+            "NetSuite", "netsuite", "workato", "customer", ["customer_id"],
+            ("company_name", "customer_id", "customer"),
+        ),
+        "chart": (
+            "NetSuite", "netsuite", "workato", "chart_of_account", ["account_number"], None,
+        ),
+        "invoices": (
+            "NetSuite", "netsuite", "workato", "invoice", ["invoice_number"], None,
+        ),
         "vendor_master": (
             "NetSuite", "netsuite", "workato", "vendor", ["vendor_id"],
             ("vendor_name", "vendor_id", "saas_subscription"),
@@ -165,6 +179,28 @@ _DISPATCH: dict[str, dict[str, tuple]] = {
         ),
     },
     "boomi": {
+        # WS-2: Boomi is bound to Sage Intacct (was Okta in WS-1). The five
+        # branches below match the Sage Intacct sim's five processes.
+        "customers": (
+            "Sage Intacct", "sage_intacct", "boomi", "customer", ["customer_id"],
+            ("company_name", "customer_id", "customer"),
+        ),
+        "chart": (
+            "Sage Intacct", "sage_intacct", "boomi", "chart_of_account", ["account_number"], None,
+        ),
+        "invoices": (
+            "Sage Intacct", "sage_intacct", "boomi", "invoice", ["invoice_number"], None,
+        ),
+        "ap_invoices": (
+            "Sage Intacct", "sage_intacct", "boomi", "ap_invoice", ["invoice_number"], None,
+        ),
+        "vendors": (
+            "Sage Intacct", "sage_intacct", "boomi", "vendor", ["vendor_id"], None,
+        ),
+        # DEPRECATED 2026-05-16 (WS-2): Okta source moved off Boomi. These
+        # branches are kept so any in-flight Okta-tagged webhooks during the
+        # transition window dispatch cleanly rather than 400. Remove when
+        # the Okta source-sim is removed entirely (WS-1.5 cleanup pass).
         "okta_apps": (
             "Okta", "okta", "boomi", "saas_app", ["id"],
             ("label", "id", "saas_subscription"),
@@ -405,11 +441,19 @@ class ManualEntry(BaseModel):
 # the same _process_payload dispatch table as webhooks. Keys mirror the
 # vendor-event substrings used in _DISPATCH.
 _MANUAL_PIPE_TO_EVENT: dict[str, tuple[str, str]] = {
-    "workato::netsuite::vendor":      ("workato", "vendor_master"),
-    "workato::netsuite::ap_invoice":  ("workato", "ap_invoices"),
-    "boomi::okta::saas_app":          ("boomi", "okta_apps"),
-    "boomi::okta::user":              ("boomi", "okta_users"),
-    "boomi::okta::assignment":        ("boomi", "okta_assignments"),
+    # WS-2 customer-side: NetSuite via Workato
+    "workato::netsuite::customer":            ("workato", "customers"),
+    "workato::netsuite::chart_of_account":    ("workato", "chart"),
+    "workato::netsuite::invoice":             ("workato", "invoices"),
+    # NetSuite vendor-payable side (carried from WS-1)
+    "workato::netsuite::vendor":              ("workato", "vendor_master"),
+    "workato::netsuite::ap_invoice":          ("workato", "ap_invoices"),
+    # WS-2: Sage Intacct via Boomi
+    "boomi::sage_intacct::customer":          ("boomi", "customers"),
+    "boomi::sage_intacct::chart_of_account":  ("boomi", "chart"),
+    "boomi::sage_intacct::invoice":           ("boomi", "invoices"),
+    "boomi::sage_intacct::ap_invoice":        ("boomi", "ap_invoices"),
+    "boomi::sage_intacct::vendor":            ("boomi", "vendors"),
 }
 
 

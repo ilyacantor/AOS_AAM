@@ -70,6 +70,45 @@ MAPPINGS: dict[str, list[FieldMapping]] = {
     # NetSuite + Okta packs below illustrate the pattern: three Okta pipes all
     # use identity_keys=['id'] but distinguish at the domain tag.
 
+    # ---- WS-2: NetSuite customer-side data (Workato → NetSuite) ----------
+
+    # Workato -> NetSuite Customer Master. Identity demo case: customer_id
+    # "Customer #12345" + company_name "Acme Corporation, Inc." pairs with
+    # the boomi::sage_intacct::customer "ACME-Corp" / "Acme Corporation Inc"
+    # at confidence ~0.96 (auto-applied tier) per Slide 8.
+    "workato::netsuite::customer": [
+        FieldMapping("customer_id", "customer", "id"),
+        FieldMapping("company_name", "customer", "name"),
+        FieldMapping("address", "customer", "address"),
+        FieldMapping("currency", "customer", "currency"),
+        FieldMapping("last_modified_utc", "customer", "last_modified_utc"),
+    ],
+    # Workato -> NetSuite Chart of Accounts. NetSuite uses 5-digit account
+    # numbering, calendar fiscal year (Dec end).
+    "workato::netsuite::chart_of_account": [
+        FieldMapping("account_number", "gl_account", "id"),
+        FieldMapping("account_name", "gl_account", "name"),
+        FieldMapping("account_type", "gl_account", "type"),
+        FieldMapping("last_modified_utc", "gl_account", "last_modified_utc"),
+    ],
+    # Workato -> NetSuite customer-facing Invoice (AR side). DISTINCT from
+    # the ap_invoice below which is the vendor-payable side. period is in
+    # calendar Q form (e.g. "Q3-2025"). aging_bucket pre-classified by
+    # the source-sim per the 0-30/30-60/60-90/90+ AOS spec (Slide 8).
+    "workato::netsuite::invoice": [
+        FieldMapping("invoice_number", "invoice", "id"),
+        FieldMapping("customer_id", "invoice", "customer_id"),
+        FieldMapping("amount", "invoice", "amount"),
+        FieldMapping("currency", "invoice", "currency"),
+        FieldMapping("invoice_date", "invoice", "invoice_date"),
+        FieldMapping("due_date", "invoice", "due_date"),
+        FieldMapping("period", "invoice", "period"),
+        FieldMapping("aging_bucket", "invoice", "aging_bucket"),
+        FieldMapping("status", "invoice", "payment_status"),
+    ],
+
+    # ---- existing: NetSuite vendor + AP invoice (Workato vendor-payable path) --
+
     # Workato -> NetSuite Vendor Master
     "workato::netsuite::vendor": [
         FieldMapping("vendor_id", "vendor", "id"),
@@ -79,10 +118,9 @@ MAPPINGS: dict[str, list[FieldMapping]] = {
         FieldMapping("subsidiary", "vendor", "subsidiary"),
         FieldMapping("is_1099", "vendor", "is_1099_reportable"),
     ],
-    # Workato -> NetSuite AP Invoice. NetSuite's "amount" is the gross billed
-    # amount before any reclassification — it could mean gross_billed_usd or
-    # net_recognized_usd. Mid-confidence mapping (0.78) surfaces in the
-    # Semantic Mapping UI for explicit operator confirmation.
+    # Workato -> NetSuite AP Invoice (vendor-payable). NetSuite's "amount" is
+    # the gross billed amount — mid-confidence (0.78) surfaces in Semantic
+    # Mapping UI for operator confirmation.
     "workato::netsuite::ap_invoice": [
         FieldMapping("bill_no", "invoice", "id"),
         FieldMapping("vendor_id", "invoice", "vendor_id"),
@@ -94,9 +132,69 @@ MAPPINGS: dict[str, list[FieldMapping]] = {
         FieldMapping("subsidiary", "invoice", "subsidiary"),
         FieldMapping("posting_period", "invoice", "posting_period"),
     ],
-    # Boomi -> Okta SaaS App Catalog (compound it_asset.saas_app keeps the
-    # AAM-side distinction from Assignment while sharing DCL's registered
-    # it_asset root concept)
+
+    # ---- WS-2: Sage Intacct (Boomi → Sage Intacct) ----------------------
+
+    # Boomi -> Sage Intacct Customer Master. Identity demo case: entity_id
+    # "ACME-Corp" + company_name "Acme Corporation Inc" (no period, no comma)
+    # pairs with NetSuite "Customer #12345" / "Acme Corporation, Inc." at
+    # ~0.96 in similarity_score (auto-applied tier, per Slide 8).
+    "boomi::sage_intacct::customer": [
+        FieldMapping("customer_id", "customer", "id"),
+        FieldMapping("company_name", "customer", "name"),
+        FieldMapping("address", "customer", "address"),
+        FieldMapping("currency", "customer", "currency"),
+        FieldMapping("parent_entity_id", "customer", "parent_entity_id"),
+        FieldMapping("last_modified_utc", "customer", "last_modified_utc"),
+    ],
+    # Boomi -> Sage Intacct Chart of Accounts. Sage Intacct uses 4-digit
+    # account numbering with June fiscal year end — intentionally different
+    # from NetSuite to exercise cross-source COA normalization (WS-3/WS-5).
+    "boomi::sage_intacct::chart_of_account": [
+        FieldMapping("account_number", "gl_account", "id"),
+        FieldMapping("account_name", "gl_account", "name"),
+        FieldMapping("account_type", "gl_account", "type"),
+        FieldMapping("last_modified_utc", "gl_account", "last_modified_utc"),
+    ],
+    # Boomi -> Sage Intacct customer-facing Invoice (AR side). period is in
+    # calendar Q form for cross-source alignment with NetSuite (Block 6's
+    # combined-Q3 query depends on shared calendar period semantics).
+    "boomi::sage_intacct::invoice": [
+        FieldMapping("invoice_number", "invoice", "id"),
+        FieldMapping("customer_id", "invoice", "customer_id"),
+        FieldMapping("amount", "invoice", "amount"),
+        FieldMapping("currency", "invoice", "currency"),
+        FieldMapping("invoice_date", "invoice", "invoice_date"),
+        FieldMapping("due_date", "invoice", "due_date"),
+        FieldMapping("period", "invoice", "period"),
+        FieldMapping("aging_bucket", "invoice", "aging_bucket"),
+        FieldMapping("status", "invoice", "payment_status"),
+    ],
+    # Boomi -> Sage Intacct AP Invoice (vendor-payable).
+    "boomi::sage_intacct::ap_invoice": [
+        FieldMapping("invoice_number", "invoice", "id"),
+        FieldMapping("vendor_id", "invoice", "vendor_id"),
+        FieldMapping("amount", "invoice", "amount"),
+        FieldMapping("currency", "invoice", "currency"),
+        FieldMapping("due_date", "invoice", "due_date"),
+        FieldMapping("period", "invoice", "period"),
+        FieldMapping("status", "invoice", "payment_status"),
+    ],
+    # Boomi -> Sage Intacct Vendor Master.
+    "boomi::sage_intacct::vendor": [
+        FieldMapping("vendor_id", "vendor", "id"),
+        FieldMapping("vendor_name", "vendor", "name"),
+        FieldMapping("currency", "vendor", "currency"),
+    ],
+
+    # ---- DEPRECATED 2026-05-16 (WS-2): Okta source is no longer bound to ----
+    # Boomi (replaced by Sage Intacct). These mappings are kept for back-
+    # compat / future direct-to-app Okta SCIM use per the store/view-
+    # separation discipline. Sage Intacct mappings above are the active
+    # Boomi-bound path. To re-activate Okta as a Boomi source: rebind
+    # BoomiSim.bind_source in farm/src/fabric_sims/boomi/sim.py.
+
+    # Boomi -> Okta SaaS App Catalog (DEPRECATED — was Boomi's source through WS-1)
     "boomi::okta::saas_app": [
         FieldMapping("id", "it_asset.saas_app", "id"),
         FieldMapping("label", "it_asset.saas_app", "name"),
@@ -106,9 +204,7 @@ MAPPINGS: dict[str, list[FieldMapping]] = {
         FieldMapping("annual_cost_per_seat_usd", "it_asset.saas_app", "annual_cost_per_seat_usd"),
         FieldMapping("created", "it_asset.saas_app", "created_at"),
     ],
-    # Boomi -> Okta User Directory (employee root — Okta user accounts share
-    # the same DCL domain as Workday Employee; source_system + property
-    # discriminate at query time)
+    # Boomi -> Okta User Directory (DEPRECATED)
     "boomi::okta::user": [
         FieldMapping("id", "employee", "id"),
         FieldMapping("profile_email", "employee", "email"),
@@ -117,8 +213,7 @@ MAPPINGS: dict[str, list[FieldMapping]] = {
         FieldMapping("status", "employee", "status"),
         FieldMapping("department", "employee", "department"),
     ],
-    # Boomi -> Okta App Assignment with login telemetry (compound
-    # it_asset.assignment shares the it_asset root with SaaSApp)
+    # Boomi -> Okta App Assignment (DEPRECATED)
     "boomi::okta::assignment": [
         FieldMapping("id", "it_asset.assignment", "id"),
         FieldMapping("user_id", "it_asset.assignment", "user_id"),
