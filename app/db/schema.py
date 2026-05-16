@@ -101,6 +101,27 @@ def _run_migrations():
          "idx_fabric_webhook_log_vendor_received"),
         ("CREATE INDEX IF NOT EXISTS idx_fabric_webhook_log_aam_inference ON fabric_webhook_log (aam_inference_id) WHERE aam_inference_id IS NOT NULL",
          "idx_fabric_webhook_log_aam_inference"),
+        # Migration 2026-05-16 (DISP #24): persistent canonical registry.
+        # Replaces the in-memory CanonicalRegistry in app/ingest/resolver.py so
+        # resolver decisions survive AAM restart, memory is bounded to the
+        # current webhook batch's snapshot, and discovery is race-safe via
+        # ON CONFLICT.
+        (
+            "CREATE TABLE IF NOT EXISTS canonical_registry ("
+            "canonical_id UUID NOT NULL, "
+            "tenant_id TEXT NOT NULL, "
+            "domain TEXT NOT NULL, "
+            "normalized_value TEXT NOT NULL, "
+            "original_value TEXT NOT NULL, "
+            "aliases_jsonb JSONB NOT NULL DEFAULT '[]'::jsonb, "
+            "created_at TIMESTAMPTZ NOT NULL DEFAULT now(), "
+            "updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), "
+            "PRIMARY KEY (tenant_id, domain, normalized_value)"
+            ")",
+            "create_canonical_registry_table",
+        ),
+        ("CREATE INDEX IF NOT EXISTS idx_canonical_registry_canonical_id ON canonical_registry (canonical_id)",
+         "idx_canonical_registry_canonical_id"),
     ]
 
     for sql_stmt, migration_name in migrations:

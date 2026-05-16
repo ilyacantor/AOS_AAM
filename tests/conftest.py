@@ -17,6 +17,10 @@ def _use_temp_db(monkeypatch, tmp_path):
     Sets AAM_DATABASE_URL to a temp path for any code that still reads it,
     and refreshes the Settings singleton.  The legacy db.connection module
     no longer exposes DATABASE, so we skip patching it.
+
+    Also invalidates the canonical_registry per-process snapshot cache
+    between tests so the PG-backed registry doesn't return stale data
+    from a previous test's tenant_id (DISP #24).
     """
     db_path = str(tmp_path / "test_aam.db")
     monkeypatch.setenv("AAM_DATABASE_URL", db_path)
@@ -24,6 +28,12 @@ def _use_temp_db(monkeypatch, tmp_path):
     from app.config import Settings
     s = Settings()
     monkeypatch.setattr("app.config.settings", s)
+    # Snapshot cache reset — cheap and avoids cross-test leakage.
+    try:
+        from app.db.canonical_registry import _SNAPSHOTS as _registry_snapshots
+        _registry_snapshots.clear()
+    except Exception:
+        pass
 
 
 @pytest.fixture

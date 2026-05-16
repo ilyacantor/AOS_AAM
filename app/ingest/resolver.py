@@ -38,6 +38,11 @@ from difflib import SequenceMatcher
 from typing import Any, Callable, Iterable, Literal, Optional
 
 from ..db import hitl_store
+from ..db.canonical_registry import (
+    CanonicalRegistry as CanonicalRegistry,
+    CanonicalEntry as CanonicalEntry,
+    PatternRule as PatternRule,
+)
 
 _log = logging.getLogger("aam.ingest.resolver")
 
@@ -62,26 +67,9 @@ class ResolutionResult:
     audit: dict = field(default_factory=dict)
 
 
-@dataclass
-class CanonicalEntry:
-    """One row in the per-domain canonical registry.
-
-    `value` is the canonical human-readable name (e.g., "Finance North
-    America"); `canonical_id` is the stable UUID used downstream.
-    """
-    canonical_id: str
-    value: str
-    domain: str
-    aliases: list[str] = field(default_factory=list)
-
-
-@dataclass
-class PatternRule:
-    """One pattern -> canonical_id binding for a domain. Regex pre-compiled."""
-    domain: str
-    pattern: re.Pattern
-    canonical_id: str
-    canonical_value: str
+# CanonicalEntry, PatternRule, CanonicalRegistry are imported from
+# app.db.canonical_registry (DISP #24 — persisted to AAM Postgres). The
+# in-memory versions previously defined here have been replaced.
 
 
 # ---------------------------------------------------------------------------
@@ -198,91 +186,7 @@ def similarity_score(a: str, b: str) -> float:
 # ---------------------------------------------------------------------------
 
 
-class CanonicalRegistry:
-    """In-memory canonical registry per (tenant_id, domain).
-
-    The resolver consults the registry on every record. Discovery (new
-    canonical mint) inserts into the same registry so subsequent records in
-    the same run can hit it via exact match. State lives in memory for the
-    process; persistence is a separate concern — for the demo, registries are
-    seeded from the resolver caller (typically the orchestrator passes the
-    "left" pipe's records as seeds before processing the "right" pipe).
-
-    Aliases are stored as a parallel dict so an alias hit still resolves to
-    the canonical entry.
-    """
-
-    def __init__(self) -> None:
-        self._entries: dict[tuple[str, str], dict[str, CanonicalEntry]] = {}
-        self._alias_to_canonical: dict[tuple[str, str], dict[str, str]] = {}
-        self._pattern_rules: dict[tuple[str, str], list[PatternRule]] = {}
-
-    def add_canonical(
-        self, *, tenant_id: str, domain: str, value: str,
-        canonical_id: Optional[str] = None, aliases: Optional[list[str]] = None,
-    ) -> CanonicalEntry:
-        """Add or return an existing canonical entry. Idempotent by normalized value."""
-        if not tenant_id or not domain or not value:
-            raise ValueError(
-                f"add_canonical: tenant_id, domain, value required "
-                f"(got tenant_id={tenant_id!r} domain={domain!r} value={value!r})"
-            )
-        key = (tenant_id, domain)
-        bucket = self._entries.setdefault(key, {})
-        norm = _normalize(value)
-        if norm in bucket:
-            return bucket[norm]
-        cid = canonical_id or str(uuid.uuid4())
-        entry = CanonicalEntry(canonical_id=cid, value=value, domain=domain,
-                               aliases=list(aliases or []))
-        bucket[norm] = entry
-        alias_map = self._alias_to_canonical.setdefault(key, {})
-        for alias in entry.aliases:
-            alias_map[_normalize(alias)] = cid
-        return entry
-
-    def add_alias(self, *, tenant_id: str, domain: str, alias: str, canonical_id: str) -> None:
-        if not alias or not canonical_id:
-            raise ValueError("add_alias: alias and canonical_id required")
-        self._alias_to_canonical.setdefault((tenant_id, domain), {})[_normalize(alias)] = canonical_id
-
-    def add_pattern_rule(self, *, domain: str, pattern: str, canonical_id: str,
-                         canonical_value: str, tenant_id: str) -> None:
-        rule = PatternRule(domain=domain,
-                           pattern=re.compile(pattern, re.IGNORECASE),
-                           canonical_id=canonical_id,
-                           canonical_value=canonical_value)
-        self._pattern_rules.setdefault((tenant_id, domain), []).append(rule)
-
-    def find_exact(self, *, tenant_id: str, domain: str, value: str) -> Optional[CanonicalEntry]:
-        return self._entries.get((tenant_id, domain), {}).get(_normalize(value))
-
-    def find_alias(self, *, tenant_id: str, domain: str, value: str) -> Optional[CanonicalEntry]:
-        canonical_id = self._alias_to_canonical.get((tenant_id, domain), {}).get(_normalize(value))
-        if not canonical_id:
-            return None
-        for entry in self._entries.get((tenant_id, domain), {}).values():
-            if entry.canonical_id == canonical_id:
-                return entry
-        return None
-
-    def find_pattern(self, *, tenant_id: str, domain: str, value: str) -> Optional[CanonicalEntry]:
-        for rule in self._pattern_rules.get((tenant_id, domain), []):
-            if rule.pattern.search(value):
-                bucket = self._entries.get((tenant_id, domain), {})
-                for entry in bucket.values():
-                    if entry.canonical_id == rule.canonical_id:
-                        return entry
-                # Canonical doesn't yet exist — synthesize one from the rule.
-                entry = self.add_canonical(
-                    tenant_id=tenant_id, domain=domain,
-                    canonical_id=rule.canonical_id, value=rule.canonical_value,
-                )
-                return entry
-        return None
-
-    def iter_canonicals(self, *, tenant_id: str, domain: str) -> Iterable[CanonicalEntry]:
-        return iter(self._entries.get((tenant_id, domain), {}).values())
+# CanonicalRegistry imported from app.db.canonical_registry (DISP #24).
 
 
 # ---------------------------------------------------------------------------
