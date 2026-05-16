@@ -91,50 +91,81 @@ class IPaaSAdapter(FabricAdapter):
             raise RuntimeError("BOOMI_ACCOUNT_ID not set")
         return acct
 
-    # ---- connect ---------------------------------------------------------
+    # ---- probe + status mapping -----------------------------------------
 
-    async def connect(self) -> bool:
-        """Connect: validate creds with a cheap GET against a known endpoint."""
+    def _probe_request(self) -> tuple[str, Dict[str, str], Optional[Dict[str, Any]]]:
+        """Return (url, headers, params) for the per-vendor health probe.
+
+        Raises RuntimeError if env config is missing. Raises NotImplementedError
+        if the vendor has no probe implementation.
+        """
         if self._vendor == "workato":
             base, token = self._workato_base(), self._workato_token()
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                r = await client.get(
-                    f"{base}/api/recipes",
-                    headers={"Authorization": f"Bearer {token}"},
-                    params={"per_page": 1},
-                )
-            if r.status_code == 401:
-                self._status = AdapterStatus.FAILED
-                self._error_message = "Workato auth rejected — check WORKATO_API_TOKEN"
-                return False
-            if r.status_code >= 400:
-                self._status = AdapterStatus.FAILED
-                self._error_message = f"Workato connect HTTP {r.status_code}: {r.text[:200]}"
-                return False
-            self._status = AdapterStatus.CONNECTED
-            return True
+            return (
+                f"{base}/api/recipes",
+                {"Authorization": f"Bearer {token}"},
+                {"per_page": 1},
+            )
         if self._vendor == "boomi":
             base = self._boomi_base()
             acct = self._boomi_account()
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                r = await client.get(
-                    f"{base}/api/rest/v1/{acct}/Process",
-                    headers={"Authorization": self._boomi_basic_header()},
-                )
-            if r.status_code == 401:
-                self._status = AdapterStatus.FAILED
-                self._error_message = "Boomi auth rejected — check BOOMI_USERNAME / BOOMI_API_TOKEN"
-                return False
-            if r.status_code >= 400:
-                self._status = AdapterStatus.FAILED
-                self._error_message = f"Boomi connect HTTP {r.status_code}: {r.text[:200]}"
-                return False
-            self._status = AdapterStatus.CONNECTED
-            return True
+            return (
+                f"{base}/api/rest/v1/{acct}/Process",
+                {"Authorization": self._boomi_basic_header()},
+                None,
+            )
         raise NotImplementedError(
-            f"IPaaSAdapter.connect() not implemented for vendor '{self._vendor}'. "
-            "Workato and Boomi are implemented; other vendors require their own auth flow."
+            f"IPaaSAdapter probe not implemented for vendor '{self._vendor}'. "
+            "Workato and Boomi are implemented; other vendors require their own probe."
         )
+
+    async def _probe(self) -> tuple[str, AdapterStatus, Optional[str]]:
+        """Probe the vendor and map the outcome to the 4-state health vocabulary.
+
+        Returns (health_state, status, error_message), where health_state is one of:
+          reachable    — HTTP 200
+          degraded     — HTTP 5xx, timeout, or unexpected non-200
+          unreachable  — connection refused or DNS failure
+          auth_expired — HTTP 401/403 or missing env-var auth config
+        """
+        try:
+            url, headers, params = self._probe_request()
+        except RuntimeError as exc:
+            # Missing required env-var (token, account, base url) — auth config absent.
+            return ("auth_expired", AdapterStatus.FAILED, str(exc))
+
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                r = await client.get(url, headers=headers, params=params)
+        except httpx.TimeoutException as exc:
+            return ("degraded", AdapterStatus.DEGRADED, f"{self._vendor} timeout: {exc}")
+        except httpx.ConnectError as exc:
+            # ConnectError covers connection refused + DNS failure in httpx.
+            return ("unreachable", AdapterStatus.DISCONNECTED,
+                    f"{self._vendor} unreachable (connection refused / DNS): {exc}")
+        except httpx.NetworkError as exc:
+            return ("unreachable", AdapterStatus.DISCONNECTED,
+                    f"{self._vendor} network error: {exc}")
+
+        if r.status_code in (401, 403):
+            return ("auth_expired", AdapterStatus.FAILED,
+                    f"{self._vendor} auth rejected (HTTP {r.status_code})")
+        if 500 <= r.status_code < 600:
+            return ("degraded", AdapterStatus.DEGRADED,
+                    f"{self._vendor} server error HTTP {r.status_code}")
+        if r.status_code == 200:
+            return ("reachable", AdapterStatus.CONNECTED, None)
+        return ("degraded", AdapterStatus.DEGRADED,
+                f"{self._vendor} unexpected HTTP {r.status_code}: {r.text[:200]}")
+
+    # ---- connect ---------------------------------------------------------
+
+    async def connect(self) -> bool:
+        """Connect: validate creds with the health probe. CONNECTED iff reachable."""
+        health_state, status, error = await self._probe()
+        self._status = status
+        self._error_message = error
+        return health_state == "reachable"
 
     async def disconnect(self) -> bool:
         """Disconnect from iPaaS control plane"""
@@ -143,21 +174,19 @@ class IPaaSAdapter(FabricAdapter):
         return True
 
     async def check_health(self) -> PlaneHealth:
-        """Health check via the same endpoint as connect()."""
+        """Health check returning the 4-state vocabulary plus operational status."""
         started = datetime.utcnow()
-        try:
-            ok = await self.connect()
-        except RuntimeError as exc:
-            self._status = AdapterStatus.FAILED
-            self._error_message = str(exc)
-            ok = False
+        health_state, status, error = await self._probe()
         latency_ms = (datetime.utcnow() - started).total_seconds() * 1000
+        self._status = status
+        self._error_message = error
         self._last_health_check = datetime.utcnow()
         return PlaneHealth(
-            status=self._status,
+            status=status,
+            health_state=health_state,
             last_check=self._last_health_check,
             latency_ms=round(latency_ms, 2),
-            error_message=None if ok else self._error_message,
+            error_message=error,
         )
 
     async def discover_pipes(self) -> List[Dict[str, Any]]:

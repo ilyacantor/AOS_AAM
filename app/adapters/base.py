@@ -28,6 +28,7 @@ class PlaneHealth(BaseModel):
     last_check: datetime
     latency_ms: Optional[float] = None
     error_message: Optional[str] = None
+    health_state: Optional[str] = None  # "reachable" | "degraded" | "unreachable" | "auth_expired"
     metrics: Dict[str, Any] = Field(default_factory=dict)
 
 
