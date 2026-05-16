@@ -54,12 +54,24 @@ def _tenant_id_from(payload: dict[str, Any]) -> str:
     return tid
 
 
-def _entity_id_from(payload: dict[str, Any]) -> str:
-    eid = (payload.get("entity_id") or os.environ.get("AOS_ENTITY_ID") or "").strip()
+def _vendor_tenant_entity_id(vendor: str) -> str:
+    """Read the per-vendor tenant_entity_id from env.
+
+    Per-adapter binding (not process-wide AOS_ENTITY_ID). AOS is multi-tenant;
+    each fabric adapter carries its own tenant configuration so a single
+    AAM process can serve multiple tenants without a global default.
+
+    Loud-fail if unset — no fallback to a global, no hardcoded default.
+    """
+    env_name = f"{vendor.upper()}_TENANT_ENTITY_ID"
+    eid = (os.environ.get(env_name) or "").strip()
     if not eid:
         raise HTTPException(
-            status_code=422,
-            detail="entity_id missing (no payload field, no AOS_ENTITY_ID env)",
+            status_code=500,
+            detail=(
+                f"{env_name} is not set; the {vendor} webhook receiver "
+                f"cannot stamp tenant identity on incoming triples."
+            ),
         )
     return eid
 
@@ -227,6 +239,8 @@ def _process_payload(
     *, vendor: str, event_type: str, rows: list[dict],
     tenant_id: str, entity_id: str,
 ) -> dict[str, Any]:
+    # entity_id arrives bound by the caller (per-adapter or per-request),
+    # never derived inside this function.
     """Resolve dispatch spec → ingest → push. Returns the response dict.
     Raises HTTPException on validation / unknown event."""
     spec = _dispatch_for_event(vendor, event_type)
@@ -315,7 +329,11 @@ async def _handle_webhook(
 
     try:
         tenant_id = _tenant_id_from(payload)
-        entity_id = _entity_id_from(payload)
+        # Per-adapter entity_id — NOT from payload, NOT from a global env.
+        # The webhook payload's entity_id (set by the Farm sim or vendor
+        # cloud) is informational; the AAM receiver is the source of truth
+        # for what identity gets stamped on triples that land in DCL.
+        entity_id = _vendor_tenant_entity_id(vendor)
         result = _process_payload(
             vendor=vendor, event_type=event_type or "",
             rows=rows, tenant_id=tenant_id, entity_id=entity_id,
@@ -379,8 +397,8 @@ async def boomi_webhook(
 class ManualEntry(BaseModel):
     pipe_key: str = Field(..., description="MAPPINGS key, e.g., workato::netsuite::vendor")
     row: dict[str, Any] = Field(..., description="Single record with field names matching the mapping")
+    entity_id: str = Field(..., min_length=1, description="Tenant entity_id — REQUIRED. No env fallback; manual entry is per-call.")
     tenant_id: str | None = None
-    entity_id: str | None = None
 
 
 # Map MAPPINGS key → (vendor, event_type) so manual entries route through
@@ -406,7 +424,7 @@ async def manual_entry(req: ManualEntry):
     payload = {
         "event_type": event_type,
         "tenant_id": req.tenant_id or os.environ.get("AOS_TENANT_ID", ""),
-        "entity_id": req.entity_id or os.environ.get("AOS_ENTITY_ID", ""),
+        "entity_id": req.entity_id,    # required by Pydantic; no env fallback
         "rows": [req.row],
     }
     body_bytes = json.dumps(payload).encode("utf-8")
@@ -419,10 +437,9 @@ async def manual_entry(req: ManualEntry):
     )
     try:
         tenant_id = _tenant_id_from(payload)
-        entity_id = _entity_id_from(payload)
         result = _process_payload(
             vendor=vendor, event_type=event_type,
-            rows=payload["rows"], tenant_id=tenant_id, entity_id=entity_id,
+            rows=payload["rows"], tenant_id=tenant_id, entity_id=req.entity_id,
         )
     except HTTPException as exc:
         fabric_webhook_log.finalize_receipt(
