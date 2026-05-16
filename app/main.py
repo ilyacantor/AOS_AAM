@@ -168,6 +168,7 @@ from .routers.aam_ui_actions import router as aam_ui_actions_router
 from .routers.mappings import router as mappings_router
 from .routers.resolver import router as resolver_router
 from .routers.webhooks import router as webhooks_router
+from .routers.fabrics import router as fabrics_router
 
 app.include_router(handoff_router)
 app.include_router(fabric_router)
@@ -192,6 +193,8 @@ app.include_router(resolver_router)
 app.include_router(ui_pages_router)
 # WP12a' — webhook receivers for Workato + Boomi sims (or vendor cloud).
 app.include_router(webhooks_router)
+# WP12b+e — Fabrics tab (observability + trigger + manual entry).
+app.include_router(fabrics_router)
 
 
 # ---------------------------------------------------------------------------

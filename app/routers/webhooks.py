@@ -4,9 +4,15 @@ Per WP12a':
   - Verify HMAC signature against per-vendor *_WEBHOOK_SECRET. Reject 401 on mismatch.
   - Parse the row payload, build TransportRecords.
   - Run each row through the WP3 record-level resolver (saas_subscription
-    domain) so the 0.71 LinkedIn fuzzy case lands on the HITL queue.
+    domain) so the LinkedIn fuzzy case lands on the HITL queue.
   - Build provenance-complete triples via WP4 builder.
   - POST to DCL /api/dcl/ingest-triples (no direct PG write).
+
+Per WP12b:
+  - Every receipt is logged to fabric_webhook_log (vendor + signature result
+    + payload), then finalized when the DCL push completes (success or
+    failure). The /aam/fabrics UI reads this table.
+  - The same ingest path is reused by /api/aam/manual-entry (source='manual').
 
 Sim vs real vendor is just a URL/cred swap. Same code.
 """
@@ -22,7 +28,9 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, Request
+from pydantic import BaseModel, Field
 
+from ..db import fabric_webhook_log
 from ..ingest import dcl_push, mappings, resolver as resolver_mod, triples as triples_mod
 from ..transport.http import TransportRecord
 
@@ -32,8 +40,7 @@ router = APIRouter(tags=["webhooks"])
 
 
 # ---------------------------------------------------------------------------
-# Identity defaults — webhook payloads carry these by convention; if absent,
-# fall back to env. Tenant must be a UUID; entity_id is a stable string.
+# Identity defaults
 # ---------------------------------------------------------------------------
 
 def _tenant_id_from(payload: dict[str, Any]) -> str:
@@ -61,21 +68,24 @@ def _entity_id_from(payload: dict[str, Any]) -> str:
 # Signature verification
 # ---------------------------------------------------------------------------
 
+def _expected_sig(*, body_bytes: bytes, secret_env: str, secret_default: str) -> str:
+    secret = os.environ.get(secret_env, secret_default)
+    return hmac.new(secret.encode("utf-8"), body_bytes, hashlib.sha256).hexdigest()
+
+
 def _verify_signature(
     *, body_bytes: bytes, header_value: str | None, secret_env: str, secret_default: str,
-) -> None:
-    secret = os.environ.get(secret_env, secret_default)
+) -> bool:
     if not header_value:
-        raise HTTPException(status_code=401, detail="missing webhook signature header")
-    expected = hmac.new(secret.encode("utf-8"), body_bytes, hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(expected, header_value):
-        raise HTTPException(status_code=401, detail="webhook signature mismatch")
+        return False
+    return hmac.compare_digest(
+        _expected_sig(body_bytes=body_bytes, secret_env=secret_env, secret_default=secret_default),
+        header_value,
+    )
 
 
 # ---------------------------------------------------------------------------
-# Resolver — process-lifetime singleton with one canonical registry.
-# Saas-subscription is the only domain wired in this pass. Discovery on first
-# sight; fuzzy match in [0.65, 0.90) lands on HITL.
+# Resolver — process-lifetime singleton
 # ---------------------------------------------------------------------------
 
 _registry = resolver_mod.CanonicalRegistry()
@@ -83,25 +93,15 @@ _resolver = resolver_mod.RecordResolver(_registry)
 
 
 def _resolve_for_domain(
-    *,
-    record_dict: dict[str, Any],
-    domain: str,
-    value_field: str,
-    record_key_field: str,
-    pipe_id: str,
-    tenant_id: str,
-    entity_id: str,
-) -> dict[str, Any] | None:
+    *, record_dict, domain, value_field, record_key_field,
+    pipe_id, tenant_id, entity_id,
+):
     if not record_dict.get(value_field):
         return None
     result = _resolver.resolve(
-        record_dict,
-        domain=domain,
-        pipe_id=pipe_id,
-        tenant_id=tenant_id,
-        entity_id=entity_id,
-        value_field=value_field,
-        record_key_field=record_key_field,
+        record_dict, domain=domain, pipe_id=pipe_id,
+        tenant_id=tenant_id, entity_id=entity_id,
+        value_field=value_field, record_key_field=record_key_field,
     )
     return {
         "canonical_id": result.canonical_id,
@@ -113,21 +113,17 @@ def _resolve_for_domain(
 
 
 # ---------------------------------------------------------------------------
-# Webhook → ingest pipeline (shared by both vendor receivers)
+# Pipe construction (deterministic UUID5 keeps DCL pipe_id idempotent across runs)
 # ---------------------------------------------------------------------------
 
-_PIPE_NAMESPACE = uuid.UUID("a4ca3b9c-7d36-4dbb-90b3-9a5e9b3a8b21")  # WP12a' fabric-sim pipes
+_PIPE_NAMESPACE = uuid.UUID("a4ca3b9c-7d36-4dbb-90b3-9a5e9b3a8b21")
 
 
 def _pipe_uuid(vendor: str, source_system: str, domain: str) -> str:
-    """Deterministic UUID5 per (vendor, source_system, domain). Stable across
-    runs so DCL idempotency on pipe_id continues to hold, and joins on
-    semantic_triples.pipe_id are meaningful across ingest batches."""
     return str(uuid.uuid5(_PIPE_NAMESPACE, f"{vendor}::{source_system}::{domain}"))
 
 
-def _build_pipe(*, vendor: str, source_system: str, domain: str, identity_keys: list[str]) -> dict[str, Any]:
-    """Build a minimal pipe dict that get_mapping_for_pipe can resolve."""
+def _build_pipe(*, vendor, source_system, domain, identity_keys):
     return {
         "id": _pipe_uuid(vendor, source_system, domain),
         "source_system": source_system,
@@ -137,28 +133,64 @@ def _build_pipe(*, vendor: str, source_system: str, domain: str, identity_keys: 
     }
 
 
+# ---------------------------------------------------------------------------
+# Vendor → (event_type substring) → pipe spec
+#
+# When a new fabric vendor is added (e.g., MuleSoft), extend this table.
+# ---------------------------------------------------------------------------
+
+# Each entry: (source_system_display, source_system_slug, fabric_plane,
+#              domain, identity_keys, resolve_spec_or_None)
+# resolve_spec = (value_field, record_key_field, resolve_domain)
+_DISPATCH: dict[str, dict[str, tuple]] = {
+    "workato": {
+        "vendor_master": (
+            "NetSuite", "netsuite", "workato", "vendor", ["vendor_id"],
+            ("vendor_name", "vendor_id", "saas_subscription"),
+        ),
+        "ap_invoices": (
+            "NetSuite", "netsuite", "workato", "ap_invoice", ["bill_no"], None,
+        ),
+    },
+    "boomi": {
+        "okta_apps": (
+            "Okta", "okta", "boomi", "saas_app", ["id"],
+            ("label", "id", "saas_subscription"),
+        ),
+        "okta_users": (
+            "Okta", "okta", "boomi", "user", ["id"], None,
+        ),
+        "okta_assignments": (
+            "Okta", "okta", "boomi", "assignment", ["id"], None,
+        ),
+    },
+}
+
+
+def _dispatch_for_event(vendor: str, event_type: str):
+    table = _DISPATCH.get(vendor)
+    if not table:
+        return None
+    for substr, spec in table.items():
+        if substr in event_type:
+            return spec
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Core ingest path — shared by webhook receivers and manual entry
+# ---------------------------------------------------------------------------
+
 def _ingest_rows(
-    *,
-    rows: list[dict[str, Any]],
-    pipe: dict[str, Any],
-    vendor: str,
-    fabric_plane: str,
-    source_system: str,
-    tenant_id: str,
-    entity_id: str,
-    aam_inference_id: str,
-    source_run_tag: str,
-    resolve_value_field: str | None,
-    resolve_record_key: str | None,
-    resolve_domain: str | None,
-) -> list[dict[str, Any]]:
-    """Convert webhook rows to triples (resolver + builder), return triples."""
+    *, rows, pipe, vendor, fabric_plane, source_system,
+    tenant_id, entity_id, aam_inference_id, source_run_tag,
+    resolve_value_field, resolve_record_key, resolve_domain,
+):
     field_mappings = mappings.get_mapping_for_pipe(pipe)
     all_triples: list[dict[str, Any]] = []
     for row in rows:
         identity_value = next(
-            (str(row.get(k)) for k in pipe["identity_keys"] if row.get(k) is not None),
-            "",
+            (str(row.get(k)) for k in pipe["identity_keys"] if row.get(k) is not None), "",
         )
         if not identity_value:
             raise HTTPException(
@@ -166,37 +198,24 @@ def _ingest_rows(
                 detail=f"row missing identity field {pipe['identity_keys']!r}; row keys={list(row.keys())}",
             )
         record = TransportRecord(
-            pipe_id=pipe["id"],
-            record_key=identity_value,
-            payload=dict(row),
-            source_system=source_system,
-            metadata={},
+            pipe_id=pipe["id"], record_key=identity_value,
+            payload=dict(row), source_system=source_system, metadata={},
         )
-        # Resolve when the row carries a value the resolver knows about.
         if resolve_value_field and resolve_domain and resolve_record_key:
             resolution = _resolve_for_domain(
-                record_dict=row,
-                domain=resolve_domain,
-                value_field=resolve_value_field,
-                record_key_field=resolve_record_key,
-                pipe_id=pipe["id"],
-                tenant_id=tenant_id,
-                entity_id=entity_id,
+                record_dict=row, domain=resolve_domain,
+                value_field=resolve_value_field, record_key_field=resolve_record_key,
+                pipe_id=pipe["id"], tenant_id=tenant_id, entity_id=entity_id,
             )
             if resolution:
                 record.metadata["_resolution"] = resolution
-
         triples = triples_mod.build_triples(
-            record,
-            pipe=pipe,
-            mappings=field_mappings,
-            tenant_id=tenant_id,
-            entity_id=entity_id,
+            record, pipe=pipe, mappings=field_mappings,
+            tenant_id=tenant_id, entity_id=entity_id,
             aam_inference_id=aam_inference_id,
             source_run_tag=f"{source_run_tag}::{record.record_key}",
             vendor=vendor,
         )
-        # Stamp fabric_plane on every triple (DCL contract requires non-null).
         for t in triples:
             t["fabric_plane"] = fabric_plane
             t["fabric_product"] = vendor
@@ -204,171 +223,224 @@ def _ingest_rows(
     return all_triples
 
 
+def _process_payload(
+    *, vendor: str, event_type: str, rows: list[dict],
+    tenant_id: str, entity_id: str,
+) -> dict[str, Any]:
+    """Resolve dispatch spec → ingest → push. Returns the response dict.
+    Raises HTTPException on validation / unknown event."""
+    spec = _dispatch_for_event(vendor, event_type)
+    if not spec:
+        raise HTTPException(status_code=400, detail=f"unknown event_type for {vendor}: {event_type!r}")
+    src_display, src_slug, fabric_plane, domain, identity_keys, resolve_spec = spec
+    pipe = _build_pipe(
+        vendor=vendor, source_system=src_slug, domain=domain, identity_keys=identity_keys,
+    )
+    aam_inference_id = str(uuid.uuid4())
+    source_run_tag = f"{vendor}::{event_type}::{aam_inference_id[:8]}"
+    rvf, rrk, rd = (resolve_spec or (None, None, None))
+    all_triples = _ingest_rows(
+        rows=rows, pipe=pipe, vendor=vendor,
+        fabric_plane=fabric_plane, source_system=src_display,
+        tenant_id=tenant_id, entity_id=entity_id,
+        aam_inference_id=aam_inference_id, source_run_tag=source_run_tag,
+        resolve_value_field=rvf, resolve_record_key=rrk, resolve_domain=rd,
+    )
+    pushed = dcl_push.push_triples(
+        triples=all_triples, tenant_id=tenant_id, entity_id=entity_id,
+        source_run_tag=source_run_tag,
+    )
+    return {
+        "aam_inference_id": aam_inference_id,
+        "dcl_ingest_id": pushed.get("dcl_ingest_id"),
+        "rows_seen": len(rows),
+        "triples_built": len(all_triples),
+        "triples_pushed": len(all_triples),  # push_triples raises on rejection
+        "concept_summary": pushed.get("concept_summary"),
+    }
+
+
 # ---------------------------------------------------------------------------
-# Workato receiver
+# Webhook receiver (vendor-agnostic core; thin per-vendor wrappers)
 # ---------------------------------------------------------------------------
+
+async def _handle_webhook(
+    *, vendor: str, request: Request, header_value: str | None,
+    secret_env: str, secret_default: str,
+) -> dict[str, Any]:
+    body_bytes = await request.body()
+    sig_truncated = (header_value or "")[:16] or None
+    verified = _verify_signature(
+        body_bytes=body_bytes, header_value=header_value,
+        secret_env=secret_env, secret_default=secret_default,
+    )
+    # Parse event_type best-effort for the receipt row before we 401.
+    parsed: dict[str, Any] = {}
+    if verified:
+        try:
+            parsed = json.loads(body_bytes)
+        except json.JSONDecodeError:
+            parsed = {}
+    event_type = parsed.get("event_type") if isinstance(parsed, dict) else None
+    receipt_id = fabric_webhook_log.log_receipt(
+        vendor=vendor, event_type=event_type,
+        payload_bytes=len(body_bytes),
+        signature_verified=verified,
+        signature_truncated=sig_truncated,
+        payload=parsed if verified else None,
+        source="webhook",
+    )
+
+    if not verified:
+        fabric_webhook_log.finalize_receipt(
+            receipt_id, error="signature mismatch or missing header",
+            push_status_code=401,
+        )
+        raise HTTPException(status_code=401, detail="webhook signature mismatch or missing")
+
+    try:
+        payload = parsed if isinstance(parsed, dict) and parsed else json.loads(body_bytes)
+    except json.JSONDecodeError as exc:
+        fabric_webhook_log.finalize_receipt(receipt_id, error=f"JSON parse: {exc}", push_status_code=400)
+        raise HTTPException(status_code=400, detail=f"webhook body not JSON: {exc}")
+
+    rows = payload.get("rows") or []
+    if not isinstance(rows, list):
+        fabric_webhook_log.finalize_receipt(receipt_id, error="payload.rows not a list", push_status_code=400)
+        raise HTTPException(status_code=400, detail="payload.rows must be a list")
+    if not rows:
+        fabric_webhook_log.finalize_receipt(receipt_id, rows_seen=0, triples_built=0,
+                                            triples_pushed=0, push_status_code=200)
+        return {"accepted": True, "receipt_id": receipt_id, "rows": 0, "triples_pushed": 0}
+
+    try:
+        tenant_id = _tenant_id_from(payload)
+        entity_id = _entity_id_from(payload)
+        result = _process_payload(
+            vendor=vendor, event_type=event_type or "",
+            rows=rows, tenant_id=tenant_id, entity_id=entity_id,
+        )
+    except HTTPException as exc:
+        fabric_webhook_log.finalize_receipt(
+            receipt_id, error=f"{exc.status_code}: {exc.detail}",
+            push_status_code=exc.status_code,
+        )
+        raise
+    except dcl_push.DCLPushError as exc:
+        fabric_webhook_log.finalize_receipt(receipt_id, error=str(exc)[:500], push_status_code=502)
+        raise HTTPException(status_code=502, detail=f"DCL push failed: {exc}")
+    except Exception as exc:
+        fabric_webhook_log.finalize_receipt(receipt_id, error=f"unexpected: {exc}"[:500], push_status_code=500)
+        raise
+
+    fabric_webhook_log.finalize_receipt(
+        receipt_id,
+        aam_inference_id=result["aam_inference_id"],
+        dcl_ingest_id=result["dcl_ingest_id"],
+        rows_seen=result["rows_seen"],
+        triples_built=result["triples_built"],
+        triples_pushed=result["triples_pushed"],
+        push_status_code=201,  # DCL ingest returns 201
+    )
+    _log.info(
+        "%s webhook accepted event=%s rows=%d triples=%d dcl_ingest_id=%s receipt_id=%s",
+        vendor, event_type, len(rows), result["triples_built"],
+        result["dcl_ingest_id"], receipt_id,
+    )
+    return {"accepted": True, "receipt_id": receipt_id, **result, "rows": len(rows)}
+
 
 @router.post("/api/aam/webhooks/workato")
 async def workato_webhook(
     request: Request,
     x_workato_signature: str | None = Header(default=None, alias="x-workato-signature"),
 ):
-    body_bytes = await request.body()
-    _verify_signature(
-        body_bytes=body_bytes,
-        header_value=x_workato_signature,
-        secret_env="WORKATO_WEBHOOK_SECRET",
-        secret_default="sim-workato-secret",
+    return await _handle_webhook(
+        vendor="workato", request=request, header_value=x_workato_signature,
+        secret_env="WORKATO_WEBHOOK_SECRET", secret_default="sim-workato-secret",
     )
-    try:
-        payload = json.loads(body_bytes)
-    except json.JSONDecodeError as exc:
-        raise HTTPException(status_code=400, detail=f"webhook body not JSON: {exc}")
-    rows = payload.get("rows") or []
-    if not isinstance(rows, list):
-        raise HTTPException(status_code=400, detail="payload.rows must be a list")
-    if not rows:
-        return {"accepted": True, "rows": 0, "triples_pushed": 0}
 
-    event_type = payload.get("event_type") or ""
-    tenant_id = _tenant_id_from(payload)
-    entity_id = _entity_id_from(payload)
-    aam_inference_id = str(uuid.uuid4())
-    source_run_tag = f"workato::{event_type}::{aam_inference_id[:8]}"
-
-    if "vendor_master" in event_type:
-        pipe = _build_pipe(
-            vendor="workato", source_system="netsuite", domain="vendor",
-            identity_keys=["vendor_id"],
-        )
-        all_triples = _ingest_rows(
-            rows=rows, pipe=pipe, vendor="workato",
-            fabric_plane="workato", source_system="NetSuite",
-            tenant_id=tenant_id, entity_id=entity_id,
-            aam_inference_id=aam_inference_id, source_run_tag=source_run_tag,
-            resolve_value_field="vendor_name",
-            resolve_record_key="vendor_id",
-            resolve_domain="saas_subscription",
-        )
-    elif "ap_invoices" in event_type:
-        pipe = _build_pipe(
-            vendor="workato", source_system="netsuite", domain="ap_invoice",
-            identity_keys=["bill_no"],
-        )
-        all_triples = _ingest_rows(
-            rows=rows, pipe=pipe, vendor="workato",
-            fabric_plane="workato", source_system="NetSuite",
-            tenant_id=tenant_id, entity_id=entity_id,
-            aam_inference_id=aam_inference_id, source_run_tag=source_run_tag,
-            resolve_value_field=None, resolve_record_key=None, resolve_domain=None,
-        )
-    else:
-        raise HTTPException(status_code=400, detail=f"unknown event_type: {event_type!r}")
-
-    pushed = dcl_push.push_triples(
-        triples=all_triples, tenant_id=tenant_id, entity_id=entity_id,
-        source_run_tag=source_run_tag,
-    )
-    _log.info(
-        "workato webhook accepted event=%s rows=%d triples=%d dcl_ingest_id=%s",
-        event_type, len(rows), len(all_triples), pushed.get("dcl_ingest_id"),
-    )
-    return {
-        "accepted": True,
-        "rows": len(rows),
-        "triples_pushed": len(all_triples),
-        "aam_inference_id": aam_inference_id,
-        "dcl_ingest_id": pushed.get("dcl_ingest_id"),
-        "concept_summary": pushed.get("concept_summary"),
-    }
-
-
-# ---------------------------------------------------------------------------
-# Boomi receiver
-# ---------------------------------------------------------------------------
 
 @router.post("/api/aam/webhooks/boomi")
 async def boomi_webhook(
     request: Request,
     x_boomi_signature: str | None = Header(default=None, alias="x-boomi-signature"),
 ):
-    body_bytes = await request.body()
-    _verify_signature(
-        body_bytes=body_bytes,
-        header_value=x_boomi_signature,
-        secret_env="BOOMI_WEBHOOK_SECRET",
-        secret_default="sim-boomi-secret",
+    return await _handle_webhook(
+        vendor="boomi", request=request, header_value=x_boomi_signature,
+        secret_env="BOOMI_WEBHOOK_SECRET", secret_default="sim-boomi-secret",
+    )
+
+
+# ---------------------------------------------------------------------------
+# WP12e — manual entry: same code path, no signature, source='manual'
+# ---------------------------------------------------------------------------
+
+class ManualEntry(BaseModel):
+    pipe_key: str = Field(..., description="MAPPINGS key, e.g., workato::netsuite::vendor")
+    row: dict[str, Any] = Field(..., description="Single record with field names matching the mapping")
+    tenant_id: str | None = None
+    entity_id: str | None = None
+
+
+# Map MAPPINGS key → (vendor, event_type) so manual entries route through
+# the same _process_payload dispatch table as webhooks. Keys mirror the
+# vendor-event substrings used in _DISPATCH.
+_MANUAL_PIPE_TO_EVENT: dict[str, tuple[str, str]] = {
+    "workato::netsuite::vendor":      ("workato", "vendor_master"),
+    "workato::netsuite::ap_invoice":  ("workato", "ap_invoices"),
+    "boomi::okta::saas_app":          ("boomi", "okta_apps"),
+    "boomi::okta::user":              ("boomi", "okta_users"),
+    "boomi::okta::assignment":        ("boomi", "okta_assignments"),
+}
+
+
+@router.post("/api/aam/manual-entry")
+async def manual_entry(req: ManualEntry):
+    if req.pipe_key not in _MANUAL_PIPE_TO_EVENT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"unknown pipe_key {req.pipe_key!r}; valid: {sorted(_MANUAL_PIPE_TO_EVENT.keys())}",
+        )
+    vendor, event_type = _MANUAL_PIPE_TO_EVENT[req.pipe_key]
+    payload = {
+        "event_type": event_type,
+        "tenant_id": req.tenant_id or os.environ.get("AOS_TENANT_ID", ""),
+        "entity_id": req.entity_id or os.environ.get("AOS_ENTITY_ID", ""),
+        "rows": [req.row],
+    }
+    body_bytes = json.dumps(payload).encode("utf-8")
+    receipt_id = fabric_webhook_log.log_receipt(
+        vendor=vendor, event_type=event_type,
+        payload_bytes=len(body_bytes),
+        signature_verified=True,           # n/a for manual
+        signature_truncated=None,
+        payload=payload, source="manual",
     )
     try:
-        payload = json.loads(body_bytes)
-    except json.JSONDecodeError as exc:
-        raise HTTPException(status_code=400, detail=f"webhook body not JSON: {exc}")
-    rows = payload.get("rows") or []
-    if not isinstance(rows, list):
-        raise HTTPException(status_code=400, detail="payload.rows must be a list")
-    if not rows:
-        return {"accepted": True, "rows": 0, "triples_pushed": 0}
+        tenant_id = _tenant_id_from(payload)
+        entity_id = _entity_id_from(payload)
+        result = _process_payload(
+            vendor=vendor, event_type=event_type,
+            rows=payload["rows"], tenant_id=tenant_id, entity_id=entity_id,
+        )
+    except HTTPException as exc:
+        fabric_webhook_log.finalize_receipt(
+            receipt_id, error=f"{exc.status_code}: {exc.detail}",
+            push_status_code=exc.status_code,
+        )
+        raise
+    except dcl_push.DCLPushError as exc:
+        fabric_webhook_log.finalize_receipt(receipt_id, error=str(exc)[:500], push_status_code=502)
+        raise HTTPException(status_code=502, detail=f"DCL push failed: {exc}")
 
-    event_type = payload.get("event_type") or ""
-    tenant_id = _tenant_id_from(payload)
-    entity_id = _entity_id_from(payload)
-    aam_inference_id = str(uuid.uuid4())
-    source_run_tag = f"boomi::{event_type}::{aam_inference_id[:8]}"
-
-    if "okta_apps" in event_type:
-        pipe = _build_pipe(
-            vendor="boomi", source_system="okta", domain="saas_app",
-            identity_keys=["id"],
-        )
-        all_triples = _ingest_rows(
-            rows=rows, pipe=pipe, vendor="boomi",
-            fabric_plane="boomi", source_system="Okta",
-            tenant_id=tenant_id, entity_id=entity_id,
-            aam_inference_id=aam_inference_id, source_run_tag=source_run_tag,
-            resolve_value_field="label",
-            resolve_record_key="id",
-            resolve_domain="saas_subscription",
-        )
-    elif "okta_users" in event_type:
-        pipe = _build_pipe(
-            vendor="boomi", source_system="okta", domain="user",
-            identity_keys=["id"],
-        )
-        all_triples = _ingest_rows(
-            rows=rows, pipe=pipe, vendor="boomi",
-            fabric_plane="boomi", source_system="Okta",
-            tenant_id=tenant_id, entity_id=entity_id,
-            aam_inference_id=aam_inference_id, source_run_tag=source_run_tag,
-            resolve_value_field=None, resolve_record_key=None, resolve_domain=None,
-        )
-    elif "okta_assignments" in event_type:
-        pipe = _build_pipe(
-            vendor="boomi", source_system="okta", domain="assignment",
-            identity_keys=["id"],
-        )
-        all_triples = _ingest_rows(
-            rows=rows, pipe=pipe, vendor="boomi",
-            fabric_plane="boomi", source_system="Okta",
-            tenant_id=tenant_id, entity_id=entity_id,
-            aam_inference_id=aam_inference_id, source_run_tag=source_run_tag,
-            resolve_value_field=None, resolve_record_key=None, resolve_domain=None,
-        )
-    else:
-        raise HTTPException(status_code=400, detail=f"unknown event_type: {event_type!r}")
-
-    pushed = dcl_push.push_triples(
-        triples=all_triples, tenant_id=tenant_id, entity_id=entity_id,
-        source_run_tag=source_run_tag,
+    fabric_webhook_log.finalize_receipt(
+        receipt_id,
+        aam_inference_id=result["aam_inference_id"],
+        dcl_ingest_id=result["dcl_ingest_id"],
+        rows_seen=result["rows_seen"],
+        triples_built=result["triples_built"],
+        triples_pushed=result["triples_pushed"],
+        push_status_code=201,
     )
-    _log.info(
-        "boomi webhook accepted event=%s rows=%d triples=%d dcl_ingest_id=%s",
-        event_type, len(rows), len(all_triples), pushed.get("dcl_ingest_id"),
-    )
-    return {
-        "accepted": True,
-        "rows": len(rows),
-        "triples_pushed": len(all_triples),
-        "aam_inference_id": aam_inference_id,
-        "dcl_ingest_id": pushed.get("dcl_ingest_id"),
-        "concept_summary": pushed.get("concept_summary"),
-    }
+    return {"accepted": True, "receipt_id": receipt_id, **result, "rows": 1}

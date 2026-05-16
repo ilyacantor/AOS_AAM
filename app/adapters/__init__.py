@@ -19,13 +19,19 @@ from .eventbus import EventBusAdapter
 from .warehouse import WarehouseAdapter
 from .factory import get_adapter_for_plane
 
+# WP12b: registry of fabric vendors with real implementations end-to-end
+# (adapter + webhook handler + UI surface). The /aam/fabrics UI iterates
+# this set; adding a new vendor = implement + handler + add slug here.
+IMPLEMENTED_VENDORS: set[str] = {"workato", "boomi"}
+
 __all__ = [
     "FabricAdapter",
-    "AdapterStatus", 
+    "AdapterStatus",
     "PlaneHealth",
     "IPaaSAdapter",
     "GatewayAdapter",
     "EventBusAdapter",
     "WarehouseAdapter",
     "get_adapter_for_plane",
+    "IMPLEMENTED_VENDORS",
 ]

@@ -71,6 +71,36 @@ def _run_migrations():
         # Migration 2026-03-27: Add tenant_id and entity_id to handoff log
         ("ALTER TABLE aod_handoff_log ADD COLUMN IF NOT EXISTS tenant_id TEXT", "add_handoff_tenant_id_column"),
         ("ALTER TABLE aod_handoff_log ADD COLUMN IF NOT EXISTS entity_id TEXT", "add_handoff_entity_id_column"),
+        # Migration 2026-05-15 (WP12b): per-receipt observability for fabric webhook receivers.
+        # Canonical SQL recorded at migrations/add_fabric_webhook_log.sql.
+        (
+            "CREATE TABLE IF NOT EXISTS fabric_webhook_log ("
+            "id UUID PRIMARY KEY DEFAULT gen_random_uuid(), "
+            "received_utc TIMESTAMPTZ NOT NULL DEFAULT now(), "
+            "finalized_utc TIMESTAMPTZ, "
+            "vendor VARCHAR(32) NOT NULL, "
+            "event_type VARCHAR(128), "
+            "payload_bytes INTEGER NOT NULL, "
+            "signature_verified BOOLEAN NOT NULL, "
+            "signature_truncated VARCHAR(24), "
+            "aam_inference_id UUID, "
+            "dcl_ingest_id UUID, "
+            "rows_seen INTEGER, "
+            "triples_built INTEGER, "
+            "triples_pushed INTEGER, "
+            "push_status_code INTEGER, "
+            "error TEXT, "
+            "payload_jsonb JSONB, "
+            "source VARCHAR(16) NOT NULL DEFAULT 'webhook' CHECK (source IN ('webhook','manual'))"
+            ")",
+            "create_fabric_webhook_log_table",
+        ),
+        ("CREATE INDEX IF NOT EXISTS idx_fabric_webhook_log_received ON fabric_webhook_log (received_utc DESC)",
+         "idx_fabric_webhook_log_received"),
+        ("CREATE INDEX IF NOT EXISTS idx_fabric_webhook_log_vendor_received ON fabric_webhook_log (vendor, received_utc DESC)",
+         "idx_fabric_webhook_log_vendor_received"),
+        ("CREATE INDEX IF NOT EXISTS idx_fabric_webhook_log_aam_inference ON fabric_webhook_log (aam_inference_id) WHERE aam_inference_id IS NOT NULL",
+         "idx_fabric_webhook_log_aam_inference"),
     ]
 
     for sql_stmt, migration_name in migrations:
