@@ -230,6 +230,7 @@ def ui_nav(active: str = "") -> str:
         <a href="/ui/pipes" class="nav-link{active_class('pipes')}" data-testid="nav-pipes">Pipes</a>
         <a href="/ui/candidates" class="nav-link{active_class('candidates')}" data-testid="nav-candidates">Candidates</a>
         <a href="/ui/drift" class="nav-link{active_class('drift')}" data-testid="nav-drift">Drift & Health</a>
+        <a href="/ui/fabrics" class="nav-link{active_class('fabrics')}" data-testid="nav-fabrics">Fabrics</a>
         <a href="/ui/reconcile" class="nav-link{active_class('reconcile')}" data-testid="nav-reconcile">Reconcile</a>
         <a href="/ui/controls" class="nav-link{active_class('controls')}" data-testid="nav-controls">Controls</a>
         <a href="/ui/guide" class="nav-link{active_class('guide')}" data-testid="nav-guide">Guide</a>

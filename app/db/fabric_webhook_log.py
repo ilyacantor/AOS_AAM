@@ -156,33 +156,109 @@ def aggregate_counts(
 def fetch_drill_companions(
     *, dcl_ingest_id: str,
 ) -> dict[str, Any]:
-    """Pull the per-batch summary from DCL via HTTP.
+    """Pull the per-batch summary AND sample triples from DCL via HTTP.
 
     AAM and DCL run against different Supabase projects in production, so a
     direct SQL join from AAM into semantic_triples is wrong even when both
-    schemas have the table. Use DCL's GET /api/dcl/ingest-status/{run_id}
-    contract — that's the authoritative read path for batch state.
+    schemas have the table. Use DCL's HTTP read endpoints — those are the
+    authoritative read paths for batch state.
 
     Returns:
       ingest_status: full DCL response dict (triple_count, concept_summary,
                      created_at, is_active) or {error: "..."} on failure.
+      triples: list of up to 50 triples for this dcl_ingest_id with all 5
+               provenance fields (source_system, source_field, pipe_id,
+               fabric_plane, confidence_score). Empty list on no-match or
+               on error; the error explanation surfaces via ingest_status.
     """
     import os
     import httpx
     base = (os.environ.get("DCL_URL") or "").rstrip("/")
     if not base:
-        return {"ingest_status": {"error": "DCL_URL not set; cannot fetch DCL state"}}
-    url = f"{base}/api/dcl/ingest-status/{dcl_ingest_id}"
+        return {
+            "ingest_status": {"error": "DCL_URL not set; cannot fetch DCL state"},
+            "triples": [],
+        }
+
+    status_url = f"{base}/api/dcl/ingest-status/{dcl_ingest_id}"
+    triples_url = f"{base}/api/dcl/triples/browse?run_id={dcl_ingest_id}&limit=50"
+    status: dict[str, Any]
+    triples: list[dict[str, Any]] = []
+
     try:
         with httpx.Client(timeout=5.0) as client:
-            r = client.get(url)
+            sr = client.get(status_url)
+            if sr.status_code == 404:
+                status = {"error": f"DCL has no record of dcl_ingest_id={dcl_ingest_id}"}
+            elif sr.status_code >= 400:
+                status = {"error": f"DCL HTTP {sr.status_code}: {sr.text[:200]}"}
+            else:
+                status = sr.json()
+            tr = client.get(triples_url)
+            if tr.status_code < 400:
+                triples = (tr.json() or {}).get("triples", [])
     except httpx.HTTPError as exc:
-        return {"ingest_status": {"error": f"DCL unreachable: {exc}"}}
-    if r.status_code == 404:
-        return {"ingest_status": {"error": f"DCL has no record of dcl_ingest_id={dcl_ingest_id}"}}
-    if r.status_code >= 400:
-        return {"ingest_status": {"error": f"DCL HTTP {r.status_code}: {r.text[:200]}"}}
-    return {"ingest_status": r.json()}
+        return {
+            "ingest_status": {"error": f"DCL unreachable: {exc}"},
+            "triples": [],
+        }
+    return {"ingest_status": status, "triples": triples}
+
+
+def fetch_hitl_for_receipt(
+    *,
+    tenant_id: str,
+    entity_id: str,
+    received_utc: str,
+    window_seconds: int = 60,
+) -> list[dict[str, Any]]:
+    """Return resolver_hitl_queue rows created near this webhook's receipt timestamp.
+
+    AAM and DCL share no schema for resolver/HITL — this reads AAM's local
+    SQLite HITL store. The receipt and the HITL entries don't share a join
+    key today, so we approximate by tenant_id + entity_id + a small time
+    window around received_utc. Acceptable for drill-down operator UX; not
+    suitable for cross-tenant aggregation.
+    """
+    from datetime import datetime, timedelta
+    from .. import db as _db_pkg  # noqa: F401
+    from ..db.hitl_store import list_all
+    try:
+        all_rows = list_all(tenant_id=tenant_id, limit=200)
+    except Exception as exc:  # noqa: BLE001 — surface, don't swallow
+        _log.warning("HITL lookup failed for receipt: %s", exc)
+        return []
+    def _to_naive_utc(s: str) -> datetime | None:
+        """Parse an ISO timestamp into a naive UTC datetime — both the Postgres
+        offset-aware receipt timestamps and SQLite naive HITL timestamps end
+        up on the same comparable scale."""
+        try:
+            dt = datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if dt.tzinfo is not None:
+            from datetime import timezone
+            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt
+
+    anchor = _to_naive_utc(received_utc)
+    if anchor is None:
+        return all_rows  # cannot window — return everything for this tenant
+    lo = anchor - timedelta(seconds=window_seconds)
+    hi = anchor + timedelta(seconds=window_seconds)
+    out: list[dict[str, Any]] = []
+    for r in all_rows:
+        if r.get("entity_id") != entity_id:
+            continue
+        created = r.get("created_at")
+        if not created:
+            continue
+        ts = _to_naive_utc(str(created))
+        if ts is None:
+            continue
+        if lo <= ts <= hi:
+            out.append(r)
+    return out
 
 
 def _serialize(row: dict[str, Any]) -> dict[str, Any]:

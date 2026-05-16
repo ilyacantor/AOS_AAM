@@ -3700,3 +3700,400 @@ async def ui_reconcile(aod_run_id: str):
 </body>
 </html>
 """)
+
+
+# ---------------------------------------------------------------------------
+# /ui/fabrics — Fabrics tab (WS-1 Block 2)
+# Relocated from app/routers/fabrics.py (deleted) into the AAM /ui/<page>
+# convention. Inherits NAV_STYLE + UI_STYLE so the dark theme + Quicksand
+# nav strip + active-tab highlight match every other AAM operator tab.
+# ---------------------------------------------------------------------------
+
+@router.get("/ui/fabrics", response_class=HTMLResponse, include_in_schema=False)
+async def ui_fabrics():
+    """Fabrics tab — per-vendor cards, recent receipts, manual entry."""
+    return HTMLResponse(content=f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>AAM — Fabrics</title>
+    {NAV_STYLE}
+    {UI_STYLE}
+    <style>
+        .health-reachable    {{ background: rgba(34, 197, 94, 0.2); color: var(--green-500); }}
+        .health-degraded     {{ background: rgba(251, 146, 60, 0.2); color: var(--orange-400); }}
+        .health-unreachable  {{ background: rgba(248, 113, 113, 0.2); color: var(--red-400); }}
+        .health-auth_expired {{ background: rgba(239, 68, 68, 0.2); color: var(--red-500); }}
+        .health-unknown      {{ background: rgba(148, 163, 184, 0.2); color: var(--slate-400); }}
+        .stat-inline {{ display:inline-block; background: rgba(30, 41, 59, 0.5); border:1px solid var(--slate-700); border-radius:6px; padding:6px 10px; margin-right:6px; font-size:0.78rem; color:var(--slate-400); }}
+        .stat-inline b {{ color:var(--cyan-400); font-size:1rem; margin-right:4px; }}
+        .vendor-grid {{ display:grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap:16px; }}
+        .field-list td {{ padding:6px 10px; border-bottom:1px solid var(--slate-700); }}
+        .field-list td:first-child {{ font-family: 'Consolas', 'Monaco', monospace; font-size:0.78rem; color:var(--slate-400); width:240px; }}
+        .field-list input {{ width:100%; background: var(--slate-900); color:#e2e8f0; border:1px solid var(--slate-700); border-radius:4px; padding:4px 8px; font-family:inherit; }}
+        .recent-row {{ cursor:pointer; }}
+        .mono {{ font-family: 'Consolas', 'Monaco', monospace; font-size:0.78rem; }}
+    </style>
+</head>
+<body>
+    {ui_nav("fabrics")}
+    <div class="container">
+        <h1>Fabrics</h1>
+        <p class="page-subtitle">Real-time webhook activity from registered fabric adapters. Trigger demo runs, drill into receipts to see resolver decisions and DCL triples with full provenance, and inject manual records into the resolver/converter pipeline.</p>
+
+        <div class="section">
+            <h2>Registered fabrics</h2>
+            <div id="vendor-cards" class="vendor-grid" data-testid="vendor-cards"></div>
+        </div>
+
+        <div class="section">
+            <h2 style="display:inline-block;">Recent receipts</h2>
+            <span class="page-subtitle" style="margin-left:12px; display:inline-block;">auto-refresh 5s</span>
+            <span style="margin-left:8px;">filter:
+                <select id="filter-vendor" onchange="loadReceipts()">
+                    <option value="">all</option>
+                </select>
+            </span>
+            <div class="panel" style="margin-top:8px; padding:0; overflow:hidden;">
+                <table data-testid="receipts-table">
+                    <thead><tr>
+                        <th>received</th><th>vendor</th><th>event</th><th>src</th>
+                        <th>sig</th><th>rows</th><th>triples</th><th>push</th><th>err</th>
+                    </tr></thead>
+                    <tbody id="receipt-rows"></tbody>
+                </table>
+                <div id="receipt-empty" class="empty-state" style="display:none;">no receipts yet</div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Manual entry</h2>
+            <p class="page-subtitle">Inject a single record into the same resolver/converter/push path as a webhook. Useful for HITL pair construction and edge-case testing.</p>
+            <div class="panel">
+                <div class="controls">
+                    <label>pipe:
+                        <select id="manual-pipe" data-testid="manual-pipe" onchange="renderManualFields()"></select>
+                    </label>
+                    <input id="manual-entity-id" data-testid="manual-entity-id" placeholder="entity_id (required)" style="background:var(--slate-900); color:#e2e8f0; border:1px solid var(--slate-700); border-radius:6px; padding:8px 12px; font-family:inherit; font-size:0.875rem;">
+                    <button class="btn" data-testid="manual-submit" onclick="submitManual()">submit</button>
+                </div>
+                <table class="field-list"><tbody id="manual-fields"></tbody></table>
+                <h3 style="margin-top:14px;">last result</h3>
+                <pre id="manual-result" class="field-value mono" style="white-space:pre-wrap; min-height:32px;">—</pre>
+            </div>
+        </div>
+    </div>
+
+<script>
+async function fetchJSON(url, opts) {{
+    const r = await fetch(url, opts);
+    if (!r.ok) throw new Error(url + ' -> ' + r.status + ' ' + (await r.text()).slice(0, 200));
+    return r.json();
+}}
+
+let MANUAL_PIPES = [];
+
+async function loadVendors() {{
+    const data = await fetchJSON('/api/aam/fabrics/list');
+    const sel = document.getElementById('filter-vendor');
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">all</option>' +
+        data.vendors.map(v => `<option value="${{v.vendor}}">${{v.vendor}}</option>`).join('');
+    sel.value = cur;
+    const cards = document.getElementById('vendor-cards');
+    cards.innerHTML = '';
+    for (const v of data.vendors) {{
+        const agg = await fetchJSON(`/api/aam/fabrics/aggregate?vendor=${{v.vendor}}&hours=24`);
+        const c = agg.counts;
+        const hs = v.health.health_state || 'unknown';
+        const lat = v.health.latency_ms != null ? ` · ${{v.health.latency_ms}}ms` : '';
+        const div = document.createElement('div');
+        div.className = 'panel';
+        div.setAttribute('data-testid', `vendor-card-${{v.vendor}}`);
+        div.innerHTML = `
+            <div class="row" style="display:flex; justify-content:space-between; align-items:center;">
+                <h3 style="margin:0;" data-testid="vendor-name">${{v.vendor}}</h3>
+                <span class="badge health-${{hs}}" data-testid="vendor-health-badge">${{hs}}${{lat}}</span>
+            </div>
+            <div class="page-subtitle" style="margin:8px 0 12px 0;" data-testid="vendor-env-status">env: ${{
+                v.env_missing.length === 0
+                    ? '<span style="color:var(--green-400);">all set</span>'
+                    : 'missing ' + v.env_missing.join(', ')
+            }}${{v.health.error ? ' · <span style="color:var(--red-400);">' + v.health.error + '</span>' : ''}}</div>
+            <div data-testid="vendor-aggregates">
+                <span class="stat-inline"><b>${{c.received}}</b>received·24h</span>
+                <span class="stat-inline"><b>${{c.verified}}</b>sig ok</span>
+                <span class="stat-inline"><b>${{c.push_succeeded}}</b>push ok</span>
+                <span class="stat-inline"><b>${{c.triples_pushed_total}}</b>triples</span>
+                <span class="stat-inline" style="${{c.errors > 0 ? 'border-color:rgba(248,113,113,0.5);' : ''}}"><b>${{c.errors}}</b>errors</span>
+            </div>
+            <div style="margin-top:14px;">
+                <button class="btn btn-success" data-testid="trigger-${{v.vendor}}" onclick="triggerVendor('${{v.vendor}}')">trigger demo run</button>
+                <span id="trig-result-${{v.vendor}}" class="page-subtitle" style="margin-left:10px;"></span>
+            </div>`;
+        cards.appendChild(div);
+    }}
+}}
+
+async function loadReceipts() {{
+    const v = document.getElementById('filter-vendor').value;
+    const url = v ? `/api/aam/fabrics/receipts?vendor=${{v}}&limit=50` : '/api/aam/fabrics/receipts?limit=50';
+    const data = await fetchJSON(url);
+    const tbody = document.getElementById('receipt-rows');
+    const empty = document.getElementById('receipt-empty');
+    tbody.innerHTML = '';
+    if (data.receipts.length === 0) {{ empty.style.display = 'block'; return; }}
+    empty.style.display = 'none';
+    for (const r of data.receipts) {{
+        const tr = document.createElement('tr');
+        tr.className = 'recent-row';
+        tr.setAttribute('data-testid', `receipt-row-${{r.id}}`);
+        tr.onclick = () => location.href = `/ui/fabrics/receipt/${{r.id}}`;
+        const sigBadge = r.signature_verified ? '<span class="badge badge-resolved">ok</span>' : '<span class="badge badge-critical">bad</span>';
+        const pushBadge = r.push_status_code == null ? '<span class="page-subtitle">…</span>'
+            : r.push_status_code >= 200 && r.push_status_code < 300 ? `<span class="badge badge-resolved">${{r.push_status_code}}</span>`
+            : `<span class="badge badge-critical">${{r.push_status_code}}</span>`;
+        const ts = (r.received_utc || '').slice(11, 19);
+        const errText = r.error ? `<span class="mono" style="color:var(--red-400);">${{r.error.slice(0, 50)}}</span>` : '';
+        tr.innerHTML = `
+            <td class="mono">${{ts}}</td><td>${{r.vendor}}</td>
+            <td>${{r.event_type || ''}}</td>
+            <td><span class="page-subtitle">${{r.source}}</span></td>
+            <td>${{sigBadge}}</td>
+            <td>${{r.rows_seen ?? ''}}</td>
+            <td>${{r.triples_pushed ?? ''}}</td>
+            <td>${{pushBadge}}</td>
+            <td>${{errText}}</td>`;
+        tbody.appendChild(tr);
+    }}
+}}
+
+async function triggerVendor(v) {{
+    const btn = document.querySelector(`[data-testid="trigger-${{v}}"]`);
+    const out = document.getElementById(`trig-result-${{v}}`);
+    btn.disabled = true; out.textContent = 'triggering…';
+    try {{
+        const r = await fetchJSON(`/api/aam/fabrics/${{v}}/trigger`, {{method: 'POST'}});
+        const fired = (r.farm_response && r.farm_response.fired) || [];
+        out.innerHTML = `<span style="color:var(--green-400);">ok</span> fired ${{fired.length}}; receipts will appear within 5s`;
+        setTimeout(loadReceipts, 1500);
+    }} catch (e) {{
+        out.innerHTML = `<span style="color:var(--red-400);">err: ${{e.message}}</span>`;
+    }}
+    btn.disabled = false;
+}}
+
+async function loadManualPipes() {{
+    const data = await fetchJSON('/api/aam/fabrics/manual/pipes');
+    MANUAL_PIPES = data.pipes;
+    const sel = document.getElementById('manual-pipe');
+    sel.innerHTML = data.pipes.map(p => `<option value="${{p.pipe_key}}">${{p.pipe_key}}</option>`).join('');
+    renderManualFields();
+}}
+
+function renderManualFields() {{
+    const key = document.getElementById('manual-pipe').value;
+    const pipe = MANUAL_PIPES.find(p => p.pipe_key === key);
+    const tbody = document.getElementById('manual-fields');
+    if (!pipe) {{ tbody.innerHTML = ''; return; }}
+    tbody.innerHTML = pipe.fields.map(f =>
+        `<tr><td>${{f.source_field}} <span class="page-subtitle">(${{f.concept}}.${{f.property}})</span></td>
+             <td><input data-field="${{f.source_field}}" data-testid="manual-field-${{f.source_field}}" placeholder="${{f.concept}}.${{f.property}}"></td></tr>`
+    ).join('');
+}}
+
+async function submitManual() {{
+    const key = document.getElementById('manual-pipe').value;
+    const entityId = document.getElementById('manual-entity-id').value.trim();
+    if (!entityId) {{
+        document.getElementById('manual-result').textContent = 'error: entity_id is required';
+        return;
+    }}
+    const inputs = document.querySelectorAll('#manual-fields input[data-field]');
+    const row = {{}};
+    inputs.forEach(i => {{ if (i.value !== '') row[i.dataset.field] = i.value; }});
+    const out = document.getElementById('manual-result');
+    out.textContent = 'submitting…';
+    try {{
+        const r = await fetchJSON('/api/aam/manual-entry', {{
+            method: 'POST',
+            headers: {{'content-type': 'application/json'}},
+            body: JSON.stringify({{pipe_key: key, entity_id: entityId, row}}),
+        }});
+        out.textContent = JSON.stringify(r, null, 2);
+        setTimeout(loadReceipts, 1000);
+    }} catch (e) {{
+        out.textContent = 'error: ' + e.message;
+    }}
+}}
+
+loadVendors();
+loadReceipts();
+loadManualPipes();
+setInterval(loadReceipts, 5000);
+setInterval(loadVendors, 30000);
+</script>
+</body>
+</html>""")
+
+
+@router.get("/ui/fabrics/receipt/{receipt_id}", response_class=HTMLResponse, include_in_schema=False)
+async def ui_fabrics_receipt(receipt_id: str):
+    """Receipt drill-down — 4 sections: webhook payload, resolver decisions, triples, push outcome."""
+    return HTMLResponse(content=f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>AAM — Fabrics — Receipt</title>
+    {NAV_STYLE}
+    {UI_STYLE}
+    <style>
+        .drill-grid {{ display:grid; grid-template-columns: 1fr 1fr; gap:20px; }}
+        .triple-row td {{ font-size:0.78rem; padding:6px 8px; }}
+        .prov-cell {{ font-family: 'Consolas', 'Monaco', monospace; font-size:0.72rem; color:var(--cyan-400); }}
+        .mono {{ font-family: 'Consolas', 'Monaco', monospace; font-size:0.78rem; }}
+        .section-label {{ font-size:0.7rem; color:var(--slate-500); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:6px; }}
+        @media (max-width:1000px) {{ .drill-grid {{ grid-template-columns: 1fr; }} }}
+    </style>
+</head>
+<body>
+    {ui_nav("fabrics")}
+    <div class="container">
+        <h1>Receipt drill-down</h1>
+        <p class="page-subtitle"><span class="mono" id="receipt-id-label">{receipt_id}</span> · <a href="/ui/fabrics">back to Fabrics</a></p>
+
+        <div class="drill-grid">
+            <div class="panel" data-testid="section-payload">
+                <h3>1. Webhook payload (as received)</h3>
+                <div class="section-label">raw</div>
+                <pre id="payload-raw" class="field-value mono" style="white-space:pre-wrap; max-height:240px; overflow:auto;">loading…</pre>
+                <div class="section-label" style="margin-top:12px;">parsed</div>
+                <table id="payload-parsed-table"><tbody></tbody></table>
+            </div>
+            <div class="panel" data-testid="section-resolver">
+                <h3>2. Resolver decisions <span class="page-subtitle" id="hitl-count"></span></h3>
+                <table data-testid="hitl-table">
+                    <thead><tr>
+                        <th>tier</th><th>confidence</th><th>entity</th><th>left ↔ right</th><th>status</th>
+                    </tr></thead>
+                    <tbody id="hitl-rows"></tbody>
+                </table>
+                <div id="hitl-empty" class="empty-state" style="display:none;">no resolver decisions linked to this receipt</div>
+            </div>
+            <div class="panel" data-testid="section-triples">
+                <h3>3. Triples built <span class="page-subtitle" id="triples-count"></span></h3>
+                <table data-testid="triples-table">
+                    <thead><tr>
+                        <th>concept</th><th>property</th><th>value</th>
+                        <th>source_system</th><th>source_field</th><th>pipe_id</th>
+                        <th>fabric_plane</th><th>confidence</th>
+                    </tr></thead>
+                    <tbody id="triples-rows"></tbody>
+                </table>
+                <div id="triples-empty" class="empty-state" style="display:none;">no triples returned from DCL for this receipt</div>
+            </div>
+            <div class="panel" data-testid="section-push">
+                <h3>4. DCL push outcome</h3>
+                <div class="field">
+                    <div class="field-label">status code</div>
+                    <div class="field-value" id="push-status">—</div>
+                </div>
+                <div class="field">
+                    <div class="field-label">dcl_ingest_id</div>
+                    <div class="field-value mono" id="push-ingest-id">—</div>
+                </div>
+                <div class="field">
+                    <div class="field-label">aam_inference_id</div>
+                    <div class="field-value mono" id="push-aam-id">—</div>
+                </div>
+                <div class="field">
+                    <div class="field-label">error</div>
+                    <div class="field-value" id="push-error">—</div>
+                </div>
+                <div class="field">
+                    <div class="field-label">ingest_status (DCL)</div>
+                    <pre id="push-ingest-status" class="field-value mono" style="white-space:pre-wrap; max-height:160px; overflow:auto;">—</pre>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script>
+const RECEIPT_ID = {receipt_id!r};
+
+async function loadReceipt() {{
+    const r = await fetch(`/api/aam/fabrics/receipts/${{RECEIPT_ID}}`);
+    if (!r.ok) {{
+        document.querySelector('.container').innerHTML = `<h1>Receipt not found</h1><p>${{await r.text()}}</p>`;
+        return;
+    }}
+    const data = await r.json();
+    const receipt = data.receipt || {{}};
+    // Section 1 — payload
+    document.getElementById('payload-raw').textContent = JSON.stringify(receipt.payload_jsonb || {{}}, null, 2);
+    const parsedBody = document.querySelector('#payload-parsed-table tbody');
+    const fields = [
+        ['received_utc', receipt.received_utc],
+        ['vendor', receipt.vendor],
+        ['event_type', receipt.event_type],
+        ['source', receipt.source],
+        ['signature_verified', String(receipt.signature_verified)],
+        ['rows_seen', receipt.rows_seen],
+        ['triples_built', receipt.triples_built],
+    ];
+    parsedBody.innerHTML = fields.map(([k, v]) =>
+        `<tr><td class="mono">${{k}}</td><td>${{v ?? ''}}</td></tr>`).join('');
+    // Section 2 — resolver decisions
+    const hitl = data.hitl_decisions || [];
+    document.getElementById('hitl-count').textContent = `(${{hitl.length}})`;
+    const hitlBody = document.getElementById('hitl-rows');
+    const hitlEmpty = document.getElementById('hitl-empty');
+    if (hitl.length === 0) {{ hitlEmpty.style.display = 'block'; }}
+    else {{
+        hitlEmpty.style.display = 'none';
+        hitlBody.innerHTML = hitl.map(h => `
+            <tr>
+              <td><span class="badge badge-triaged">${{h.domain || ''}}</span></td>
+              <td class="prov-cell" data-testid="hitl-confidence">${{(h.confidence ?? 0).toFixed(3)}}</td>
+              <td class="mono">${{h.entity_id || ''}}</td>
+              <td class="mono">${{h.left_value || ''}} ↔ ${{h.right_value || ''}}</td>
+              <td><span class="badge badge-${{h.status === 'approved' ? 'resolved' : h.status === 'pending' ? 'acknowledged' : 'open'}}">${{h.status}}</span></td>
+            </tr>`).join('');
+    }}
+    // Section 3 — triples (with 5 provenance fields)
+    const triples = data.triples || [];
+    document.getElementById('triples-count').textContent = `(${{triples.length}})`;
+    const triplesBody = document.getElementById('triples-rows');
+    const triplesEmpty = document.getElementById('triples-empty');
+    if (triples.length === 0) {{ triplesEmpty.style.display = 'block'; }}
+    else {{
+        triplesEmpty.style.display = 'none';
+        triplesBody.innerHTML = triples.map(t => `
+            <tr class="triple-row" data-testid="triple-row">
+              <td class="mono">${{t.concept}}</td>
+              <td class="mono">${{t.property}}</td>
+              <td class="mono">${{t.value ?? ''}}</td>
+              <td class="prov-cell" data-testid="prov-source-system">${{t.source_system ?? ''}}</td>
+              <td class="prov-cell" data-testid="prov-source-field">${{t.source_field ?? ''}}</td>
+              <td class="prov-cell" data-testid="prov-pipe-id">${{t.pipe_id ?? ''}}</td>
+              <td class="prov-cell" data-testid="prov-fabric-plane">${{t.fabric_plane ?? ''}}</td>
+              <td class="prov-cell" data-testid="prov-confidence-score">${{t.confidence_score ?? ''}}</td>
+            </tr>`).join('');
+    }}
+    // Section 4 — push outcome
+    const code = receipt.push_status_code;
+    const codeEl = document.getElementById('push-status');
+    if (code == null) {{ codeEl.innerHTML = '<span class="page-subtitle">no push attempted</span>'; }}
+    else if (code >= 200 && code < 300) {{ codeEl.innerHTML = `<span class="badge badge-resolved" data-testid="push-status">${{code}}</span>`; }}
+    else {{ codeEl.innerHTML = `<span class="badge badge-critical" data-testid="push-status">${{code}}</span>`; }}
+    document.getElementById('push-ingest-id').textContent = receipt.dcl_ingest_id || '—';
+    document.getElementById('push-aam-id').textContent = receipt.aam_inference_id || '—';
+    document.getElementById('push-error').textContent = receipt.error || '—';
+    document.getElementById('push-ingest-status').textContent =
+        JSON.stringify(data.ingest_status || {{}}, null, 2);
+}}
+
+loadReceipt();
+</script>
+</body>
+</html>""")
