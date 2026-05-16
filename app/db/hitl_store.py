@@ -13,7 +13,14 @@ queue absorbs LLM-proposed canonical bindings without schema change — the
 Hard requirements:
   - tenant_id, entity_id, domain, left_value, right_value are NOT NULL.
   - confidence in [0.0, 1.0].
-  - status in {'pending','approved','rejected'}.
+  - status in {'pending','approved','rejected','auto_applied'}.
+
+WS-2: status='auto_applied' rows record resolver matches at confidence
+>= auto_threshold (0.90). These are NOT operator-actionable (no approve/
+reject buttons) — the resolver already applied them. They surface in
+/ui/candidates Recent Matches so operators can audit auto-applied
+matches with confidence + source pointers + timestamp + match rule,
+per deck Slide 8.
 """
 from __future__ import annotations
 
@@ -298,6 +305,120 @@ def append_audit(
              json.dumps(details or {}), actor, _now()),
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+def insert_auto_applied(
+    *,
+    tenant_id: str,
+    entity_id: str,
+    domain: str,
+    left_pipe_id: Optional[str],
+    left_record_key: Optional[str],
+    left_value: str,
+    right_pipe_id: Optional[str],
+    right_record_key: Optional[str],
+    right_value: str,
+    confidence: float,
+    canonical_id: str,
+    match_rule: str,
+    extra: Optional[dict] = None,
+) -> str:
+    """Insert an auto-applied resolver match (status='auto_applied').
+
+    Auto-applied = resolver confidence >= auto_threshold (0.90) per
+    Slide 6 thresholds. Not operator-actionable; surfaces in
+    /ui/candidates Recent Matches for auditability (Slide 8).
+
+    The proposed_canonical_id column is repurposed for the canonical_id
+    the resolver bound (since the match is already applied, "proposed"
+    is now "applied"). match_rule is the resolver_method that produced
+    the match (e.g., "fuzzy", "exact"); stored in audit details + the
+    extra_json column under key 'match_rule' for query-time access.
+
+    Raises ValueError on missing required fields — no silent fallback.
+    """
+    if not tenant_id or not entity_id or not domain:
+        raise ValueError(
+            f"insert_auto_applied: tenant_id, entity_id, domain required "
+            f"(got tenant_id={tenant_id!r} entity_id={entity_id!r} domain={domain!r})"
+        )
+    if not left_value or not right_value:
+        raise ValueError(
+            f"insert_auto_applied: left_value and right_value required "
+            f"(got left={left_value!r} right={right_value!r})"
+        )
+    if not (0.0 <= confidence <= 1.0):
+        raise ValueError(f"insert_auto_applied: confidence must be in [0, 1] (got {confidence})")
+    if not canonical_id:
+        raise ValueError("insert_auto_applied: canonical_id required")
+    if not match_rule:
+        raise ValueError("insert_auto_applied: match_rule required")
+
+    enriched = dict(extra or {})
+    enriched["match_rule"] = match_rule
+    hitl_queue_id = str(uuid.uuid4())
+    audit_id = str(uuid.uuid4())
+    now = _now()
+    extra_json = json.dumps(enriched)
+
+    conn = _get_db()
+    try:
+        conn.execute(
+            "INSERT INTO resolver_hitl_queue "
+            "(hitl_queue_id, tenant_id, entity_id, domain, "
+            " left_pipe_id, left_record_key, left_value, "
+            " right_pipe_id, right_record_key, right_value, "
+            " confidence, status, proposed_canonical_id, "
+            " decided_by, decided_at, audit_id, created_at, extra_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'auto_applied', ?, 'resolver', ?, ?, ?, ?)",
+            (
+                hitl_queue_id, tenant_id, entity_id, domain,
+                left_pipe_id, left_record_key, left_value,
+                right_pipe_id, right_record_key, right_value,
+                confidence, canonical_id, now, audit_id, now, extra_json,
+            ),
+        )
+        conn.execute(
+            "INSERT INTO resolver_hitl_audit (audit_id, hitl_queue_id, event, details, actor, occurred_at) "
+            "VALUES (?, ?, 'auto_applied', ?, ?, ?)",
+            (audit_id, hitl_queue_id,
+             json.dumps({"confidence": confidence, "domain": domain,
+                         "match_rule": match_rule, "canonical_id": canonical_id}),
+             "resolver", now),
+        )
+        conn.commit()
+        return hitl_queue_id
+    finally:
+        conn.close()
+
+
+def list_auto_applied(
+    *,
+    tenant_id: str,
+    domain: Optional[str] = None,
+    limit: int = 50,
+) -> list[dict]:
+    """Auto-applied resolver matches (status='auto_applied'), newest first.
+
+    Used by /api/aam/resolver/auto-matches + /ui/candidates Recent
+    Matches surface (Slide 8 operator-visible auto-apply audit).
+    """
+    if not tenant_id:
+        raise ValueError("list_auto_applied: tenant_id required")
+    conn = _get_db()
+    try:
+        sql = ("SELECT * FROM resolver_hitl_queue "
+               "WHERE tenant_id=? AND status='auto_applied'")
+        params: list = [tenant_id]
+        if domain:
+            sql += " AND domain=?"
+            params.append(domain)
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        rows = conn.execute(sql, params).fetchall()
+        return [_row_to_dict(r) for r in rows]
     finally:
         conn.close()
 

@@ -907,7 +907,10 @@ async def ui_candidates_list(
     
     if not candidates:
         rows_html = '<tr><td colspan="8" class="empty-state">No candidates found. Create candidates via the API.</td></tr>'
-    
+
+    import os as _os
+    aos_tenant_id = _os.environ.get("AOS_TENANT_ID", "")
+
     return HTMLResponse(content=f"""
 <!DOCTYPE html>
 <html>
@@ -952,6 +955,22 @@ async def ui_candidates_list(
             </thead>
             <tbody id="candidates-body">{rows_html}</tbody>
         </table>
+
+        <!-- WS-2 B5: Recent Matches — auto-applied identity resolutions ----->
+        <div class="section" style="margin-top:32px;">
+            <h2>Recent Matches</h2>
+            <p class="page-subtitle">Identity resolutions the resolver auto-applied at confidence &ge; 0.90 (Slide 6 auto-apply tier). Each match unifies records from two source systems under one canonical id. Operators audit; no approve/reject needed — the match already shipped.</p>
+            <div class="panel" style="padding:0; overflow:hidden;">
+                <table data-testid="recent-matches-table">
+                    <thead><tr>
+                        <th>when</th><th>domain</th><th>left value</th><th>right value</th>
+                        <th>confidence</th><th>rule</th><th>canonical_id</th>
+                    </tr></thead>
+                    <tbody id="recent-matches-body"></tbody>
+                </table>
+                <div id="recent-matches-empty" class="empty-state" style="display:none;">no auto-applied matches yet for this tenant</div>
+            </div>
+        </div>
     </div>
     <div id="toast" class="toast"></div>
 
@@ -1217,6 +1236,46 @@ async def ui_candidates_list(
         document.getElementById('defer-modal').addEventListener('click', function(e) {{
             if (e.target === this) closeDeferModal();
         }});
+
+        // WS-2 B5: load auto-applied identity matches (Slide 8 audit surface)
+        const _AOS_TENANT_ID = "{aos_tenant_id}";
+        async function loadRecentMatches() {{
+            const tbody = document.getElementById('recent-matches-body');
+            const empty = document.getElementById('recent-matches-empty');
+            if (!_AOS_TENANT_ID) {{
+                empty.textContent = 'AOS_TENANT_ID not set in server env; cannot scope auto-matches';
+                empty.style.display = 'block';
+                return;
+            }}
+            try {{
+                const r = await fetch('/api/aam/resolver/auto-matches?tenant_id=' + encodeURIComponent(_AOS_TENANT_ID) + '&limit=20');
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                const data = await r.json();
+                const rows = data.auto_matches || [];
+                if (rows.length === 0) {{ empty.style.display = 'block'; tbody.innerHTML = ''; return; }}
+                empty.style.display = 'none';
+                tbody.innerHTML = rows.map(function(m) {{
+                    const when = (m.created_at || '').slice(0, 19).replace('T', ' ');
+                    const conf = (m.confidence != null) ? Number(m.confidence).toFixed(3) : '—';
+                    const rule = (m.extra_json ? (JSON.parse(m.extra_json).match_rule || '—') : '—');
+                    return (
+                        '<tr data-testid="recent-match-row" data-confidence="' + conf + '">' +
+                        '<td class="mono" data-testid="match-when">' + when + '</td>' +
+                        '<td><span class="badge badge-connected" data-testid="match-domain">' + (m.domain || '') + '</span></td>' +
+                        '<td class="mono" data-testid="match-left-value">' + (m.left_value || '') + '</td>' +
+                        '<td class="mono" data-testid="match-right-value">' + (m.right_value || '') + '</td>' +
+                        '<td class="mono" data-testid="match-confidence">' + conf + '</td>' +
+                        '<td data-testid="match-rule"><span class="badge badge-triaged">' + rule + '</span></td>' +
+                        '<td class="mono" data-testid="match-canonical-id">' + (m.proposed_canonical_id || '').slice(0, 8) + '…</td>' +
+                        '</tr>'
+                    );
+                }}).join('');
+            }} catch (e) {{
+                empty.textContent = 'load failed: ' + e.message;
+                empty.style.display = 'block';
+            }}
+        }}
+        loadRecentMatches();
     </script>
 </body>
 </html>

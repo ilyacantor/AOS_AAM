@@ -1,8 +1,9 @@
 """Resolver HITL Review endpoints.
 
-GET  /api/aam/resolver/pending   — list pending HITL pairs for a tenant
-POST /api/aam/resolver/decisions — operator approves / rejects a pair
-GET  /api/aam/resolver/audit     — audit trail for one HITL decision
+GET  /api/aam/resolver/pending        — list pending HITL pairs for a tenant
+POST /api/aam/resolver/decisions      — operator approves / rejects a pair
+GET  /api/aam/resolver/audit          — audit trail for one HITL decision
+GET  /api/aam/resolver/auto-matches   — list auto-applied matches (WS-2 B5)
 
 The decision endpoint promotes approved pairs to canonical authority — every
 downstream semantic_triples row with the proposed canonical_id gets its
@@ -31,6 +32,33 @@ class DecisionRequest(BaseModel):
     hitl_queue_id: str = Field(..., description="The pending HITL row to finalize.")
     decision: str = Field(..., description="'approved' or 'rejected'")
     decided_by: str = Field(..., description="Operator id / email — required for the audit trail.")
+
+
+@router.get("/api/aam/resolver/auto-matches")
+async def list_auto_matches(
+    tenant_id: str = Query(...),
+    domain: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=500),
+) -> dict[str, Any]:
+    """Return auto-applied resolver matches (confidence >= auto_threshold).
+
+    Slide 8: auto-applied matches must be operator-visible with confidence,
+    source pointers, match rule, and timestamp. This is the read path
+    behind /ui/candidates Recent Matches.
+
+    Identity is required (I2): no tenant_id, no listing.
+    """
+    if not tenant_id:
+        raise HTTPException(status_code=422, detail="tenant_id is required")
+    rows = hitl_store.list_auto_applied(
+        tenant_id=tenant_id, domain=domain, limit=limit,
+    )
+    return {
+        "tenant_id": tenant_id,
+        "domain": domain,
+        "count": len(rows),
+        "auto_matches": rows,
+    }
 
 
 @router.get("/api/aam/resolver/pending")

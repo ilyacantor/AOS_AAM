@@ -412,6 +412,28 @@ class RecordResolver:
                     best_entry = entry
 
         if best_entry and best_score >= self.auto_threshold:
+            # WS-2: persist auto-applied matches to the resolver log so
+            # /ui/candidates Recent Matches can surface them (Slide 8).
+            try:
+                self.hitl.insert_auto_applied(
+                    tenant_id=tenant_id,
+                    entity_id=entity_id,
+                    domain=domain,
+                    left_pipe_id=pipe_id,
+                    left_record_key=record_key,
+                    left_value=value,
+                    right_pipe_id=None,
+                    right_record_key=None,
+                    right_value=best_entry.value,
+                    confidence=round(best_score, 4),
+                    canonical_id=best_entry.canonical_id,
+                    match_rule="fuzzy",
+                    extra={"input_value": value,
+                           "candidate_value": best_entry.value,
+                           "raw_score": best_score},
+                )
+            except Exception as exc:  # noqa: BLE001 — surface, don't swallow
+                _log.warning("auto_applied log insert failed: %s", exc)
             return ResolutionResult(
                 canonical_id=best_entry.canonical_id,
                 resolution_method="fuzzy",
