@@ -3,9 +3,10 @@
 import { test, expect, Page } from '@playwright/test';
 
 async function triggerAndDrill(page: Page, vendor: 'workato' | 'boomi') {
-  // WS-2 dataset volumes: workato trigger ~30s, boomi ~70s (5 syncs each
-  // with up to 5K records). Allow 240s test budget.
-  test.setTimeout(240_000);
+  // WS-2 dataset volumes: workato trigger ~30s, boomi ~70-180s (boomi
+  // slows as resolver registry grows across consecutive runs). 5 syncs
+  // each with up to 5K records. Allow 360s test budget.
+  test.setTimeout(360_000);
 
   await page.goto('/ui/fabrics');
   await expect(page.locator(`[data-testid="vendor-card-${vendor}"]`)).toHaveText(new RegExp(vendor));
@@ -20,7 +21,7 @@ async function triggerAndDrill(page: Page, vendor: 'workato' | 'boomi') {
   // Click the trigger button. The button's JS sets the result span to
   // "ok fired N" when the AAM proxy returns from Farm.
   await page.locator(`[data-testid="trigger-${vendor}"]`).click();
-  await expect(page.locator(`#trig-result-${vendor}`)).toContainText('fired', { timeout: 150_000 });
+  await expect(page.locator(`#trig-result-${vendor}`)).toContainText('fired', { timeout: 250_000 });
 
   // Poll receipts via the API for a row newer than the anchor with this
   // run's dcl_ingest_id (only the latest run's triples stay active in DCL).

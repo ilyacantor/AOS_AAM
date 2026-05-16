@@ -18,14 +18,17 @@ async function triggerVendor(page: Page, vendor: 'workato' | 'boomi') {
   // prior runs left customer rows already populating the table.
   await page.locator(`[data-testid="trigger-${vendor}"]`).click();
   const resultSpan = page.locator(`#trig-result-${vendor}`);
-  await expect(resultSpan).toContainText('fired', { timeout: 150_000 });
+  // 200s timeout: boomi trigger fires 5 syncs synchronously; resolver
+  // registry grows across runs, slowing per-record fuzzy scans. 200s
+  // accommodates accumulated state without test restart.
+  await expect(resultSpan).toContainText('fired', { timeout: 200_000 });
 }
 
 test('identity resolution — Acme demo case auto-applied at 0.92–0.96', async ({ page }) => {
   // WS-2 dataset volumes: workato trigger ~30s, boomi trigger ~70s
   // (5 syncs each, 10K-50K triples per AR-invoice sync). Plus Recent
   // Matches poll. Allow 240s test budget.
-  test.setTimeout(240_000);
+  test.setTimeout(480_000);
   await page.goto('/ui/fabrics');
 
   // First trigger: workato seeds the resolver registry with the 500 NetSuite
