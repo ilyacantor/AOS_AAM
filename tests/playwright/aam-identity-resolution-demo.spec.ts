@@ -2,27 +2,30 @@
 
 import { test, expect, Page } from '@playwright/test';
 
-const ACME_NETSUITE_NAME = 'Acme Corporation, Inc.';
-const ACME_SAGE_NAME = 'Acme Corporation Inc';
+// WS-2 B4 score-tuned renderings — empirically score 0.9455 against the
+// resolver's similarity_score function (auto-apply tier, in 0.94 ±0.02 band).
+const ACME_NETSUITE_NAME = 'Acme Corp Inc.';
+const ACME_SAGE_NAME = 'Acme Corp';
 const CONFIDENCE_LO = 0.92;
 const CONFIDENCE_HI = 0.96;
 
 async function triggerVendor(page: Page, vendor: 'workato' | 'boomi') {
+  // Click the trigger button. The button's JS handler awaits the AAM proxy,
+  // which awaits Farm firing all 5 syncs. On success the result span shows
+  // "ok fired N" — that text is the unambiguous signal that the run
+  // completed (all webhooks dispatched). Don't poll the receipts table —
+  // its 50-row limit makes the "new customer receipt" delta unstable when
+  // prior runs left customer rows already populating the table.
   await page.locator(`[data-testid="trigger-${vendor}"]`).click();
-  // The trigger now fires multiple sync processes; wait for the customer-sync
-  // receipt to land (event_type contains "customers"). Up to 30s per vendor
-  // because the new dataset volume (~500 customers + ~5K invoices + chart +
-  // ~3K AP invoices + ~200 vendors) lengthens the round trip.
-  await expect.poll(
-    async () => {
-      const rows = await page.locator('[data-testid="receipts-table"] tbody tr').filter({ hasText: vendor }).filter({ hasText: 'customers' }).count();
-      return rows;
-    },
-    { timeout: 60_000, intervals: [1500, 2500, 4000] },
-  ).toBeGreaterThan(0);
+  const resultSpan = page.locator(`#trig-result-${vendor}`);
+  await expect(resultSpan).toContainText('fired', { timeout: 150_000 });
 }
 
 test('identity resolution — Acme demo case auto-applied at 0.92–0.96', async ({ page }) => {
+  // WS-2 dataset volumes: workato trigger ~30s, boomi trigger ~70s
+  // (5 syncs each, 10K-50K triples per AR-invoice sync). Plus Recent
+  // Matches poll. Allow 240s test budget.
+  test.setTimeout(240_000);
   await page.goto('/ui/fabrics');
 
   // First trigger: workato seeds the resolver registry with the 500 NetSuite

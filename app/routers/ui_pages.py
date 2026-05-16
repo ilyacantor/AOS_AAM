@@ -1276,6 +1276,9 @@ async def ui_candidates_list(
             }}
         }}
         loadRecentMatches();
+        // WS-2 B5: poll every 3s so newly auto-applied matches surface
+        // without operator-reload. Matches mirror /ui/fabrics receipts auto-refresh.
+        setInterval(loadRecentMatches, 3000);
     </script>
 </body>
 </html>
@@ -3929,17 +3932,24 @@ async function loadReceipts() {{
 
 async function triggerVendor(v) {{
     const btn = document.querySelector(`[data-testid="trigger-${{v}}"]`);
-    const out = document.getElementById(`trig-result-${{v}}`);
-    btn.disabled = true; out.textContent = 'triggering…';
+    const startSpan = document.getElementById(`trig-result-${{v}}`);
+    if (btn) btn.disabled = true;
+    if (startSpan) startSpan.textContent = 'triggering…';
     try {{
         const r = await fetchJSON(`/api/aam/fabrics/${{v}}/trigger`, {{method: 'POST'}});
         const fired = (r.farm_response && r.farm_response.fired) || [];
-        out.innerHTML = `<span style="color:var(--green-400);">ok</span> fired ${{fired.length}}; receipts will appear within 5s`;
+        // Re-query span at write time — the 30s loadVendors setInterval may
+        // have rebuilt the vendor card during the long trigger round trip,
+        // detaching the closure-captured node.
+        const out = document.getElementById(`trig-result-${{v}}`);
+        if (out) out.innerHTML = `<span style="color:var(--green-400);">ok</span> fired ${{fired.length}}; receipts will appear within 5s`;
         setTimeout(loadReceipts, 1500);
     }} catch (e) {{
-        out.innerHTML = `<span style="color:var(--red-400);">err: ${{e.message}}</span>`;
+        const out = document.getElementById(`trig-result-${{v}}`);
+        if (out) out.innerHTML = `<span style="color:var(--red-400);">err: ${{e.message}}</span>`;
     }}
-    btn.disabled = false;
+    const btnAfter = document.querySelector(`[data-testid="trigger-${{v}}"]`);
+    if (btnAfter) btnAfter.disabled = false;
 }}
 
 async function loadManualPipes() {{

@@ -14,8 +14,6 @@ test('manual entry — workato pipe → new receipt with src=manual → drill 4 
 
   await page.goto('/ui/fabrics');
 
-  const beforeCount = await page.locator('[data-testid="receipts-table"] tbody tr').count();
-
   // Operator selects the pipe — change event re-renders the dynamic field inputs.
   await page.locator('[data-testid="manual-pipe"]').selectOption(targetPipe.pipe_key);
   await page.locator('[data-testid="manual-entity-id"]').fill(MANUAL_ENTITY_ID);
@@ -28,14 +26,21 @@ test('manual entry — workato pipe → new receipt with src=manual → drill 4 
 
   await page.locator('[data-testid="manual-submit"]').click();
 
-  // Receipts table grows within 10s.
+  // The result pre updates to "submitting…" then to the JSON response containing
+  // dcl_ingest_id once the manual ingest completes. Use that text as the
+  // completion signal — the receipts table has a 50-row limit that makes
+  // count-delta unreliable when prior runs filled the table.
+  await expect(page.locator('#manual-result')).toContainText('dcl_ingest_id', { timeout: 30_000 });
+
+  // Receipts table reloads ~1s after the result. The most recent row is the
+  // manual ingest; verify it carries the manual source tag.
   await expect.poll(
-    async () => await page.locator('[data-testid="receipts-table"] tbody tr').count(),
+    async () => await page.locator('[data-testid="receipts-table"] tbody tr').filter({ hasText: 'manual' }).count(),
     { timeout: 15_000, intervals: [1000, 1500, 2000] },
-  ).toBeGreaterThan(beforeCount);
+  ).toBeGreaterThan(0);
 
   // Top row labels src as "manual" (in the src column rendered by loadReceipts()).
-  const topRow = page.locator('[data-testid="receipts-table"] tbody tr').first();
+  const topRow = page.locator('[data-testid="receipts-table"] tbody tr').filter({ hasText: 'manual' }).first();
   await expect(topRow).toHaveText(/manual/);
 
   // Drill — click the row, verify 4 sections + provenance on at least one triple.
