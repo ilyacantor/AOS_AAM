@@ -58,7 +58,14 @@ CREATE TABLE IF NOT EXISTS resolver_hitl_queue (
     decided_at TEXT,
     audit_id TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    extra_json TEXT
+    extra_json TEXT,
+    -- DISP #24 follow-up — dedup_key collapses (tenant, domain, normalized
+    -- left, normalized right, status) into one column so SQLite can enforce
+    -- a unique index. The non-idempotent INSERT path caused 10× duplicate
+    -- pending rows across 5 B6 runs; this column makes re-insert a no-op.
+    -- _dedup_key() is the canonical builder. Populated on every insert,
+    -- NULL for legacy rows pre-migration.
+    dedup_key TEXT
 )
 """
 
@@ -80,7 +87,36 @@ _CREATE_IDX_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_hitl_created ON resolver_hitl_queue(created_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_hitl_canonical ON resolver_hitl_queue(proposed_canonical_id)",
     "CREATE INDEX IF NOT EXISTS idx_hitl_audit_qid ON resolver_hitl_audit(hitl_queue_id)",
+    # DISP #24 follow-up — partial unique index on dedup_key for non-null
+    # rows. Makes INSERT OR IGNORE a no-op when the (tenant, domain,
+    # normalized left, normalized right, status) tuple already exists.
+    # Partial WHERE clause keeps legacy NULL-dedup rows unaffected.
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_hitl_dedup ON resolver_hitl_queue(dedup_key) WHERE dedup_key IS NOT NULL",
 ]
+
+
+# Same normalization as the resolver — collapses whitespace + common
+# punctuation, lowercases, strips. Kept in-module to avoid a circular
+# import from app.ingest.resolver. If the resolver's normalization changes,
+# update both call sites.
+import re as _re
+_NORM_SEP = _re.compile(r"[\s\-_./,;:]+")
+
+
+def _normalize(s: str) -> str:
+    return _NORM_SEP.sub(" ", str(s).lower()).strip()
+
+
+def _dedup_key(*, tenant_id: str, domain: str, left_value: str,
+               right_value: str, status: str) -> str:
+    """Canonical dedup key for a HITL row. Two inserts with the same key
+    converge to one row regardless of pipe_id / record_key / confidence /
+    proposed_canonical_id (those are write-time noise — the dedup
+    semantics are the operator-visible pair + status)."""
+    return "|".join([
+        tenant_id, domain.lower(), _normalize(left_value),
+        _normalize(right_value), status,
+    ])
 
 
 def _get_db() -> sqlite3.Connection:
@@ -93,11 +129,24 @@ def _get_db() -> sqlite3.Connection:
 
 
 def init_hitl_db() -> None:
-    """Create the HITL tables if they don't exist. Idempotent."""
+    """Create the HITL tables if they don't exist. Idempotent.
+
+    Also runs an idempotent column-add migration for the dedup_key column
+    (added 2026-05-17 per DISP #24 follow-up). Existing rows keep their
+    NULL dedup_key (legacy bypass of the unique index); new inserts
+    populate the column.
+    """
     conn = _get_db()
     try:
         conn.execute(_CREATE_TABLE_SQL)
         conn.execute(_CREATE_AUDIT_SQL)
+        # Idempotent migration: ALTER TABLE ADD COLUMN if missing.
+        cols = {row["name"] for row in conn.execute(
+            "PRAGMA table_info(resolver_hitl_queue)"
+        ).fetchall()}
+        if "dedup_key" not in cols:
+            conn.execute("ALTER TABLE resolver_hitl_queue ADD COLUMN dedup_key TEXT")
+            _log.info("Migration applied: added dedup_key column to resolver_hitl_queue")
         for sql_idx in _CREATE_IDX_SQL:
             conn.execute(sql_idx)
         conn.commit()
@@ -148,24 +197,66 @@ def insert_pending(
     audit_id = str(uuid.uuid4())
     now = _now()
     extra_json = json.dumps(extra) if extra else None
+    # DISP #24 follow-up: idempotent insert. Same (tenant, domain,
+    # normalized left, normalized right, status='pending') → return the
+    # existing hitl_queue_id instead of inserting a duplicate. Pre-fix,
+    # 5 B6 runs produced 9140 pending rows for 912 distinct pairs (~10×
+    # duplication); this rewrite makes re-insert a no-op.
+    dedup = _dedup_key(
+        tenant_id=tenant_id, domain=domain, left_value=left_value,
+        right_value=right_value, status="pending",
+    )
 
     conn = _get_db()
     try:
-        conn.execute(
-            "INSERT INTO resolver_hitl_queue "
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO resolver_hitl_queue "
             "(hitl_queue_id, tenant_id, entity_id, domain, "
             " left_pipe_id, left_record_key, left_value, "
             " right_pipe_id, right_record_key, right_value, "
             " confidence, status, proposed_canonical_id, "
-            " decided_by, decided_at, audit_id, created_at, extra_json) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, NULL, NULL, ?, ?, ?)",
+            " decided_by, decided_at, audit_id, created_at, extra_json, dedup_key) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, NULL, NULL, ?, ?, ?, ?)",
             (
                 hitl_queue_id, tenant_id, entity_id, domain,
                 left_pipe_id, left_record_key, left_value,
                 right_pipe_id, right_record_key, right_value,
-                confidence, proposed_canonical_id, audit_id, now, extra_json,
+                confidence, proposed_canonical_id, audit_id, now, extra_json, dedup,
             ),
         )
+        if cur.rowcount == 0:
+            # Dedup conflict — fetch the existing row's hitl_queue_id and
+            # return it. The caller's audit trail still records that the
+            # resolver saw this pair (audit row created below), but the
+            # queue itself stays single-row per pair.
+            existing = conn.execute(
+                "SELECT hitl_queue_id, audit_id FROM resolver_hitl_queue "
+                "WHERE dedup_key=?",
+                (dedup,),
+            ).fetchone()
+            if existing is None:
+                # Race: INSERT was ignored but row vanished. SQLite shouldn't
+                # do this — raise loudly per A1.
+                raise RuntimeError(
+                    f"insert_pending: INSERT OR IGNORE returned 0 rows AND "
+                    f"no row found for dedup_key={dedup!r} — DB inconsistency"
+                )
+            existing_qid = existing["hitl_queue_id"]
+            existing_audit_id = existing["audit_id"]
+            # Append a 'reseen' audit event so the audit trail shows the
+            # resolver re-encountered this pair (operator-visible if they
+            # check audit history). No new queue row, just an audit entry.
+            conn.execute(
+                "INSERT INTO resolver_hitl_audit "
+                "(audit_id, hitl_queue_id, event, details, actor, occurred_at) "
+                "VALUES (?, ?, 'reseen', ?, ?, ?)",
+                (str(uuid.uuid4()), existing_qid,
+                 json.dumps({"confidence": confidence, "domain": domain,
+                             "dedup_collapsed_into": existing_qid}),
+                 "resolver", now),
+            )
+            conn.commit()
+            return existing_qid
         conn.execute(
             "INSERT INTO resolver_hitl_audit (audit_id, hitl_queue_id, event, details, actor, occurred_at) "
             "VALUES (?, ?, 'created', ?, ?, ?)",
@@ -362,24 +453,52 @@ def insert_auto_applied(
     audit_id = str(uuid.uuid4())
     now = _now()
     extra_json = json.dumps(enriched)
+    # DISP #24 follow-up: idempotent insert (same shape as insert_pending).
+    dedup = _dedup_key(
+        tenant_id=tenant_id, domain=domain, left_value=left_value,
+        right_value=right_value, status="auto_applied",
+    )
 
     conn = _get_db()
     try:
-        conn.execute(
-            "INSERT INTO resolver_hitl_queue "
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO resolver_hitl_queue "
             "(hitl_queue_id, tenant_id, entity_id, domain, "
             " left_pipe_id, left_record_key, left_value, "
             " right_pipe_id, right_record_key, right_value, "
             " confidence, status, proposed_canonical_id, "
-            " decided_by, decided_at, audit_id, created_at, extra_json) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'auto_applied', ?, 'resolver', ?, ?, ?, ?)",
+            " decided_by, decided_at, audit_id, created_at, extra_json, dedup_key) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'auto_applied', ?, 'resolver', ?, ?, ?, ?, ?)",
             (
                 hitl_queue_id, tenant_id, entity_id, domain,
                 left_pipe_id, left_record_key, left_value,
                 right_pipe_id, right_record_key, right_value,
-                confidence, canonical_id, now, audit_id, now, extra_json,
+                confidence, canonical_id, now, audit_id, now, extra_json, dedup,
             ),
         )
+        if cur.rowcount == 0:
+            existing = conn.execute(
+                "SELECT hitl_queue_id FROM resolver_hitl_queue WHERE dedup_key=?",
+                (dedup,),
+            ).fetchone()
+            if existing is None:
+                raise RuntimeError(
+                    f"insert_auto_applied: INSERT OR IGNORE returned 0 rows AND "
+                    f"no row found for dedup_key={dedup!r} — DB inconsistency"
+                )
+            existing_qid = existing["hitl_queue_id"]
+            conn.execute(
+                "INSERT INTO resolver_hitl_audit "
+                "(audit_id, hitl_queue_id, event, details, actor, occurred_at) "
+                "VALUES (?, ?, 'reseen', ?, ?, ?)",
+                (str(uuid.uuid4()), existing_qid,
+                 json.dumps({"confidence": confidence, "domain": domain,
+                             "match_rule": match_rule, "canonical_id": canonical_id,
+                             "dedup_collapsed_into": existing_qid}),
+                 "resolver", now),
+            )
+            conn.commit()
+            return existing_qid
         conn.execute(
             "INSERT INTO resolver_hitl_audit (audit_id, hitl_queue_id, event, details, actor, occurred_at) "
             "VALUES (?, ?, 'auto_applied', ?, ?, ?)",
