@@ -5,6 +5,10 @@ import { test, expect } from '@playwright/test';
 const MANUAL_ENTITY_ID = 'finops-demo-co';
 
 test('manual entry — workato pipe → new receipt with src=manual → drill 4 sections + provenance', async ({ page, request }) => {
+  // 180s test budget — DCL push round-trip is the dominant cost when
+  // tenant_runs flips a large recent batch active; manual-entry's small
+  // payload still waits behind DCL's queue.
+  test.setTimeout(180_000);
   // Ground-truth: fetch the pipe list so we don't hardcode pipe_key or field names.
   const pipesResp = await request.get('/api/aam/fabrics/manual/pipes');
   const { pipes } = await pipesResp.json();
@@ -30,7 +34,11 @@ test('manual entry — workato pipe → new receipt with src=manual → drill 4 
   // dcl_ingest_id once the manual ingest completes. Use that text as the
   // completion signal — the receipts table has a 50-row limit that makes
   // count-delta unreliable when prior runs filled the table.
-  await expect(page.locator('#manual-result')).toContainText('dcl_ingest_id', { timeout: 30_000 });
+  // 90s timeout: under B6 sustained-load conditions (5 consecutive
+  // suites with accumulated HITL state) the manual-entry round-trip
+  // (resolver → DCL push) can take 60s+. 30s was the WS-2 single-run
+  // value; bump for B6 determinism.
+  await expect(page.locator('#manual-result')).toContainText('dcl_ingest_id', { timeout: 90_000 });
 
   // Receipts table reloads ~1s after the result. The most recent row is the
   // manual ingest; verify it carries the manual source tag.

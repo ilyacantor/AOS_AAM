@@ -3855,7 +3855,11 @@ async function fetchJSON(url, opts) {{
 
 let MANUAL_PIPES = [];
 
+let _loadVendorsRunning = false;
 async function loadVendors() {{
+    if (_loadVendorsRunning) return;
+    _loadVendorsRunning = true;
+    try {{
     const data = await fetchJSON('/api/aam/fabrics/list');
     const sel = document.getElementById('filter-vendor');
     const cur = sel.value;
@@ -3895,6 +3899,7 @@ async function loadVendors() {{
             </div>`;
         cards.appendChild(div);
     }}
+    }} finally {{ _loadVendorsRunning = false; }}
 }}
 
 async function loadReceipts() {{

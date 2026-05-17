@@ -86,7 +86,7 @@ def push_triples(
     entity_id: str,
     source_run_tag: str,
     dcl_base: str | None = None,
-    timeout_s: float = 30.0,
+    timeout_s: float = 90.0,
 ) -> dict[str, Any]:
     """POST one batch to /api/dcl/ingest-triples. Returns the parsed response.
 
@@ -112,13 +112,32 @@ def push_triples(
         "DCL push -> %s tenant=%s entity=%s triples=%d dcl_ingest_id=%s",
         url, tenant_id, entity_id, len(triples), dcl_ingest_id,
     )
-    try:
-        with httpx.Client(timeout=timeout_s) as client:
-            resp = client.post(url, json=body)
-    except httpx.HTTPError as exc:
+    # Single retry on transient transport failure (ReadTimeout / WriteTimeout
+    # / ConnectError). DCL dev pool is shared; first push after a cold start
+    # or after a heavy concurrent burst can hit timeout. Idempotent at the
+    # DCL layer — same dcl_ingest_id deduplicates.
+    last_exc: Exception | None = None
+    resp = None
+    for attempt in (1, 2):
+        try:
+            with httpx.Client(timeout=timeout_s) as client:
+                resp = client.post(url, json=body)
+            last_exc = None
+            break
+        except (httpx.ReadTimeout, httpx.WriteTimeout, httpx.ConnectTimeout, httpx.ConnectError) as exc:
+            last_exc = exc
+            _log.warning(
+                "DCL push attempt %d failed transiently (%s); retrying", attempt, type(exc).__name__,
+            )
+            continue
+        except httpx.HTTPError as exc:
+            raise DCLPushError(
+                f"DCL push transport failed: {type(exc).__name__}: {exc}"
+            ) from exc
+    if last_exc is not None or resp is None:
         raise DCLPushError(
-            f"DCL push transport failed: {type(exc).__name__}: {exc}"
-        ) from exc
+            f"DCL push transport failed after retry: {type(last_exc).__name__}: {last_exc}"
+        ) from last_exc
     if resp.status_code >= 400:
         raise DCLPushError(
             f"DCL push rejected: status={resp.status_code} body={resp.text[:500]}"

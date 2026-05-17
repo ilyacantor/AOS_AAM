@@ -39,7 +39,13 @@ async function triggerAndDrill(page: Page, vendor: 'workato' | 'boomi') {
       return true;
     }
     return false;
-  }, { timeout: 30_000, intervals: [1000, 1500, 2000] }).toBe(true);
+    // 120s poll: under sustained sequential B6 runs (5 consecutive
+    // suites without restart between), webhook handlers can take 60-90s
+    // to land a receipt for the LAST sync in the fire plan (the trigger
+    // span shows "fired" earlier, but the receipts table catches up via
+    // the 5s setInterval; we want a row with push_status_code=201, which
+    // only appears after the full DCL round-trip completes).
+  }, { timeout: 120_000, intervals: [1500, 2500, 4000] }).toBe(true);
 
   // Sanity: poll's .toBe(true) above already guarantees latestReceiptId is
   // non-empty when we proceed. Assert against a string regex pattern so the

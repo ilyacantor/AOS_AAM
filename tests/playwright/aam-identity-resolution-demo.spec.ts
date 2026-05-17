@@ -43,11 +43,13 @@ test('identity resolution — Acme demo case auto-applied at 0.92–0.96', async
   // Navigate to Candidates — Recent Matches section auto-loads on mount.
   await page.goto('/ui/candidates');
 
-  // Poll for the Acme row to appear in Recent Matches.
+  // Poll for the Acme row to appear in Recent Matches. 60s budget:
+  // page renders immediately but the 3s auto-refresh setInterval may
+  // need a cycle or two to catch the boomi-triggered auto-applied row.
   const acmeRow = page.locator('[data-testid="recent-match-row"]').filter({ hasText: ACME_NETSUITE_NAME });
   await expect.poll(
     async () => await acmeRow.count(),
-    { timeout: 30_000, intervals: [1000, 2000, 3000] },
+    { timeout: 60_000, intervals: [2000, 3000, 4000] },
   ).toBeGreaterThan(0);
 
   const row = acmeRow.first();
